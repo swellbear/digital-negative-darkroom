@@ -33,7 +33,8 @@ def apply_grain(
     # Soft envelope: peak around mid densities
     fog = profile.base_plus_fog
     t = np.clip((density - fog) / 1.4, 0.0, 1.0)
-    envelope = np.sin(np.pi * t) ** 1.2
+    # Clip before the fractional power — sin(pi) can be a tiny negative float
+    envelope = np.power(np.clip(np.sin(np.pi * t), 0.0, 1.0), 1.2)
     envelope = 0.25 + 0.75 * envelope
 
     grained = density + noise * amplitude * envelope.astype(np.float32)

@@ -5,7 +5,9 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 output/
-samples/*
+samples/raws/
+!samples/README.md
+!samples/fetch_raws.sh
 !samples/.gitkeep
 .DS_Store
 *.tiff
