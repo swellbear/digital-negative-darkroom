@@ -1,0 +1,23 @@
+{
+  "id": "mg-standard",
+  "name": "Multigrade Standard",
+  "version": "1.0",
+  "type": "bw_multigrade",
+  "source": {
+    "notes": "Parametric Level-3 paper response approximating variable-contrast RC paper. Not digitized from a specific datasheet; tuned for believable enlarger behavior.",
+    "created": "2026-07-29"
+  },
+  "dmax": 2.05,
+  "dmin": 0.04,
+  "grades": {
+    "00": {"gamma": 0.55, "toe": 0.22, "shoulder": 0.28},
+    "0": {"gamma": 0.70, "toe": 0.18, "shoulder": 0.24},
+    "1": {"gamma": 0.90, "toe": 0.14, "shoulder": 0.20},
+    "2": {"gamma": 1.10, "toe": 0.11, "shoulder": 0.16},
+    "2.5": {"gamma": 1.25, "toe": 0.10, "shoulder": 0.14},
+    "3": {"gamma": 1.45, "toe": 0.09, "shoulder": 0.12},
+    "4": {"gamma": 1.80, "toe": 0.07, "shoulder": 0.10},
+    "5": {"gamma": 2.20, "toe": 0.05, "shoulder": 0.08}
+  },
+  "default_grade": 2.5
+}

@@ -70,11 +70,37 @@ def load_film_profile(path: str | Path) -> FilmProfile:
     )
 
 
+DEVELOPER_STYLES = {
+    "standard": {
+        "name": "Standard",
+        "contrast_bias": 0.0,
+        "density_bias": 1.0,
+        "grain_bias": 1.0,
+        "fog_lift": 0.0,
+    },
+    "high_definition": {
+        "name": "High Definition",
+        "contrast_bias": 0.15,
+        "density_bias": 0.95,
+        "grain_bias": 0.7,
+        "fog_lift": -0.01,
+    },
+    "high_energy": {
+        "name": "High Energy",
+        "contrast_bias": 0.35,
+        "density_bias": 1.12,
+        "grain_bias": 1.35,
+        "fog_lift": 0.02,
+    },
+}
+
+
 def modify_curve(
     profile: FilmProfile,
     *,
     relative_time: float = 1.0,
     contrast_modifier: float = 0.0,
+    developer_id: str = "standard",
 ) -> FilmProfile:
     """Apply Level-3 development modifiers to a base characteristic curve.
 
@@ -82,21 +108,27 @@ def modify_curve(
         1.0 = normal; >1 push (more density / contrast); <1 pull.
     contrast_modifier:
         Added to the effective slope around midtones (-1..+1 typical).
+    developer_id:
+        standard | high_definition | high_energy
     """
+    style = DEVELOPER_STYLES.get(developer_id, DEVELOPER_STYLES["standard"])
     log_e = profile.log_exposure.copy()
     dens = profile.density.copy()
-    fog = profile.base_plus_fog
+    fog = profile.base_plus_fog + float(style["fog_lift"])
 
     # Relative development: scale density above fog (push/pull)
     # Mild non-linearity keeps toe/shoulder character.
     scale = float(np.clip(relative_time, 0.4, 2.5))
     dens = fog + (dens - fog) * (0.65 + 0.35 * scale) * (scale**0.35)
+    dens = fog + (dens - fog) * float(style["density_bias"])
 
     # Contrast: pivot around mid-curve density and stretch
     pivot = float(np.interp(0.5, np.linspace(0, 1, len(dens)), dens))
-    contrast_scale = 1.0 + 0.45 * float(np.clip(contrast_modifier, -1.5, 1.5))
+    contrast_scale = 1.0 + 0.45 * float(
+        np.clip(contrast_modifier + float(style["contrast_bias"]), -1.5, 1.5)
+    )
     dens = pivot + (dens - pivot) * contrast_scale
-    dens = np.maximum(dens, fog * 0.98)
+    dens = np.maximum(dens, max(fog, 0.02) * 0.98)
 
     return FilmProfile(
         id=profile.id,
@@ -104,7 +136,7 @@ def modify_curve(
         type=profile.type,
         version=profile.version,
         iso=profile.iso,
-        base_plus_fog=fog,
+        base_plus_fog=float(max(fog, 0.02)),
         log_exposure=log_e,
         density=dens.astype(np.float64),
         source=profile.source,

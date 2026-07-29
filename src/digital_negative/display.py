@@ -21,6 +21,11 @@ def to_u8_gray(image: np.ndarray) -> np.ndarray:
     return (np.clip(image, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
 
 
+def to_pil_gray(image: np.ndarray, *, assume_linear: bool = False) -> Image.Image:
+    view = linear_to_srgb(image) if assume_linear else image
+    return Image.fromarray(to_u8_gray(view), mode="L")
+
+
 def save_gray_preview(path: str | Path, image: np.ndarray, *, assume_linear: bool = False) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -35,6 +40,8 @@ def make_before_after(
     *,
     title: str = "Digital Negative Spike",
     subtitle: str = "",
+    left_label: str = "Linear (Digital Negative)",
+    right_label: str = "After film curve / print",
 ) -> Image.Image:
     left = to_u8_gray(linear_to_srgb(before_linear if before_linear.ndim == 2 else before_linear))
     right = to_u8_gray(after_positive)
@@ -51,13 +58,8 @@ def make_before_after(
 
     canvas.paste(Image.fromarray(left, mode="L"), (0, header))
     canvas.paste(Image.fromarray(right, mode="L"), (left.shape[1] + 24, header))
-    draw.text((12, header + 8), "Linear (Digital Negative)", fill=(220, 220, 220), font=font)
-    draw.text(
-        (left.shape[1] + 36, header + 8),
-        "After HP5 curve (positive preview)",
-        fill=(220, 220, 220),
-        font=font,
-    )
+    draw.text((12, header + 8), left_label, fill=(220, 220, 220), font=font)
+    draw.text((left.shape[1] + 36, header + 8), right_label, fill=(220, 220, 220), font=font)
     return canvas
 
 
@@ -68,9 +70,18 @@ def save_before_after(
     *,
     title: str = "Digital Negative Spike",
     subtitle: str = "",
+    left_label: str = "Linear (Digital Negative)",
+    right_label: str = "After film curve / print",
 ) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    img = make_before_after(before_linear, after_positive, title=title, subtitle=subtitle)
+    img = make_before_after(
+        before_linear,
+        after_positive,
+        title=title,
+        subtitle=subtitle,
+        left_label=left_label,
+        right_label=right_label,
+    )
     img.save(path)
     return path

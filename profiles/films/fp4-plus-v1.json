@@ -1,0 +1,48 @@
+{
+  "id": "fp4-plus-v1",
+  "name": "FP4 Plus",
+  "type": "bw",
+  "version": "1.0",
+  "iso": 125,
+  "manufacturer": "ILFORD / HARMAN technology",
+  "grain_scale": 0.55,
+  "source": {
+    "document": "ILFORD FP4 Plus technical information",
+    "reference_url": "https://www.ilfordphoto.com/amfile/file/download/file/1919/product/690/product_datasheet_fp4plus.pdf",
+    "process": "ILFORD ILFOTEC HC (1+31), 8 minutes at 20°C, intermittent agitation",
+    "digitization_date": "2026-07-29",
+    "digitization_notes": "Approximate point sampling of the published characteristic curve (density vs relative log exposure). Captures FP4's lower fog, clean straight-line, and long highlight scale vs HP5. Re-digitize from a high-res datasheet plot for production profiles."
+  },
+  "curve": {
+    "x_label": "relative_log_exposure",
+    "y_label": "density",
+    "base_plus_fog": 0.08,
+    "points": [
+      [0.50, 0.08],
+      [0.80, 0.09],
+      [1.00, 0.11],
+      [1.20, 0.16],
+      [1.40, 0.25],
+      [1.60, 0.38],
+      [1.80, 0.54],
+      [2.00, 0.72],
+      [2.20, 0.91],
+      [2.40, 1.10],
+      [2.60, 1.29],
+      [2.80, 1.47],
+      [3.00, 1.64],
+      [3.20, 1.79],
+      [3.40, 1.92],
+      [3.60, 2.02],
+      [3.80, 2.10],
+      [4.00, 2.16],
+      [4.20, 2.20]
+    ]
+  },
+  "defaults": {
+    "developer_id": "standard",
+    "relative_time": 1.0,
+    "contrast_modifier": 0.0,
+    "grain_strength": 0.75
+  }
+}

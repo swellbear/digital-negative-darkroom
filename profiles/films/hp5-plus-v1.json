@@ -5,6 +5,7 @@
   "version": "1.0",
   "iso": 400,
   "manufacturer": "ILFORD / HARMAN technology",
+  "grain_scale": 1.0,
   "source": {
     "document": "ILFORD HP5 Plus technical information",
     "reference_url": "https://www.digitaltruth.com/products/ilford_tech/hp5.pdf",

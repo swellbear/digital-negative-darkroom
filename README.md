@@ -2,12 +2,13 @@
 
 Desktop darkroom workflow for digital capture: ingest a camera raw as a **Digital Negative** (latent image), then develop and print with photographer-facing controls.
 
-This repo currently contains the **first technical spike**:
+## What’s working now
 
-1. Ingest a raw/image (or a built-in synthetic scene)
-2. Create a Digital Negative (linear image + JSON metadata)
-3. Apply a digitized **HP5 Plus** characteristic curve
-4. Export density / positive previews and a before/after strip
+1. Ingest raw/image (or synthetic test scene) → Digital Negative
+2. Film stocks: **HP5 Plus**, **FP4 Plus**
+3. Development: relative time, contrast, grain, developer style
+4. Print: exposure (stops), multigrade grade, paper response
+5. CLI + sequential Gradio UI
 
 ## Quick start
 
@@ -16,52 +17,55 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Synthetic scene (no raw file required)
+# CLI (synthetic scene if no file given)
 python scripts/run_spike.py
+python scripts/run_spike.py /path/to/file.NEF --film fp4-plus-v1 --print-grade 3
 
-# Or pass a camera raw / image
-python scripts/run_spike.py /path/to/file.NEF
+# Interactive UI
+python scripts/run_darkroom_ui.py
+# open http://127.0.0.1:7860
 ```
 
 Outputs land in `output/`:
 
-- `negatives/<uuid>.tiff` + `.json` — Digital Negative payload
-- `<uuid>_density.png` — developed density visualization
-- `<uuid>_positive.png` — simple positive preview
-- `<uuid>_comparison.png` — linear DN vs developed preview
+- `negatives/<uuid>.tiff` + `.json` — Digital Negative
+- `*_developed.png` / `*_print.png` / `*_comparison.png`
 
 ## Project layout
 
 ```
-profiles/films/     Film characteristic curves (JSON point lists)
+profiles/films/          Characteristic curves (HP5, FP4)
+profiles/papers/         Multigrade paper response
 src/digital_negative/
-  ingest.py         Raw/image → Digital Negative
-  digital_negative.py
-  curves.py         Profile load + spline interpolation
-  development.py    Log-E → density → transmittance
-  display.py        Preview helpers
-  pipeline.py       Spike orchestration
-scripts/run_spike.py
-docs/               Starter / product reference
+  ingest.py              Raw/image → Digital Negative
+  development.py         Log-E → density (+ grain)
+  print_engine.py        Enlarger / paper stage
+  pipeline.py            Orchestration
+scripts/run_spike.py     CLI
+scripts/run_darkroom_ui.py
+docs/                    Product starter document
 ```
 
-## Film profiles
+## Controls (photographer language)
 
-`profiles/films/hp5-plus-v1.json` is an approximate digitization of the public Ilford HP5 Plus characteristic curve (ILFOTEC HC 1+31, 6½ min @ 20°C). Source URL and notes are stored inside the profile. Re-digitize from a high-resolution datasheet plot before shipping production profiles.
-
-Do **not** copy curves or code from GPLv3 / CC BY-SA research projects (e.g. spektrafilm / agx-emulsion).
+| Stage | Control | Meaning |
+|-------|---------|---------|
+| Develop | Film stock | Characteristic curve + grain baseline |
+| Develop | Relative development | 1.0 normal; >1 push; <1 pull |
+| Develop | Contrast | Straight-line slope |
+| Develop | Grain strength | Seeded micro-variation |
+| Develop | Developer style | Standard / High Definition / High Energy |
+| Print | Exposure | Stops of enlarger light |
+| Print | Multigrade filtration | Grade 0–5 |
+| Print | Print contrast | Fine nudge around selected grade |
 
 ## Tests
 
 ```bash
 source .venv/bin/activate
-pip install pytest
 pytest -q
 ```
 
-## Next
+## Notes
 
-- Development modifiers UI (relative time, contrast, grain)
-- Second film profile (FP4 Plus / Portra 400)
-- Print stage (exposure, multigrade filtration, paper response)
-- Sequential darkroom UI shell
+Film curves are approximate digitizations of public Ilford datasheets; source URLs live inside each profile JSON. Do **not** copy curves/code from GPLv3 / CC BY-SA research projects.
