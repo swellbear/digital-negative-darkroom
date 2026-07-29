@@ -1,0 +1,47 @@
+{
+  "id": "hp5-plus-v1",
+  "name": "HP5 Plus",
+  "type": "bw",
+  "version": "1.0",
+  "iso": 400,
+  "manufacturer": "ILFORD / HARMAN technology",
+  "source": {
+    "document": "ILFORD HP5 Plus technical information",
+    "reference_url": "https://www.digitaltruth.com/products/ilford_tech/hp5.pdf",
+    "process": "ILFORD ILFOTEC HC (1+31), 6.5 minutes at 20°C, intermittent agitation",
+    "digitization_date": "2026-07-29",
+    "digitization_notes": "Approximate point sampling of the published characteristic curve (density vs relative log exposure). Points intentionally capture toe, straight-line, and shoulder behavior for Level-3 process simulation. Re-digitize from a printed/high-res datasheet plot for production profiles."
+  },
+  "curve": {
+    "x_label": "relative_log_exposure",
+    "y_label": "density",
+    "base_plus_fog": 0.10,
+    "points": [
+      [0.60, 0.10],
+      [0.90, 0.11],
+      [1.10, 0.14],
+      [1.30, 0.20],
+      [1.50, 0.30],
+      [1.70, 0.43],
+      [1.90, 0.58],
+      [2.10, 0.74],
+      [2.30, 0.91],
+      [2.50, 1.08],
+      [2.70, 1.25],
+      [2.90, 1.41],
+      [3.10, 1.56],
+      [3.30, 1.70],
+      [3.50, 1.82],
+      [3.70, 1.92],
+      [3.90, 1.99],
+      [4.10, 2.04],
+      [4.30, 2.07]
+    ]
+  },
+  "defaults": {
+    "developer_id": "standard",
+    "relative_time": 1.0,
+    "contrast_modifier": 0.0,
+    "grain_strength": 1.0
+  }
+}
