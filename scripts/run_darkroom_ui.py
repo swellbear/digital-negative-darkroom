@@ -342,7 +342,10 @@ body.db-exposing #live_preview,
 body.db-exposing #live_preview *,
 #live_preview.db-waving,
 #live_preview.db-waving *,
-#live_preview.db-waving img {
+#live_preview.db-waving img,
+#live_preview.db-tool-hover,
+#live_preview.db-tool-hover *,
+#live_preview.db-tool-hover img {
   cursor: none !important;
 }
 #live_preview.db-waving .label-wrap span,
@@ -358,6 +361,12 @@ body.db-exposing #live_preview *,
   width: 120px;
   height: 120px;
   display: none;
+}
+#db_tool_cursor.db-tool-preview .db-tool-fill {
+  opacity: 0.18;
+}
+#db_tool_cursor.db-tool-preview .db-tool-svg {
+  opacity: 0.95;
 }
 #db_tool_cursor .db-tool-fill {
   position: absolute;
@@ -405,11 +414,14 @@ body.db-exposing #live_preview *,
 """
 
 # Wheel / trackpad zoom + drag pan for main and inspect viewers;
-# during dodge/burn exposure, wave a card stamp over the live print.
+# tool silhouette follows the pointer on the live print (preview + expose).
+# Gradio injects launch(js=...) as a <script> text node — it must be an IIFE
+# (or bare statements), not a bare () => {} which never runs.
 UI_JS = """
-() => {
+(() => {
   window.__dbPos = '';
   window.__dbGetPos = () => window.__dbPos || '';
+  window.__dbToolArmed = true;
 
   const writePosBox = (text) => {
     window.__dbPos = text || '';
@@ -432,13 +444,18 @@ UI_JS = """
     let panX = 0, panY = 0;
     let dragging = false, lastX = 0, lastY = 0;
 
+    const toolActive = () =>
+      root.classList.contains('db-waving') ||
+      root.classList.contains('db-tool-hover') ||
+      document.body.classList.contains('db-exposing');
+
     const apply = (img) => {
       if (!img) return;
       img.style.transformOrigin = 'center center';
       img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
       img.style.maxWidth = scale > 1.02 ? 'none' : '';
       img.style.maxHeight = scale > 1.02 ? 'none' : '';
-      if (root.classList.contains('db-waving') || document.body.classList.contains('db-exposing')) {
+      if (toolActive()) {
         img.style.cursor = 'none';
         root.style.cursor = 'none';
         return;
@@ -559,19 +576,39 @@ UI_JS = """
     return el;
   };
 
+  const hideTool = () => {
+    const tool = document.getElementById('db_tool_cursor');
+    if (tool) tool.style.display = 'none';
+    const live = document.querySelector('#live_preview');
+    if (live) live.classList.remove('db-tool-hover');
+  };
+
+  const readCheckedValue = (allowed) => {
+    for (const input of document.querySelectorAll('#controls_col input[type="radio"]:checked')) {
+      const v = (input.value || '').toLowerCase();
+      if (allowed.has(v)) return input.value;
+    }
+    return '';
+  };
+
   const readFlag = () => {
     const flagRoot = document.querySelector('#db_flag');
-    if (!flagRoot) return null;
-    const node = flagRoot.getAttribute('data-exposing') != null
-      ? flagRoot
-      : flagRoot.querySelector('[data-exposing]');
-    if (!node) return null;
-    const asset = flagRoot.querySelector('#db_stamp_asset, img');
+    const node = flagRoot
+      ? (flagRoot.getAttribute('data-exposing') != null
+          ? flagRoot
+          : flagRoot.querySelector('[data-exposing]'))
+      : null;
+    const asset = flagRoot && flagRoot.querySelector('#db_stamp_asset, img');
+    const shapeFromUi = readCheckedValue(new Set(['soft_oval','circle','finger','card','custom']));
+    const modeFromUi = readCheckedValue(new Set(['dodge','burn']));
+    const shape = (node && node.getAttribute('data-shape')) || shapeFromUi || 'soft_oval';
+    let mode = (node && node.getAttribute('data-mode')) || modeFromUi || 'burn';
+    if (!mode) mode = 'burn';
     return {
-      exposing: node.getAttribute('data-exposing') === '1',
-      shape: node.getAttribute('data-shape') || 'soft_oval',
-      mode: node.getAttribute('data-mode') || 'burn',
-      frac: parseFloat(node.getAttribute('data-stamp-fw') || '0.28'),
+      exposing: !!(node && node.getAttribute('data-exposing') === '1'),
+      shape,
+      mode,
+      frac: parseFloat((node && node.getAttribute('data-stamp-fw')) || '0.28'),
       stamp: asset && asset.getAttribute('src') ? asset.getAttribute('src') : '',
       node,
     };
@@ -581,8 +618,8 @@ UI_JS = """
     const live = document.querySelector('#live_preview');
     const img = live && live.querySelector('img');
     const tool = ensureToolCursor();
-    if (!flag || !flag.exposing || !img) {
-      tool.style.display = 'none';
+    if (!flag || !img) {
+      hideTool();
       return;
     }
     const r = img.getBoundingClientRect();
@@ -593,7 +630,7 @@ UI_JS = """
     const fillImg = tool.querySelector('.db-tool-fill');
     if (svg) svg.innerHTML = shapePaths(flag.shape, stroke);
     if (fillImg) {
-      if (flag.stamp) {
+      if (flag.stamp && flag.exposing) {
         if (fillImg.getAttribute('src') !== flag.stamp) fillImg.setAttribute('src', flag.stamp);
         fillImg.style.display = 'block';
       } else {
@@ -605,35 +642,38 @@ UI_JS = """
     tool.style.left = clientX + 'px';
     tool.style.top = clientY + 'px';
     tool.classList.toggle('db-card-resting', !!resting);
+    tool.classList.toggle('db-tool-preview', !flag.exposing);
     tool.style.display = 'block';
+    live.classList.add('db-tool-hover');
     forceNoCursor(live);
   };
 
   const placeRestingCard = (live, flag) => {
     const img = live && live.querySelector('img');
     if (!img || !flag) {
-      const tool = document.getElementById('db_tool_cursor');
-      if (tool) tool.style.display = 'none';
+      hideTool();
       return;
     }
     const r = img.getBoundingClientRect();
     if (r.width < 8 || r.height < 8) return;
     showToolAt(r.left + r.width / 2, r.top + r.height / 2, flag, true);
-    if (!window.__dbPos) writePosBox('0.5000,0.5000');
+    if (flag.exposing && !window.__dbPos) writePosBox('0.5000,0.5000');
   };
 
   const syncWave = () => {
     const flag = readFlag();
     const live = document.querySelector('#live_preview');
-    const tool = ensureToolCursor();
     const exposing = !!(flag && flag.exposing);
     document.body.classList.toggle('db-exposing', exposing);
     if (!exposing) {
       writePosBox('');
       window.__dbScrolled = false;
       if (live) live.classList.remove('db-waving');
-      tool.classList.remove('db-card-resting');
-      tool.style.display = 'none';
+      // Keep a faint resting preview on the print so the card is visible
+      // before Start — pointer hover still moves it.
+      if (live && live.querySelector('img') && !window.__dbHoveringPrint) {
+        placeRestingCard(live, flag);
+      }
       return;
     }
     if (live) {
@@ -644,27 +684,33 @@ UI_JS = """
         window.__dbScrolled = true;
       }
     }
-    if (!window.__dbPos) placeRestingCard(live, flag);
+    if (!window.__dbHoveringPrint) placeRestingCard(live, flag);
   };
 
   const onLivePointer = (e) => {
     const flag = readFlag();
-    if (!flag || !flag.exposing) {
-      writePosBox('');
-      const tool = document.getElementById('db_tool_cursor');
-      if (tool) tool.style.display = 'none';
-      return;
-    }
     const live = document.querySelector('#live_preview');
     const img = live && live.querySelector('img');
-    if (!img) return;
-    forceNoCursor(live);
-    const n = normOverImg(img, e.clientX, e.clientY);
-    if (!n) {
-      if (!window.__dbPos) placeRestingCard(live, flag);
+    if (!flag || !img) {
+      window.__dbHoveringPrint = false;
+      hideTool();
       return;
     }
-    writePosBox(n[0].toFixed(4) + ',' + n[1].toFixed(4));
+    const n = normOverImg(img, e.clientX, e.clientY);
+    if (!n) {
+      window.__dbHoveringPrint = false;
+      if (flag.exposing) {
+        if (!window.__dbPos) placeRestingCard(live, flag);
+      } else {
+        placeRestingCard(live, flag);
+      }
+      return;
+    }
+    window.__dbHoveringPrint = true;
+    forceNoCursor(live);
+    if (flag.exposing) {
+      writePosBox(n[0].toFixed(4) + ',' + n[1].toFixed(4));
+    }
     showToolAt(e.clientX, e.clientY, flag, false);
   };
 
@@ -677,8 +723,19 @@ UI_JS = """
   boot();
   document.addEventListener('pointermove', onLivePointer, { passive: true });
   document.addEventListener('pointerdown', onLivePointer, { passive: true });
-  new MutationObserver(boot).observe(document.body, { childList: true, subtree: true });
-}
+  // Narrow observer — body-wide observation re-entered on every tool move.
+  const observeRoots = () => {
+    ['#db_flag', '#live_preview', '#controls_col'].forEach((sel) => {
+      const el = document.querySelector(sel);
+      if (el && el.dataset.dbObs !== '1') {
+        el.dataset.dbObs = '1';
+        new MutationObserver(boot).observe(el, { childList: true, subtree: true, attributes: true });
+      }
+    });
+  };
+  observeRoots();
+  setInterval(observeRoots, 2000);
+})();
 """
 
 DB_TICK_JS = """
@@ -1684,7 +1741,7 @@ def _db_flag_html(state) -> str:
     stamp = ""
     frac = "0.28"
     shape = "soft_oval"
-    mode = ""
+    mode = "burn"
     if state and state.get("db_stamp_url"):
         stamp = str(state["db_stamp_url"])
     if state and state.get("db_stamp_frac"):
@@ -1699,6 +1756,16 @@ def _db_flag_html(state) -> str:
         f'<div data-exposing="{exposing}" data-shape="{shape}" data-stamp-fw="{frac}" '
         f'data-mode="{mode}">{img}</div>'
     )
+
+
+def _sync_tool_preview(shape_id, mode, state):
+    """Keep flag HTML in sync with card shape / mode so the outline can preview before Start."""
+    state = {**(state or {})}
+    state["db_shape"] = str(shape_id or state.get("db_shape") or "soft_oval")
+    state["db_mode"] = (
+        "dodge" if str(mode).lower().startswith("dodge") else "burn"
+    )
+    return state, _db_flag_html(state)
 
 
 def _wave_banner_html(state) -> str:
@@ -2368,8 +2435,9 @@ def build_ui() -> gr.Blocks:
                     print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter nudge")
                     with gr.Accordion("Dodge & burn · enlarger easel", open=True):
                         gr.Markdown(
-                            "The **print on the right** is the easel. Pick a card shape, set the pass "
-                            "time, Start, then wave over that print. Reset clears local work only.",
+                            "The **print on the right** is the easel. Pick a card shape — its outline "
+                            "already follows your pointer on the print (no magnifying glass). "
+                            "Set the pass time, Start, then wave. Reset clears local work only.",
                             elem_id="db_hint",
                         )
                         db_shape = gr.Radio(
@@ -2558,22 +2626,36 @@ def build_ui() -> gr.Blocks:
         def _toggle_custom_editor(shape_id):
             return gr.update(visible=str(shape_id).lower() == "custom")
 
+        def _on_shape_change(shape_id, mode, state):
+            editor = _toggle_custom_editor(shape_id)
+            state, flag = _sync_tool_preview(shape_id, mode, state)
+            return editor, state, flag
+
+        def _on_mode_change(base_seconds, mode, current_pass, shape_id, state):
+            secs, base_md, pass_md = _sync_db_pass_timer(base_seconds, mode, current_pass)
+            state, flag = _sync_tool_preview(shape_id, mode, state)
+            return secs, base_md, pass_md, state, flag
+
         print_exposure.change(
             fn=_sync_db_pass_timer,
             inputs=[print_exposure, db_mode, db_seconds],
             outputs=[db_seconds, base_math_md, pass_math_md],
         )
         db_mode.change(
-            fn=_sync_db_pass_timer,
-            inputs=[print_exposure, db_mode, db_seconds],
-            outputs=[db_seconds, base_math_md, pass_math_md],
+            fn=_on_mode_change,
+            inputs=[print_exposure, db_mode, db_seconds, db_shape, state],
+            outputs=[db_seconds, base_math_md, pass_math_md, state, db_flag],
         )
         db_seconds.change(
             fn=_sync_pass_math_only,
             inputs=[print_exposure, db_mode, db_seconds],
             outputs=[pass_math_md],
         )
-        db_shape.change(fn=_toggle_custom_editor, inputs=[db_shape], outputs=[db_editor])
+        db_shape.change(
+            fn=_on_shape_change,
+            inputs=[db_shape, db_mode, state],
+            outputs=[db_editor, state, db_flag],
+        )
 
         # Film / developer swap chemistry list + datasheet-normal minutes, then refresh.
         film.change(
