@@ -290,18 +290,85 @@ UI_CSS = """
 }
 #db_flag { display: none !important; }
 #db_pos { display: none !important; }
+#db_wave_banner:empty,
+#db_wave_banner .db-wave-idle {
+  display: none !important;
+}
+#db_wave_banner .db-wave-active {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 0 0 8px 0;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #1a1208;
+  background: linear-gradient(90deg, #ffb84d, #ffcc66 40%, #ffe0a0 70%, #ffcc66);
+  border: 1px solid #e09a30;
+  box-shadow: 0 0 0 1px rgba(255, 180, 60, 0.35), 0 6px 18px rgba(0, 0, 0, 0.25);
+  animation: db-wave-pulse 1.2s ease-in-out infinite;
+}
+#db_wave_banner .db-wave-active .db-wave-arrow {
+  font-size: 1.15rem;
+  opacity: 0.9;
+}
+body.db-exposing #controls_col {
+  opacity: 0.55;
+  pointer-events: none;
+}
+body.db-exposing #controls_col #db_actions,
+body.db-exposing #controls_col .db_clock_hidden {
+  pointer-events: auto;
+  opacity: 1;
+}
+body.db-exposing #preview_col {
+  position: relative;
+  z-index: 2;
+}
+#live_preview.db-waving {
+  outline: 3px solid #ffb84d !important;
+  outline-offset: 4px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 8px rgba(255, 184, 77, 0.18), 0 0 28px rgba(255, 170, 40, 0.35) !important;
+  animation: db-wave-ring 1.2s ease-in-out infinite;
+}
 #live_preview.db-waving,
 #live_preview.db-waving img {
   cursor: none !important;
+}
+#live_preview.db-waving .label-wrap span,
+#live_preview.db-waving label span {
+  color: #ffb84d !important;
+  font-weight: 700 !important;
 }
 #db_card_cursor {
   position: fixed;
   pointer-events: none;
   z-index: 9999;
   transform: translate(-50%, -50%);
-  opacity: 0.72;
+  opacity: 0.78;
   mix-blend-mode: screen;
   image-rendering: auto;
+  filter: drop-shadow(0 0 6px rgba(255, 180, 60, 0.65));
+}
+#db_card_cursor.db-card-resting {
+  opacity: 0.42;
+  animation: db-card-breathe 1.4s ease-in-out infinite;
+}
+@keyframes db-wave-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.08); }
+}
+@keyframes db-wave-ring {
+  0%, 100% { box-shadow: 0 0 0 6px rgba(255, 184, 77, 0.16), 0 0 22px rgba(255, 170, 40, 0.28); }
+  50% { box-shadow: 0 0 0 10px rgba(255, 184, 77, 0.28), 0 0 34px rgba(255, 170, 40, 0.45); }
+}
+@keyframes db-card-breathe {
+  0%, 100% { opacity: 0.34; transform: translate(-50%, -50%) scale(0.96); }
+  50% { opacity: 0.55; transform: translate(-50%, -50%) scale(1.02); }
 }
 @media (max-width: 900px) {
   #main_workspace { flex-wrap: wrap !important; }
@@ -424,38 +491,81 @@ UI_JS = """
     if (!el) {
       el = document.createElement('img');
       el.id = 'db_card_cursor';
-      el.alt = '';
+      el.alt = 'dodge/burn card';
       document.body.appendChild(el);
     }
     return el;
   };
 
-  const syncWave = () => {
-    const flag = document.querySelector('#db_flag [data-exposing], #db_flag');
-    const node = flag && flag.getAttribute
-      ? (flag.getAttribute('data-exposing') != null ? flag : flag.querySelector('[data-exposing]'))
-      : null;
-    const exposing = node && node.getAttribute('data-exposing') === '1';
-    const stamp = node ? (node.getAttribute('data-stamp') || '') : '';
-    const live = document.querySelector('#live_preview');
+  const placeRestingCard = (live, stamp, frac) => {
+    const img = live && live.querySelector('img');
     const cursor = ensureCursor();
-    if (!exposing) {
-      window.__dbPos = '';
-      if (live) live.classList.remove('db-waving');
+    if (!img || !stamp) {
       cursor.style.display = 'none';
       return;
     }
-    if (live) live.classList.add('db-waving');
+    const r = img.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) {
+      cursor.style.display = 'none';
+      return;
+    }
+    if (cursor.getAttribute('src') !== stamp) cursor.setAttribute('src', stamp);
+    cursor.style.width = Math.max(28, (frac || 0.25) * r.width) + 'px';
+    cursor.style.height = 'auto';
+    cursor.style.left = (r.left + r.width / 2) + 'px';
+    cursor.style.top = (r.top + r.height / 2) + 'px';
+    cursor.classList.add('db-card-resting');
+    cursor.style.display = 'block';
+  };
+
+  const syncWave = () => {
+    const flagRoot = document.querySelector('#db_flag');
+    const node = flagRoot
+      ? (flagRoot.getAttribute('data-exposing') != null
+          ? flagRoot
+          : flagRoot.querySelector('[data-exposing]'))
+      : null;
+    const exposing = node && node.getAttribute('data-exposing') === '1';
+    const stamp = node ? (node.getAttribute('data-stamp') || '') : '';
+    const frac = node ? parseFloat(node.getAttribute('data-stamp-fw') || '0.25') : 0.25;
+    const live = document.querySelector('#live_preview');
+    const cursor = ensureCursor();
+    document.body.classList.toggle('db-exposing', !!exposing);
+    if (!exposing) {
+      window.__dbPos = '';
+      window.__dbScrolled = false;
+      if (live) live.classList.remove('db-waving');
+      cursor.classList.remove('db-card-resting');
+      cursor.style.display = 'none';
+      return;
+    }
+    if (live) {
+      live.classList.add('db-waving');
+      if (!window.__dbScrolled) {
+        live.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        window.__dbScrolled = true;
+      }
+    }
     if (stamp && cursor.getAttribute('src') !== stamp) cursor.setAttribute('src', stamp);
-    cursor.style.display = window.__dbPos ? 'block' : 'none';
+    if (!window.__dbPos) {
+      placeRestingCard(live, stamp, frac);
+    }
   };
 
   const onLivePointer = (e) => {
-    const flag = document.querySelector('#db_flag [data-exposing="1"]');
+    const flagRoot = document.querySelector('#db_flag');
+    const flag = flagRoot
+      ? (flagRoot.getAttribute('data-exposing') === '1'
+          ? flagRoot
+          : flagRoot.querySelector('[data-exposing="1"]'))
+      : null;
     if (!flag) {
       window.__dbPos = '';
       const c = document.getElementById('db_card_cursor');
-      if (c) c.style.display = 'none';
+      if (c) {
+        c.classList.remove('db-card-resting');
+        c.style.display = 'none';
+      }
       return;
     }
     const live = document.querySelector('#live_preview');
@@ -465,7 +575,9 @@ UI_JS = """
     const cursor = ensureCursor();
     if (!n) {
       window.__dbPos = '';
-      cursor.style.display = 'none';
+      const stamp = flag.getAttribute('data-stamp') || '';
+      const frac = parseFloat(flag.getAttribute('data-stamp-fw') || '0.25');
+      placeRestingCard(live, stamp, frac);
       return;
     }
     window.__dbPos = n[0].toFixed(4) + ',' + n[1].toFixed(4);
@@ -473,6 +585,7 @@ UI_JS = """
     const frac = parseFloat(flag.getAttribute('data-stamp-fw') || '0.25');
     if (stamp && cursor.getAttribute('src') !== stamp) cursor.setAttribute('src', stamp);
     const iw = img.getBoundingClientRect().width;
+    cursor.classList.remove('db-card-resting');
     cursor.style.width = Math.max(24, frac * iw) + 'px';
     cursor.style.height = 'auto';
     cursor.style.left = e.clientX + 'px';
@@ -1475,6 +1588,28 @@ def _db_flag_html(state) -> str:
     )
 
 
+def _wave_banner_html(state) -> str:
+    """Big cue above the live print while the enlarger card is active."""
+    if not state or not state.get("db_exposing"):
+        return '<div class="db-wave-idle"></div>'
+    mode = str(state.get("db_mode", "burn"))
+    verb = "DODGE" if mode == "dodge" else "BURN"
+    left = max(0, int(np.ceil(float(state.get("db_seconds_left", 0.0)))))
+    tip = "hold back light" if mode == "dodge" else "add light"
+    return (
+        f'<div class="db-wave-active" role="status">'
+        f'<span class="db-wave-arrow">↓</span>'
+        f'<span><strong>{verb}</strong> — move your pointer over the print below '
+        f'({tip}) · <strong>{left}s</strong> left</span>'
+        f'<span class="db-wave-arrow">↓</span>'
+        f"</div>"
+    )
+
+
+LIVE_PRINT_LABEL = "Live print — theoretical enlarger print"
+LIVE_WAVE_LABEL = "→ WAVE YOUR CARD OVER THIS PRINT ←"
+
+
 def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print_contrast, editor, state):
     if not state or state.get("development_full") is None:
         raise gr.Error("Commit Develop first — dodge/burn happens on the print.")
@@ -1527,20 +1662,20 @@ def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print
     total_stops = relative_pass_stops(seconds, base_seconds, mode)
     status = (
         f"**{verb}** — {seconds}s of {base_seconds:g}s base · ~{total_stops:+.2f} stops if held still.  \n"
-        f"_Wave the card over the **live print** on the right. Result appears when the timer ends._"
+        f"_Move your pointer over the highlighted **live print** (right). "
+        f"The amber card follows you. Result appears when the timer ends._"
     )
     timer_md = (
-        f"**{verb}… {seconds}s** — wave over the live print "
-        f"(base timer {base_seconds:g}s)"
+        f"**{verb}… {seconds}s** — look right → wave the card over the highlighted print"
     )
     if state.get("dn") is not None:
         summary = f"{_stage_banner('print', _locks(state))}\n\n{status}\n\n{_history_md(state['dn'])}"
     else:
         summary = status
     st, hi = _split_summary(summary)
-    state = {**state, "summary_cache": summary}
+    state = {**state, "summary_cache": summary, "viewer_mode": "live"}
     return (
-        gr.skip(),
+        gr.update(label=LIVE_WAVE_LABEL),
         timer_md,
         st,
         hi,
@@ -1548,6 +1683,7 @@ def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print
         gr.update(active=True),
         _db_flag_html(state),
         "",
+        _wave_banner_html(state),
     )
 
 
@@ -1586,8 +1722,8 @@ def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, sta
         timer_line = f"**Ready** — {len(strokes)} local pass(es). Reset clears them."
     else:
         timer_line = (
-            "**Ready** — cut a card shape, set the timer, Start exposure, "
-            "then wave over the live print."
+            "**Ready** — cut a card, then **Start — wave over print** "
+            "(highlighted on the right)."
         )
 
     summary = (
@@ -1619,6 +1755,7 @@ def tick_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, pos, 
             state,
             gr.update(active=False),
             _db_flag_html(state),
+            _wave_banner_html(state),
         )
 
     h, w = _db_target_shape(state)
@@ -1630,22 +1767,34 @@ def tick_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, pos, 
 
     if still:
         verb = "Dodging" if state.get("db_mode") == "dodge" else "Burning"
-        timer_md = f"**{verb}… {secs}s** — keep waving the card over the live print"
+        timer_md = (
+            f"**{verb}… {secs}s** — keep waving over the highlighted print on the right"
+        )
         return (
-            gr.skip(),
+            gr.update(label=LIVE_WAVE_LABEL),
             timer_md,
             gr.skip(),
             gr.skip(),
             state,
             gr.update(active=True),
             _db_flag_html(state),
+            _wave_banner_html(state),
         )
 
     status = "**Exposure done** — inspect the print. Start again for another pass, or Reset."
     live, timer_md, st, hi, state = _db_refresh_print(
         paper_id, print_exposure, print_grade, print_contrast, state, status_md=status
     )
-    return live, timer_md, st, hi, state, gr.update(active=False), _db_flag_html(state)
+    return (
+        gr.update(value=live, label=LIVE_PRINT_LABEL),
+        timer_md,
+        st,
+        hi,
+        state,
+        gr.update(active=False),
+        _db_flag_html(state),
+        _wave_banner_html(state),
+    )
 
 
 def reset_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, state):
@@ -1666,7 +1815,7 @@ def reset_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, stat
     )
     editor = _editor_from_print(live_rgb)
     return (
-        live_rgb,
+        gr.update(value=live_rgb, label=LIVE_PRINT_LABEL),
         timer_line,
         status,
         history,
@@ -1675,6 +1824,7 @@ def reset_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, stat
         gr.update(active=False),
         _db_flag_html(state),
         "",
+        _wave_banner_html(state),
     )
 
 
@@ -1735,8 +1885,8 @@ def seed_dodge_burn_editor(state):
     rgb = state.get("live_rgb") if state else None
     return (
         _editor_from_print(rgb),
-        "**Ready** — paint a freeform card/wand on the dark pad, set the timer, "
-        "Start exposure, then **wave over the live print**. Result shows when the timer ends.",
+        "**Ready** — paint a card on the dark pad, then **Start — wave over print →** "
+        "(the print on the right lights up).",
     )
 
 
@@ -1892,9 +2042,9 @@ def build_ui() -> gr.Blocks:
                         gr.Markdown(
                             "Set the **base exposure** timer above first. Then:  \n"
                             "1) Paint a **card / wand** on the dark pad  \n"
-                            "2) **Start** a dodge or burn pass (seconds of that base)  \n"
-                            "3) **Wave** over the live print while it counts  \n"
-                            "4) When it stops, inspect. Reset clears local work only.",
+                            "2) Click **Start — wave over print**  \n"
+                            "3) Move your pointer over the **highlighted print on the right**  \n"
+                            "4) When the timer stops, inspect. Reset clears local work only.",
                             elem_id="db_hint",
                         )
                         db_editor = gr.ImageEditor(
@@ -1929,10 +2079,15 @@ def build_ui() -> gr.Blocks:
                             info="Relative to the base exposure timer above",
                         )
                         db_timer_md = gr.Markdown(
-                            "**Ready** — Commit Develop, cut a card shape, then Start exposure."
+                            "**Ready** — cut a card on the dark pad, then "
+                            "**Start — wave over print** (right side)."
                         )
                         with gr.Row(elem_id="db_actions"):
-                            db_start_btn = gr.Button("Start exposure", variant="primary", size="sm")
+                            db_start_btn = gr.Button(
+                                "Start — wave over print →",
+                                variant="primary",
+                                size="sm",
+                            )
                             db_reset_btn = gr.Button("Reset local work", size="sm")
                         db_flag = gr.HTML(_db_flag_html(None), elem_id="db_flag")
                         db_pos = gr.Textbox(value="", elem_id="db_pos", visible=False)
@@ -1953,8 +2108,9 @@ def build_ui() -> gr.Blocks:
                     )
 
             with gr.Column(scale=1, elem_id="preview_col", min_width=480):
+                db_wave_banner = gr.HTML(_wave_banner_html(None), elem_id="db_wave_banner")
                 live_out = gr.Image(
-                    label="Commit preview (live) — theoretical print",
+                    label=LIVE_PRINT_LABEL,
                     type="numpy",
                     elem_id="live_preview",
                     height=620,
@@ -2120,18 +2276,48 @@ def build_ui() -> gr.Blocks:
                 db_editor,
                 state,
             ],
-            outputs=[live_out, db_timer_md, status, history, state, db_clock, db_flag, db_pos],
+            outputs=[
+                live_out,
+                db_timer_md,
+                status,
+                history,
+                state,
+                db_clock,
+                db_flag,
+                db_pos,
+                db_wave_banner,
+            ],
         )
         db_clock.tick(
             fn=tick_dodge_burn,
             inputs=[paper, print_exposure, print_grade, print_contrast, db_pos, state],
-            outputs=[live_out, db_timer_md, status, history, state, db_clock, db_flag],
+            outputs=[
+                live_out,
+                db_timer_md,
+                status,
+                history,
+                state,
+                db_clock,
+                db_flag,
+                db_wave_banner,
+            ],
             js=DB_TICK_JS,
         )
         db_reset_btn.click(
             fn=reset_dodge_burn,
             inputs=[paper, print_exposure, print_grade, print_contrast, state],
-            outputs=[live_out, db_timer_md, status, history, db_editor, state, db_clock, db_flag, db_pos],
+            outputs=[
+                live_out,
+                db_timer_md,
+                status,
+                history,
+                db_editor,
+                state,
+                db_clock,
+                db_flag,
+                db_pos,
+                db_wave_banner,
+            ],
         )
 
         unlock_develop_btn.click(
