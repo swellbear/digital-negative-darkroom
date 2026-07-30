@@ -483,14 +483,18 @@ body.db-exposing #live_preview *,
   0%, 100% { opacity: 0.34; transform: translate(-50%, -50%) scale(0.96); }
   50% { opacity: 0.55; transform: translate(-50%, -50%) scale(1.02); }
 }
-/* Interactive crop stage — drag box on the picture */
-#crop_stage {
+/* Interactive crop overlay on the live theoretical print */
+#live_preview.crop-armed {
   position: relative !important;
   user-select: none;
+  cursor: crosshair;
 }
-#crop_stage .image-container,
-#crop_stage .image-frame {
+#live_preview.crop-armed .image-container,
+#live_preview.crop-armed .image-frame {
   position: relative !important;
+}
+#live_preview.crop-armed img {
+  cursor: crosshair;
 }
 #crop_overlay {
   position: absolute;
@@ -542,11 +546,19 @@ body.db-exposing #live_preview *,
 #crop_overlay .crop-handle.s { left: 50%; bottom: -6px; margin-left: -6px; cursor: ns-resize; }
 #crop_overlay .crop-handle.w { left: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
 #crop_overlay .crop-handle.e { right: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
-#crop_stage.crop-armed {
-  cursor: crosshair;
+#live_preview.inspect-armed img {
+  cursor: zoom-in;
 }
-#crop_stage.crop-armed img {
-  cursor: crosshair;
+#preview_tool {
+  margin-bottom: 4px !important;
+}
+#frame_tools {
+  margin-top: 6px !important;
+  margin-bottom: 4px !important;
+  padding: 8px 10px !important;
+  border: 1px solid rgba(242, 210, 138, 0.35) !important;
+  border-radius: 8px !important;
+  background: rgba(0, 0, 0, 0.18) !important;
 }
 #crop_ratio_row {
   gap: 6px !important;
@@ -559,6 +571,9 @@ body.db-exposing #live_preview *,
   opacity: 0 !important;
   overflow: hidden !important;
   pointer-events: none !important;
+}
+#inspect_preview {
+  display: none !important;
 }
 @media (max-width: 900px) {
   #main_workspace { flex-wrap: wrap !important; }
@@ -609,6 +624,31 @@ UI_JS = """
     box.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
+  const readPreviewTool = () => {
+    const root = document.querySelector('#preview_tool');
+    if (!root) return 'print';
+    const checked = root.querySelector('input[type="radio"]:checked');
+    if (checked && checked.value) return checked.value;
+    return 'print';
+  };
+
+  const syncPreviewToolClasses = () => {
+    const tool = readPreviewTool();
+    document.body.dataset.previewTool = tool;
+    const live = document.querySelector('#live_preview');
+    if (!live) return tool;
+    live.classList.toggle('crop-armed', tool === 'frame');
+    live.classList.toggle('inspect-armed', tool === 'inspect');
+    const overlay = document.getElementById('crop_overlay');
+    if (overlay && tool !== 'frame') overlay.style.display = 'none';
+    if (tool !== 'print') hideTool();
+    const modeEl = document.querySelector('#db_size_readout .db-tool-mode');
+    if (modeEl) {
+      modeEl.textContent = tool === 'frame' ? 'Frame' : (tool === 'inspect' ? 'Inspect' : 'Print');
+    }
+    return tool;
+  };
+
   function enhance(sel) {
     const root = document.querySelector(sel);
     if (!root || root.dataset.zoomReady === '1') return;
@@ -633,13 +673,34 @@ UI_JS = """
         root.style.cursor = 'none';
         return;
       }
+      const mode = readPreviewTool();
+      if (mode === 'frame') {
+        img.style.cursor = 'crosshair';
+        return;
+      }
+      if (mode === 'inspect') {
+        img.style.cursor = scale > 1.02 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in';
+        return;
+      }
       img.style.cursor = scale > 1.02 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in';
     };
 
     root.addEventListener('wheel', (e) => {
       const img = findImg();
       if (!img) return;
-      // Live print: scroll = resize dodge/burn tool. Ctrl/Meta+scroll = zoom.
+      const mode = syncPreviewToolClasses();
+      // Frame mode: leave scroll alone (box handles do the work).
+      if (sel === '#live_preview' && mode === 'frame') return;
+      // Inspect mode on live: scroll always zooms (no need for Ctrl).
+      if (sel === '#live_preview' && mode === 'inspect') {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+        scale = Math.min(10, Math.max(0.4, scale * factor));
+        if (scale <= 1.02) { panX = 0; panY = 0; }
+        apply(img);
+        return;
+      }
+      // Print mode: scroll = resize dodge/burn tool. Ctrl/Meta+scroll = zoom.
       if (sel === '#live_preview' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
@@ -669,6 +730,8 @@ UI_JS = """
 
     root.addEventListener('pointerdown', (e) => {
       if (root.classList.contains('db-waving')) return;
+      const mode = readPreviewTool();
+      if (sel === '#live_preview' && mode === 'frame') return;
       const img = findImg();
       if (!img || scale <= 1.02) return;
       dragging = true; lastX = e.clientX; lastY = e.clientY;
@@ -864,6 +927,11 @@ UI_JS = """
     const exposing = !!(flag && flag.exposing);
     const wasExposing = document.body.classList.contains('db-exposing');
     document.body.classList.toggle('db-exposing', exposing);
+    if (syncPreviewToolClasses() !== 'print') {
+      if (live) live.classList.remove('db-waving');
+      hideTool();
+      return;
+    }
     if (!exposing) {
       // Keep last nx,ny,scale so Start / scroll size survive leaving the print.
       window.__dbScrolled = false;
@@ -891,6 +959,11 @@ UI_JS = """
   };
 
   const onLivePointer = (e) => {
+    if (syncPreviewToolClasses() !== 'print') {
+      window.__dbHoveringPrint = false;
+      hideTool();
+      return;
+    }
     const flag = readFlag();
     const live = document.querySelector('#live_preview');
     const img = live && live.querySelector('img');
@@ -978,7 +1051,7 @@ UI_JS = """
   observeRoots();
   setInterval(observeRoots, 2000);
 
-  // ——— Interactive crop box on #crop_stage ———
+  // ——— Interactive crop box on #live_preview (Frame tool mode) ———
   const CROP_MIN = 0.04; // minimum normalized side
   window.__cropBox = window.__cropBox || { x: 0, y: 0, w: 1, h: 1 };
 
@@ -987,7 +1060,6 @@ UI_JS = """
     if (!root) return 'free';
     const checked = root.querySelector('input[type="radio"]:checked');
     if (checked && checked.value) return checked.value;
-    // Dropdown / radio group fallbacks
     const sel = root.querySelector('select');
     if (sel && sel.value) return sel.value;
     return 'free';
@@ -1020,7 +1092,6 @@ UI_JS = """
 
   const largestBoxForRatio = (ratio) => {
     if (!ratio || !(ratio > 0)) return { x: 0, y: 0, w: 1, h: 1 };
-    // Image space is 1×1; fit largest ratio-locked rect.
     if (ratio >= 1) {
       const h = Math.min(1, 1 / ratio);
       return { x: 0, y: (1 - h) / 2, w: 1, h };
@@ -1041,37 +1112,29 @@ UI_JS = """
   const applyAspectToBox = (box, ratio, anchor) => {
     if (!ratio || !(ratio > 0)) return clampBox(box);
     let { x, y, w, h } = box;
-    // Keep width, adjust height — then clamp; if height hits edge, shrink width.
     const fromW = () => {
       h = w / ratio;
-      if (anchor === 'n' || anchor === 'ne' || anchor === 'nw') {
-        /* top fixed */
-      } else if (anchor === 's' || anchor === 'se' || anchor === 'sw') {
+      if (anchor === 's' || anchor === 'se' || anchor === 'sw') {
         y = box.y + box.h - h;
-      } else {
+      } else if (!(anchor === 'n' || anchor === 'ne' || anchor === 'nw')) {
         y = box.y + (box.h - h) / 2;
       }
     };
     const fromH = () => {
       w = h * ratio;
-      if (anchor === 'w' || anchor === 'nw' || anchor === 'sw') {
-        /* left fixed */
-      } else if (anchor === 'e' || anchor === 'ne' || anchor === 'se') {
+      if (anchor === 'e' || anchor === 'ne' || anchor === 'se') {
         x = box.x + box.w - w;
-      } else {
+      } else if (!(anchor === 'w' || anchor === 'nw' || anchor === 'sw')) {
         x = box.x + (box.w - w) / 2;
       }
     };
-    // Prefer adjusting the dimension that the handle primarily changes.
     if (anchor === 'n' || anchor === 's') fromH();
     else if (anchor === 'e' || anchor === 'w') fromW();
     else fromW();
     let out = clampBox({ x, y, w, h });
-    // If clamping broke the ratio, shrink to fit.
     const cur = out.w / Math.max(out.h, 1e-9);
     if (Math.abs(cur - ratio) > 0.01) {
       out = clampBox(largestBoxForRatio(ratio));
-      // Keep near previous center
       const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
       out.x = Math.max(0, Math.min(1 - out.w, cx - out.w / 2));
       out.y = Math.max(0, Math.min(1 - out.h, cy - out.h / 2));
@@ -1080,8 +1143,12 @@ UI_JS = """
   };
 
   const syncOverlay = () => {
-    const stage = document.querySelector('#crop_stage');
-    if (!stage) return;
+    const stage = document.querySelector('#live_preview');
+    if (!stage || syncPreviewToolClasses() !== 'frame') {
+      const overlay = document.getElementById('crop_overlay');
+      if (overlay) overlay.style.display = 'none';
+      return;
+    }
     const img = stage.querySelector('img');
     let overlay = document.getElementById('crop_overlay');
     if (!img || img.naturalWidth < 2) {
@@ -1110,7 +1177,6 @@ UI_JS = """
         </div>`;
       host.appendChild(overlay);
     }
-    // Position overlay exactly over the displayed image box inside host
     const hr = host.getBoundingClientRect();
     const ir = img.getBoundingClientRect();
     overlay.style.display = 'block';
@@ -1148,9 +1214,9 @@ UI_JS = """
   };
 
   const setupCropTool = () => {
-    const stage = document.querySelector('#crop_stage');
+    const stage = document.querySelector('#live_preview');
     if (!stage) return;
-    stage.classList.add('crop-armed');
+    syncPreviewToolClasses();
     if (stage.dataset.cropReady === '1') {
       readBoxFromInput();
       syncOverlay();
@@ -1161,7 +1227,7 @@ UI_JS = """
     writeCropRectBox();
     syncOverlay();
 
-    let mode = null; // 'move' | 'resize' | 'create'
+    let mode = null;
     let handle = null;
     let start = null;
     let startBox = null;
@@ -1185,6 +1251,7 @@ UI_JS = """
 
     stage.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
+      if (syncPreviewToolClasses() !== 'frame') return;
       const t = e.target;
       if (!(t instanceof Element)) return;
       const h = t.getAttribute && t.getAttribute('data-h');
@@ -1199,7 +1266,6 @@ UI_JS = """
         mode = 'resize';
         handle = h;
       } else if (onBox && t.closest && t.closest('.crop-box') && !h) {
-        // click on box interior (not handle)
         if (t.classList.contains('crop-handle')) {
           mode = 'resize';
           handle = t.getAttribute('data-h');
@@ -1217,6 +1283,7 @@ UI_JS = """
 
     stage.addEventListener('pointermove', (e) => {
       if (!mode || !start || !startBox) return;
+      if (syncPreviewToolClasses() !== 'frame') return;
       const n = normFromEvent(e);
       if (!n) return;
       const dx = n[0] - start[0];
@@ -1237,7 +1304,6 @@ UI_JS = """
         const y1 = Math.max(start[1], n[1]);
         let box = { x: x0, y: y0, w: Math.max(CROP_MIN, x1 - x0), h: Math.max(CROP_MIN, y1 - y0) };
         if (ratio) {
-          // Expand from the drag start corner toward pointer, locked.
           const aw = Math.abs(n[0] - start[0]);
           const ah = Math.abs(n[1] - start[1]);
           let w = aw, h = ah;
@@ -1276,26 +1342,28 @@ UI_JS = """
     stage.addEventListener('pointerup', end);
     stage.addEventListener('pointercancel', end);
 
-    // Keep overlay aligned when Gradio swaps the image src / layout
     new MutationObserver(() => {
       readBoxFromInput();
       syncOverlay();
-    }).observe(stage, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+    }).observe(stage, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'class'] });
     window.addEventListener('resize', syncOverlay);
   };
 
-  // Ratio preset: reshape box to largest centered rect for that ratio
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (!(t instanceof Element)) return;
+    if (t.closest && t.closest('#preview_tool')) {
+      syncPreviewToolClasses();
+      syncOverlay();
+      return;
+    }
     if (!t.closest || !t.closest('#crop_ratio')) return;
-    const stage = document.querySelector('#crop_stage');
+    const stage = document.querySelector('#live_preview');
     const img = stage && stage.querySelector('img');
     const aspect = img && img.clientWidth ? img.clientWidth / Math.max(img.clientHeight, 1) : 1;
     const ratio = parseRatio(readCropRatio(), aspect);
-    if (!ratio) return; // free — keep current box
+    if (!ratio) return;
     const next = largestBoxForRatio(ratio);
-    // Center on previous center if possible
     const cx = window.__cropBox.x + window.__cropBox.w / 2;
     const cy = window.__cropBox.y + window.__cropBox.h / 2;
     next.x = Math.max(0, Math.min(1 - next.w, cx - next.w / 2));
@@ -1305,7 +1373,7 @@ UI_JS = """
     syncOverlay();
   });
 
-  const bootCrop = () => { try { setupCropTool(); } catch (_) {} };
+  const bootCrop = () => { try { setupCropTool(); syncPreviewToolClasses(); } catch (_) {} };
   bootCrop();
   setInterval(bootCrop, 1500);
 })();
@@ -1684,17 +1752,17 @@ def focus_viewer(mode: str):
     def _fn(state, evt: SelectData | None = None):
         if not state or state.get("dn") is None:
             empty = gr.update()
-            return empty, empty, "*Commit Ingest first.*", gr.update(open=False), state
+            return empty, empty, "*Commit Ingest first.*", state
         if evt is not None and getattr(evt, "selected", True) is False:
             mode_use = "live"
         else:
             mode_use = mode
         state = {**state, "viewer_mode": mode_use}
         tip = {
-            "live": "_Large + Inspect: **live theoretical print**. Scroll-wheel zooms; drag pans._",
-            "original": "_Large + Inspect: **Original**. Scroll-wheel zooms; drag pans._",
-            "latent": "_Large + Inspect: **Latent DN**. Scroll-wheel zooms; drag pans._",
-            "negative": "_Large + Inspect: **Developed negative**. Scroll-wheel zooms; drag pans._",
+            "live": "_Live theoretical print. Use **Frame** to crop/straighten, **Inspect** to zoom._",
+            "original": "_Original in the live preview. Use **Inspect** to zoom · **Frame** to crop._",
+            "latent": "_Latent DN in the live preview. Use **Inspect** to zoom · **Frame** to crop._",
+            "negative": "_Developed negative in the live preview. Use **Inspect** to zoom · **Frame** to crop._",
         }.get(mode_use, "")
         banner = _stage_banner(state.get("stage", "development"), _locks(state))
         status = f"{banner}\n\n{tip}"
@@ -1702,7 +1770,6 @@ def focus_viewer(mode: str):
             _viewer_frame(state),
             _inspect_frame(state),
             status,
-            gr.update(open=True),
             state,
         )
 
@@ -1714,6 +1781,20 @@ def focus_viewer_button(mode: str):
         return focus_viewer(mode)(state, None)
 
     return _fn
+
+
+def on_preview_tool_change(tool: str):
+    """Show frame controls only in Frame mode; keep live preview as the workspace."""
+    tool = str(tool or "print")
+    labels = {
+        "print": LIVE_PRINT_LABEL + " · Print tool (dodge/burn)",
+        "frame": LIVE_PRINT_LABEL + " · Frame tool (crop & straighten)",
+        "inspect": LIVE_PRINT_LABEL + " · Inspect tool (scroll zoom · drag pan)",
+    }
+    return (
+        gr.update(visible=tool == "frame"),
+        gr.update(label=labels.get(tool, LIVE_PRINT_LABEL)),
+    )
 
 
 def _rebuild_views_from_dn(state: dict) -> dict:
@@ -1861,7 +1942,6 @@ def rotate_working(turns_cw: int, state):
         0.0,
         DEFAULT_CROP_RECT,
         "free",
-        _framing_stage_preview(state, 0.0),
     )
 
 
@@ -1976,7 +2056,6 @@ def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
         deg,
         rect_echo,
         ratio,
-        _framing_stage_preview(state, deg),
     )
 
 
@@ -2038,15 +2117,7 @@ def reset_crop_straighten(state):
         0.0,
         DEFAULT_CROP_RECT,
         "free",
-        _framing_stage_preview(state, 0.0),
     )
-
-
-def refresh_crop_stage(straighten_deg, state):
-    """Update the crop-stage picture when straighten changes (box stays normalized)."""
-    if not state or state.get("dn") is None:
-        return None
-    return _framing_stage_preview(state, float(straighten_deg or 0.0))
 
 
 def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
@@ -2084,7 +2155,7 @@ def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
         + f" · subject ≈ ({result['subject']['x']:.0%}, {result['subject']['y']:.0%}). "
         f"Tweak the box if needed, then **Apply framing**._"
     )
-    return rect, hint, _framing_stage_preview(state, deg)
+    return rect, hint
 
 
 def rotate_cw(state):
@@ -2129,7 +2200,7 @@ def commit_ingest(sample_path, file_obj, state):
     summary = (
         f"{_stage_banner('development', ['ingest'])}\n\n"
         f"**Ingest locked** — `{dn.metadata['source']['original_filename']}`  \n"
-        f"_Open a sequence below, then use **Inspect & zoom** (scroll-wheel zoom, drag pan)._\n\n"
+        f"_Use the live preview tools: **Frame** to crop, **Inspect** to zoom._\n\n"
         f"{_history_md(dn)}"
     )
     state = {
@@ -2179,9 +2250,7 @@ def commit_ingest(sample_path, file_obj, state):
         0.0,
         DEFAULT_CROP_RECT,
         "free",
-        _framing_stage_preview(state, 0.0),
         _inspect_frame(state, live=latent_inspect),
-        gr.update(open=True),
         state,
     )
 
@@ -3121,9 +3190,7 @@ def guided_first_print(
             straighten_u,
             crop_rect_u,
             crop_ratio_u,
-            crop_stage_u,
             inspect_out,
-            inspect_acc_u,
             state,
         ) = commit_ingest(sample_path, file_obj, state)
     else:
@@ -3149,9 +3216,8 @@ def guided_first_print(
         straighten_u = gr.skip()
         crop_rect_u = gr.skip()
         crop_ratio_u = gr.skip()
-        crop_stage_u = gr.skip()
         inspect_out = state.get("live_inspect") or live_rgb
-        inspect_acc_u = gr.update(open=True)
+        # inspect_acc removed — Inspect is a live-preview tool mode
 
     if not _locked(state, "development"):
         (
@@ -3253,9 +3319,7 @@ def guided_first_print(
         straighten_u,
         crop_rect_u,
         crop_ratio_u,
-        crop_stage_u,
         inspect_out,
-        inspect_acc_u,
         state,
         gr.update(value=_editor_from_print(live_rgb), visible=False),
         timer_md,
@@ -3338,7 +3402,6 @@ def reset_session():
         0.0,
         DEFAULT_CROP_RECT,
         "free",
-        None,
         None,
     )
 
@@ -3517,26 +3580,31 @@ def build_ui() -> gr.Blocks:
             with gr.Column(scale=1, elem_id="preview_col", min_width=480):
                 db_wave_banner = gr.HTML(_wave_banner_html(None), elem_id="db_wave_banner")
                 db_size_readout = gr.HTML(
-                    '<div class="db-size-pill">Card size <strong class="db-size-value">100%</strong> · scroll over print to resize · Ctrl/⌘+scroll zooms</div>',
+                    '<div class="db-size-pill"><span class="db-tool-mode">Print</span> · card <strong class="db-size-value">100%</strong> · Frame draws crop on this print · Inspect zooms</div>',
                     elem_id="db_size_readout",
                 )
+                preview_tool = gr.Radio(
+                    choices=[
+                        ("Print · dodge/burn", "print"),
+                        ("Frame · crop & straighten", "frame"),
+                        ("Inspect · zoom", "inspect"),
+                    ],
+                    value="print",
+                    label="Live preview tools",
+                    elem_id="preview_tool",
+                )
                 live_out = gr.Image(
-                    label=LIVE_PRINT_LABEL,
+                    label=LIVE_PRINT_LABEL + " · Print tool (dodge/burn)",
                     type="numpy",
                     elem_id="live_preview",
                     height=620,
                     buttons=["fullscreen", "download"],
                 )
-                with gr.Row():
-                    rotate_ccw_btn = gr.Button("Rotate ⟲ 90°", size="sm", interactive=False)
-                    rotate_180_btn = gr.Button("Rotate 180°", size="sm", interactive=False)
-                    rotate_cw_btn = gr.Button("Rotate 90° ⟳", size="sm", interactive=False)
-                with gr.Accordion("Crop & straighten", open=True):
+                with gr.Group(visible=False, elem_id="frame_tools") as frame_tools:
                     gr.Markdown(
-                        "Drag on the picture to draw a crop box · drag handles to resize · "
-                        "pick a ratio to lock · straighten tilts the easel first. "
-                        "**Auto crop** proposes a box from classical composition rules — "
-                        "tweak it, then Apply. Framing uses the last ingest / 90° base."
+                        "Crop and straighten on the **live theoretical print** above. "
+                        "Draw/resize the box · lock a ratio · Auto crop suggests classical rules · "
+                        "then **Apply framing**."
                     )
                     crop_ratio = gr.Radio(
                         choices=CROP_RATIO_CHOICES,
@@ -3559,7 +3627,7 @@ def build_ui() -> gr.Blocks:
                             scale=1,
                         )
                     crop_hint = gr.Markdown(
-                        "_Pick a rule and hit Auto crop, or draw the box yourself._",
+                        "_Pick a rule and hit Auto crop, or draw the box on the print._",
                         elem_id="crop_hint",
                     )
                     straighten_deg = gr.Slider(
@@ -3568,14 +3636,6 @@ def build_ui() -> gr.Blocks:
                         value=0.0,
                         step=0.1,
                         label="Straighten (° CW)",
-                    )
-                    crop_stage = gr.Image(
-                        label="Crop stage — click & drag on the picture",
-                        type="numpy",
-                        elem_id="crop_stage",
-                        height=420,
-                        interactive=False,
-                        buttons=[],
                     )
                     crop_rect = gr.Textbox(
                         value=DEFAULT_CROP_RECT,
@@ -3588,6 +3648,10 @@ def build_ui() -> gr.Blocks:
                             "Apply framing", interactive=False, variant="secondary", size="sm"
                         )
                         reset_framing_btn = gr.Button("Reset framing", interactive=False, size="sm")
+                with gr.Row():
+                    rotate_ccw_btn = gr.Button("Rotate ⟲ 90°", size="sm", interactive=False)
+                    rotate_180_btn = gr.Button("Rotate 180°", size="sm", interactive=False)
+                    rotate_cw_btn = gr.Button("Rotate 90° ⟳", size="sm", interactive=False)
                 with gr.Row(elem_id="ref_row"):
                     original_out = gr.Image(
                         label="Original (click to enlarge)",
@@ -3612,19 +3676,14 @@ def build_ui() -> gr.Blocks:
                     view_lat_btn = gr.Button("Latent DN", size="sm")
                     view_neg_btn = gr.Button("Negative", size="sm")
                     view_live_btn = gr.Button("Live print", size="sm", variant="primary")
-                with gr.Accordion("Inspect & zoom", open=True) as inspect_acc:
-                    gr.Markdown(
-                        "Scroll-wheel zooms · drag pans when zoomed · double-click resets · "
-                        "fullscreen button for an even larger view",
-                        elem_id="inspect_hint",
-                    )
-                    inspect_out = gr.Image(
-                        label="Inspect — pick a sequence above",
-                        type="numpy",
-                        elem_id="inspect_preview",
-                        height=720,
-                        buttons=["fullscreen", "download"],
-                    )
+                # Hidden high-res twin kept for backend inspect caches / downloads.
+                inspect_out = gr.Image(
+                    label="Inspect",
+                    type="numpy",
+                    elem_id="inspect_preview",
+                    visible=False,
+                    buttons=["fullscreen", "download"],
+                )
 
         # Always pass develop + print controls so the large viewer can show a
         # theoretical print through the working negative while developing.
@@ -3653,8 +3712,8 @@ def build_ui() -> gr.Blocks:
                 ingest_acc, develop_acc, print_acc,
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
                 apply_framing_btn, reset_framing_btn, auto_crop_btn,
-                straighten_deg, crop_rect, crop_ratio, crop_stage,
-                inspect_out, inspect_acc, state,
+                straighten_deg, crop_rect, crop_ratio,
+                inspect_out, state,
             ],
         ).then(
             fn=live_preview_high,
@@ -3871,9 +3930,7 @@ def build_ui() -> gr.Blocks:
                 straighten_deg,
                 crop_rect,
                 crop_ratio,
-                crop_stage,
                 inspect_out,
-                inspect_acc,
                 state,
                 db_editor,
                 db_timer_md,
@@ -3937,16 +3994,22 @@ def build_ui() -> gr.Blocks:
                 ingest_acc, develop_acc, print_acc,
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
                 apply_framing_btn, reset_framing_btn, auto_crop_btn,
-                straighten_deg, crop_rect, crop_ratio, crop_stage,
+                straighten_deg, crop_rect, crop_ratio,
                 state,
             ],
+        )
+
+        preview_tool.change(
+            fn=on_preview_tool_change,
+            inputs=[preview_tool],
+            outputs=[frame_tools, live_out],
         )
 
         rotate_outputs = [
             live_out, original_out, latent_out, neg_out, status, history,
             develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
             develop_acc, print_acc, state,
-            straighten_deg, crop_rect, crop_ratio, crop_stage,
+            straighten_deg, crop_rect, crop_ratio,
         ]
         rotate_ccw_btn.click(fn=rotate_ccw, inputs=[state], outputs=rotate_outputs).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
@@ -3962,7 +4025,7 @@ def build_ui() -> gr.Blocks:
             live_out, original_out, latent_out, neg_out, status, history,
             develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
             develop_acc, print_acc, state,
-            straighten_deg, crop_rect, crop_ratio, crop_stage,
+            straighten_deg, crop_rect, crop_ratio,
         ]
         apply_framing_btn.click(
             fn=apply_crop_straighten,
@@ -3981,21 +4044,11 @@ def build_ui() -> gr.Blocks:
         auto_crop_btn.click(
             fn=suggest_auto_crop,
             inputs=[auto_crop_rule, crop_ratio, straighten_deg, state],
-            outputs=[crop_rect, crop_hint, crop_stage],
-        )
-        straighten_deg.release(
-            fn=refresh_crop_stage,
-            inputs=[straighten_deg, state],
-            outputs=[crop_stage],
-        )
-        straighten_deg.change(
-            fn=refresh_crop_stage,
-            inputs=[straighten_deg, state],
-            outputs=[crop_stage],
+            outputs=[crop_rect, crop_hint],
         )
 
-        # Thumbnail / button → enlarge in main preview + open inspect/zoom
-        focus_outputs = [live_out, inspect_out, status, inspect_acc, state]
+        # Thumbnail / button → enlarge in main preview
+        focus_outputs = [live_out, inspect_out, status, state]
         original_out.select(fn=focus_viewer("original"), inputs=[state], outputs=focus_outputs)
         latent_out.select(fn=focus_viewer("latent"), inputs=[state], outputs=focus_outputs)
         neg_out.select(fn=focus_viewer("negative"), inputs=[state], outputs=focus_outputs)
