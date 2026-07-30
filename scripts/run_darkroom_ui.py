@@ -241,6 +241,38 @@ body.drawer-collapsed #drawer_host {
 }
 #drawer_host .form { gap: 3px !important; }
 #drawer_host button { min-height: 30px !important; font-size: 0.82rem !important; }
+#ingest_upload,
+#ingest_upload .wrap,
+#ingest_upload .upload-container,
+#ingest_upload .center,
+#ingest_upload [data-testid="file"] {
+  overflow: visible !important;
+  min-height: 120px !important;
+}
+#ingest_upload .wrap {
+  height: auto !important;
+  min-height: 120px !important;
+}
+#ingest_upload .upload-container,
+#ingest_upload .center {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  padding: 12px 8px !important;
+  min-height: 110px !important;
+  box-sizing: border-box !important;
+}
+#ingest_upload button,
+#ingest_upload .or,
+#ingest_upload span,
+#ingest_upload p {
+  white-space: normal !important;
+  line-height: 1.25 !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+  max-height: none !important;
+}
 #drawer_host [role="listbox"],
 #drawer_host ul.options {
   z-index: 9999 !important;
@@ -3552,7 +3584,7 @@ def build_ui() -> gr.Blocks:
                                 ".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp",
                                 ".heic", ".heif", ".avif",
                             ],
-                            height=88,
+                            height=140,
                             elem_id="ingest_upload",
                         )
                         ingest_btn = gr.Button("Commit Ingest", variant="primary", size="sm")
