@@ -1286,19 +1286,36 @@ body.module-collapsed #module_panel {
 #curve_plot [data-testid="block-label"],
 #curve_plot .icon-button-wrapper { display: none !important; }
 #curve_summary { margin-bottom: 4px !important; }
+/* Float over the print stage only — never cover the stage filmstrip
+   (#seq_strip is a fixed 46px row under the preview). */
+#preview_col .block:has(#spot_readout) {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  border: none !important;
+  background: transparent !important;
+  pointer-events: none !important;
+  z-index: 8 !important;
+}
 #spot_readout {
-  position: absolute;
-  left: 10px;
-  bottom: 10px;
-  z-index: 40;
-  max-width: min(420px, 70%);
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--dr-border);
-  background: rgba(18, 18, 21, 0.82);
-  color: var(--dr-text);
-  font-size: 12px;
-  pointer-events: none;
+  position: absolute !important;
+  left: 10px !important;
+  bottom: calc(46px + 8px) !important;
+  z-index: 8 !important;
+  max-width: min(420px, 70%) !important;
+  padding: 6px 10px !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--dr-border) !important;
+  background: rgba(18, 18, 21, 0.82) !important;
+  color: var(--dr-text) !important;
+  font-size: 12px !important;
+  pointer-events: none !important;
 }
 #spot_readout p { margin: 0 !important; }
 #hist_plot,
