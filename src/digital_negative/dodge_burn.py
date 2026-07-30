@@ -236,12 +236,24 @@ def place_stamp(
     stamp: np.ndarray,
     nx: float,
     ny: float,
+    scale: float = 1.0,
 ) -> np.ndarray:
-    """Place stamp centered at normalized (nx, ny) in [0, 1] image coords."""
+    """Place stamp centered at normalized (nx, ny) in [0, 1] image coords.
+
+    ``scale`` resizes the stamp about its center (scroll-wheel tool size in the UI).
+    """
     out = np.zeros((height, width), dtype=np.float32)
+    stamp = np.asarray(stamp, dtype=np.float32)
     sh, sw = stamp.shape[:2]
     if sh < 1 or sw < 1:
         return out
+
+    scale = float(np.clip(float(scale), 0.35, 2.75))
+    if abs(scale - 1.0) > 0.02:
+        nh = max(3, int(round(sh * scale)))
+        nw = max(3, int(round(sw * scale)))
+        stamp = _resize_mask(stamp, nh, nw)
+        sh, sw = stamp.shape[:2]
 
     cx = int(round(float(nx) * (width - 1)))
     cy = int(round(float(ny) * (height - 1)))
@@ -288,7 +300,17 @@ def stamp_to_png_data_url(stamp: np.ndarray, *, tint: tuple[int, int, int] = (25
 
 
 def parse_pointer(pos: str | None) -> tuple[float, float] | None:
-    """Parse 'nx,ny' normalized pointer from the UI. Returns None if missing/invalid."""
+    """Parse 'nx,ny' or 'nx,ny,scale' from the UI. Returns (nx, ny) or None."""
+    parsed = parse_pointer_state(pos)
+    if parsed is None:
+        return None
+    return (parsed[0], parsed[1])
+
+
+def parse_pointer_state(
+    pos: str | None,
+) -> tuple[float, float, float] | None:
+    """Parse 'nx,ny[,scale]' → normalized pointer + tool scale (default 1)."""
     if not pos or not isinstance(pos, str):
         return None
     text = pos.strip()
@@ -300,11 +322,16 @@ def parse_pointer(pos: str | None) -> tuple[float, float] | None:
             return None
         nx = float(parts[0])
         ny = float(parts[1])
+        scale = float(parts[2]) if len(parts) >= 3 else 1.0
     except (TypeError, ValueError):
         return None
-    if not np.isfinite(nx) or not np.isfinite(ny):
+    if not np.isfinite(nx) or not np.isfinite(ny) or not np.isfinite(scale):
         return None
-    return (float(np.clip(nx, 0.0, 1.0)), float(np.clip(ny, 0.0, 1.0)))
+    return (
+        float(np.clip(nx, 0.0, 1.0)),
+        float(np.clip(ny, 0.0, 1.0)),
+        float(np.clip(scale, 0.35, 2.75)),
+    )
 
 
 def _as_float_mask(value: Any) -> np.ndarray | None:
@@ -359,6 +386,7 @@ def apply_exposure_tick(
     mode = str(state.get("db_mode", "burn"))
     tick_s = float(state.get("db_tick_seconds", TICK_SECONDS))
     sign = -1.0 if mode == "dodge" else 1.0
+    scale = float(np.clip(float(state.get("db_tool_scale", 1.0) or 1.0), 0.35, 2.75))
 
     # Prefer explicit pointer; otherwise keep the card where it last was.
     if position is None:
@@ -377,7 +405,9 @@ def apply_exposure_tick(
         if position is None:
             mask = np.zeros((height, width), dtype=np.float32)
         else:
-            mask = place_stamp(height, width, stamp, position[0], position[1])
+            mask = place_stamp(
+                height, width, stamp, position[0], position[1], scale=scale
+            )
     else:
         mask = mask_from_editor(
             editor_value,

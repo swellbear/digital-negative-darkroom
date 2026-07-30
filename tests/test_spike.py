@@ -404,6 +404,8 @@ def test_dodge_burn_timer_darkens_and_lightens():
         extract_tool_stamp,
         local_stops_from_state,
         mask_from_editor,
+        parse_pointer,
+        parse_pointer_state,
         place_stamp,
         relative_pass_stops,
     )
@@ -482,15 +484,39 @@ def test_dodge_burn_timer_darkens_and_lightens():
         "print_base_seconds": REFERENCE_BASE_SECONDS,
         "db_strokes": [],
         "db_stamp": card,
+        "db_tool_scale": 1.0,
     }
     ensure_accum(st, 100, 100)
     apply_exposure_tick(st, None, height=100, width=100, position=(0.2, 0.2))
-    a = st["db_accum"].copy()
+    a_peak = float(st["db_accum"][20, 20])
     apply_exposure_tick(st, None, height=100, width=100, position=(0.8, 0.8))
-    assert float(st["db_accum"][20, 20]) == float(a[20, 20])
-    assert float(st["db_accum"][80, 80]) > float(a[80, 80])
-    placed = place_stamp(100, 100, card, 0.5, 0.5)
-    assert float(placed[50, 50]) > 0.5
+    assert float(st["db_accum"][20, 20]) == a_peak  # A not increased
+    assert float(st["db_accum"][80, 80]) > 0.0
+
+    # Scroll-scale enlarges the placed stamp footprint.
+    st2 = {
+        "db_exposing": True,
+        "db_mode": "burn",
+        "db_seconds_left": 0.5,
+        "db_total_seconds": 1,
+        "db_tick_seconds": 0.5,
+        "db_base_seconds": REFERENCE_BASE_SECONDS,
+        "print_base_seconds": REFERENCE_BASE_SECONDS,
+        "db_strokes": [],
+        "db_stamp": np.ones((11, 11), dtype=np.float32),
+        "db_tool_scale": 2.0,
+    }
+    ensure_accum(st2, 80, 80)
+    apply_exposure_tick(st2, None, height=80, width=80, position=(0.5, 0.5))
+    assert float(np.sum(st2["db_accum"] > 0)) > 11 * 11
+
+    from digital_negative.dodge_burn import parse_pointer_state, place_stamp
+
+    assert parse_pointer_state("0.25,0.75,1.5") == (0.25, 0.75, 1.5)
+    assert parse_pointer("0.25,0.75,1.5") == (0.25, 0.75)
+    big = place_stamp(100, 100, np.ones((10, 10), dtype=np.float32), 0.5, 0.5, scale=2.0)
+    small = place_stamp(100, 100, np.ones((10, 10), dtype=np.float32), 0.5, 0.5, scale=1.0)
+    assert float(np.sum(big > 0)) > float(np.sum(small > 0))
 
 
 def test_preset_stamps_and_resolve():

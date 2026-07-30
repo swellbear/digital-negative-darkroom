@@ -41,6 +41,7 @@ from digital_negative.dodge_burn import (
     extract_tool_stamp,
     local_stops_from_state,
     parse_pointer,
+    parse_pointer_state,
     relative_pass_stops,
     reset_local_work,
     resolve_tool_stamp,
@@ -422,8 +423,15 @@ UI_JS = """
   window.__dbPos = '';
   window.__dbGetPos = () => window.__dbPos || '';
   window.__dbToolArmed = true;
+  window.__dbToolScale = 1.0;
+
+  const clampToolScale = (s) => Math.min(2.75, Math.max(0.35, s));
+
+  const formatPos = (nx, ny) =>
+    Number(nx).toFixed(4) + ',' + Number(ny).toFixed(4) + ',' + clampToolScale(window.__dbToolScale || 1).toFixed(3);
 
   const writePosBox = (text) => {
+    // If caller passes only x,y keep current scale; formatPos used for live writes.
     window.__dbPos = text || '';
     const root = document.querySelector('#db_pos');
     if (!root) return;
@@ -464,9 +472,28 @@ UI_JS = """
     };
 
     root.addEventListener('wheel', (e) => {
-      if (root.classList.contains('db-waving')) return;
       const img = findImg();
       if (!img) return;
+      // Live print: scroll = resize dodge/burn tool. Ctrl/Meta+scroll = zoom.
+      if (sel === '#live_preview' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+        window.__dbToolScale = clampToolScale((window.__dbToolScale || 1) * factor);
+        const n = (() => {
+          const r = img.getBoundingClientRect();
+          if (r.width < 2 || r.height < 2) return null;
+          const nx = (e.clientX - r.left) / r.width;
+          const ny = (e.clientY - r.top) / r.height;
+          if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return [0.5, 0.5];
+          return [nx, ny];
+        })();
+        if (n) writePosBox(formatPos(n[0], n[1]));
+        // Refresh outline at pointer (or resting center).
+        const flag = readFlag();
+        if (flag) showToolAt(e.clientX, e.clientY, flag, false);
+        return;
+      }
+      if (root.classList.contains('db-waving')) return;
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
       scale = Math.min(10, Math.max(0.4, scale * factor));
@@ -628,7 +655,8 @@ UI_JS = """
     }
     const r = img.getBoundingClientRect();
     const frac = Math.min(0.55, Math.max(0.12, flag.frac || 0.28));
-    const size = Math.max(48, frac * Math.min(r.width, r.height) * 1.15);
+    const toolScale = clampToolScale(window.__dbToolScale || 1);
+    const size = Math.max(40, frac * Math.min(r.width, r.height) * 1.15 * toolScale);
     const stroke = (flag.mode || '').toLowerCase().startsWith('dodge') ? '#66ccff' : '#ffcc66';
     const svg = tool.querySelector('.db-tool-svg');
     const fillImg = tool.querySelector('.db-tool-fill');
@@ -661,16 +689,17 @@ UI_JS = """
     const r = img.getBoundingClientRect();
     if (r.width < 8 || r.height < 8) return;
     showToolAt(r.left + r.width / 2, r.top + r.height / 2, flag, true);
-    if (flag.exposing && !window.__dbPos) writePosBox('0.5000,0.5000');
+    if (flag.exposing && !window.__dbPos) writePosBox(formatPos(0.5, 0.5));
   };
 
   const syncWave = () => {
     const flag = readFlag();
     const live = document.querySelector('#live_preview');
     const exposing = !!(flag && flag.exposing);
+    const wasExposing = document.body.classList.contains('db-exposing');
     document.body.classList.toggle('db-exposing', exposing);
     if (!exposing) {
-      writePosBox('');
+      // Keep last nx,ny,scale so Start / scroll size survive leaving the print.
       window.__dbScrolled = false;
       if (live) live.classList.remove('db-waving');
       // Keep a faint resting preview on the print so the card is visible
@@ -687,6 +716,10 @@ UI_JS = """
         live.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
         window.__dbScrolled = true;
       }
+    }
+    if (!wasExposing) {
+      // Preserve scroll-wheel tool size when the timer arms.
+      writePosBox(formatPos(0.5, 0.5));
     }
     if (!window.__dbHoveringPrint) placeRestingCard(live, flag);
   };
@@ -713,7 +746,10 @@ UI_JS = """
     window.__dbHoveringPrint = true;
     forceNoCursor(live);
     if (flag.exposing) {
-      writePosBox(n[0].toFixed(4) + ',' + n[1].toFixed(4));
+      writePosBox(formatPos(n[0], n[1]));
+    } else {
+      // Keep scale+pos warm so Start picks up the size you scrolled to.
+      writePosBox(formatPos(n[0], n[1]));
     }
     showToolAt(e.clientX, e.clientY, flag, false);
   };
@@ -1717,12 +1753,13 @@ def _pass_math_md(base_seconds, pass_seconds, mode) -> str:
         return (
             f"**Pass math** — dodge **{sec:g}s** of **{base:g}s** base "
             f"≈ **{stops:+.2f} stops** if the card is held still "
-            f"(area gets {max(base - min(sec, base * 0.95), base * 0.05):.1f}s of light)."
+            f"(holds back light → **lighter** print; area gets "
+            f"{max(base - min(sec, base * 0.95), base * 0.05):.1f}s of enlarger light)."
         )
     return (
         f"**Pass math** — burn **{sec:g}s** on **{base:g}s** base "
         f"≈ **{stops:+.2f} stops** if held still "
-        f"(area gets {base + sec:.1f}s of light)."
+        f"(adds enlarger light → **darker** print; area gets {base + sec:.1f}s of light)."
     )
 
 
@@ -1814,7 +1851,7 @@ def _wave_banner_html(state) -> str:
     mode = str(state.get("db_mode", "burn"))
     verb = "DODGE" if mode == "dodge" else "BURN"
     left = max(0, int(np.ceil(float(state.get("db_seconds_left", 0.0)))))
-    tip = "hold back light" if mode == "dodge" else "add light"
+    tip = "hold back light → lighter print" if mode == "dodge" else "add enlarger light → darker print"
     return (
         f'<div class="db-wave-active" role="status">'
         f'<span class="db-wave-arrow">↓</span>'
@@ -1830,7 +1867,7 @@ LIVE_WAVE_LABEL = "→ WAVE YOUR CARD OVER THIS PRINT ←"
 
 
 def start_dodge_burn(
-    mode, seconds, shape_id, paper_id, print_exposure, print_grade, print_contrast, editor, state
+    mode, seconds, shape_id, paper_id, print_exposure, print_grade, print_contrast, editor, db_pos, state
 ):
     if not state or state.get("development_full") is None:
         raise gr.Error("Commit Develop first — dodge/burn happens on the print.")
@@ -1860,6 +1897,10 @@ def start_dodge_burn(
             "Shorten the dodge timer or lengthen the base."
         )
 
+    parsed = parse_pointer_state(db_pos)
+    tool_scale = float(parsed[2]) if parsed is not None else 1.0
+    seed_nx, seed_ny = (0.5, 0.5) if parsed is None else (parsed[0], parsed[1])
+
     state = {**state}
     state = _remember_print_seconds(state, base_seconds)
     state["db_exposing"] = True
@@ -1870,21 +1911,22 @@ def start_dodge_burn(
     state["db_feather_px"] = 4.0
     state["db_stamp"] = stamp
     state["db_shape"] = str(shape_id)
+    state["db_tool_scale"] = tool_scale
     tint = (120, 200, 255) if mode == "dodge" else (255, 200, 90)
     # Compact cursor image; full-resolution stamp stays in state for exposure.
     cursor = stamp
     mx = max(int(stamp.shape[0]), int(stamp.shape[1]), 1)
     if mx > 240:
-        scale = 240.0 / mx
-        nh = max(1, int(round(stamp.shape[0] * scale)))
-        nw = max(1, int(round(stamp.shape[1] * scale)))
+        cursor_scale = 240.0 / mx
+        nh = max(1, int(round(stamp.shape[0] * cursor_scale)))
+        nw = max(1, int(round(stamp.shape[1] * cursor_scale)))
         from digital_negative.dodge_burn import _resize_mask
 
         cursor = _resize_mask(stamp, nh, nw)
     state["db_stamp_url"] = stamp_to_png_data_url(cursor, tint=tint)
     state["db_stamp_frac"] = float(stamp.shape[1]) / float(max(w, 1))
-    # Seed center so a resting card still burns/dodges until waved.
-    state["db_last_pos"] = [0.5, 0.5]
+    # Seed last pointer (and scroll size) so a resting card still applies.
+    state["db_last_pos"] = [float(seed_nx), float(seed_ny)]
     state["db_applied_ticks"] = 0
     ensure_accum(state, h, w)
 
@@ -1892,8 +1934,10 @@ def start_dodge_burn(
     total_stops = relative_pass_stops(seconds, base_seconds, mode)
     status = (
         f"**{verb}** — {seconds}s of {base_seconds:g}s base · ~{total_stops:+.2f} stops if held still.  \n"
-        f"_Move your pointer over the highlighted **live print** (right). "
-        f"The card follows you. Result appears when the timer ends._"
+        f"_Wave over the highlighted **live print** (right). "
+        f"**Scroll** to resize the card. "
+        f"{'Adds enlarger light → darker.' if mode == 'burn' else 'Holds back light → lighter.'} "
+        f"Result appears when the timer ends._"
     )
     timer_md = (
         f"**{verb}… {seconds}s** — look right → wave the card over the highlighted print\n\n"
@@ -1905,6 +1949,7 @@ def start_dodge_burn(
         summary = status
     st, hi = _split_summary(summary)
     state = {**state, "summary_cache": summary, "viewer_mode": "live"}
+    seed_pos = f"{seed_nx:.4f},{seed_ny:.4f},{tool_scale:.3f}"
     return (
         gr.update(label=LIVE_WAVE_LABEL),
         timer_md,
@@ -1913,7 +1958,7 @@ def start_dodge_burn(
         state,
         gr.update(active=True),
         _db_flag_html(state),
-        "0.5000,0.5000",
+        seed_pos,
         _wave_banner_html(state),
     )
 
@@ -1990,7 +2035,10 @@ def tick_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, pos, 
         )
 
     h, w = _db_target_shape(state)
-    pointer = parse_pointer(pos)
+    parsed = parse_pointer_state(pos)
+    pointer = None if parsed is None else (parsed[0], parsed[1])
+    if parsed is not None:
+        state = {**state, "db_tool_scale": float(parsed[2])}
     apply_exposure_tick(state, None, height=h, width=w, position=pointer)
     left = float(state.get("db_seconds_left", 0.0))
     still = bool(state.get("db_exposing"))
@@ -2477,9 +2525,10 @@ def build_ui() -> gr.Blocks:
                     print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter nudge")
                     with gr.Accordion("Dodge & burn · enlarger easel", open=True):
                         gr.Markdown(
-                            "The **print on the right** is the easel. Pick a card shape — its outline "
-                            "already follows your pointer on the print (no magnifying glass). "
-                            "Set the pass time, Start, then wave. Reset clears local work only.",
+                            "The **print on the right** is the easel. Pick a card shape — outline "
+                            "follows your pointer. **Scroll** over the print to resize the tool. "
+                            "Burn adds enlarger light (**darker**); dodge holds light back (**lighter**). "
+                            "Start, then wave. Reset clears local work only.",
                             elem_id="db_hint",
                         )
                         db_shape = gr.Radio(
@@ -2507,7 +2556,10 @@ def build_ui() -> gr.Blocks:
                             visible=False,
                         )
                         db_mode = gr.Radio(
-                            choices=[("Dodge (hold back light)", "dodge"), ("Burn (add light)", "burn")],
+                            choices=[
+                                ("Dodge — hold back light (lighter print)", "dodge"),
+                                ("Burn — add enlarger light (darker print)", "burn"),
+                            ],
                             value="burn",
                             label="Mode",
                         )
@@ -2749,6 +2801,7 @@ def build_ui() -> gr.Blocks:
                 print_grade,
                 print_contrast,
                 db_editor,
+                db_pos,
                 state,
             ],
             outputs=[
