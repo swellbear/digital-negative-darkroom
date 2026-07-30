@@ -102,13 +102,18 @@ def _profile_path(paths, profile_id: str) -> Path:
 
 
 def _resolve_input(file_obj, sample_path: str | None) -> str | None:
+    """Prefer an uploaded file over the sample dropdown when both are set."""
+    upload_path = None
+    if file_obj is not None:
+        if isinstance(file_obj, str):
+            upload_path = file_obj
+        else:
+            upload_path = getattr(file_obj, "name", None) or str(file_obj)
+        if upload_path:
+            return upload_path
     if sample_path:
         return sample_path
-    if file_obj is None:
-        return None
-    if isinstance(file_obj, str):
-        return file_obj
-    return getattr(file_obj, "name", None) or str(file_obj)
+    return None
 
 
 def _to_rgb_u8(gray_float: np.ndarray, *, assume_linear: bool = False) -> np.ndarray:
@@ -803,9 +808,13 @@ def build_ui() -> gr.Blocks:
                     elem_id="ritual_status",
                 )
                 with gr.Accordion("1 · Ingest", open=True):
-                    sample = gr.Dropdown(choices=SAMPLE_CHOICES, value=default_sample, label="Sample raw")
+                    sample = gr.Dropdown(
+                        choices=SAMPLE_CHOICES,
+                        value=default_sample,
+                        label="Sample raw (used if no upload)",
+                    )
                     file_in = gr.File(
-                        label="Or upload",
+                        label="Upload your file (overrides sample)",
                         file_types=[
                             ".arw", ".cr2", ".cr3", ".nef", ".dng", ".raf", ".orf", ".rw2",
                             ".tif", ".tiff", ".jpg", ".jpeg", ".png",
