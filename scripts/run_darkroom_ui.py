@@ -655,6 +655,45 @@ body.drawer-collapsed #drawer_host {
   word-break: break-word !important;
   white-space: pre-wrap !important;
 }
+/* Markdown code spans default to a near-white fill, which on this dark
+   chrome turned every logged value into a glaring highlight. */
+#history_box code,
+#history_box pre,
+#history_box kbd,
+#history_box samp,
+#drawer_host code,
+#module_panel code {
+  background: rgba(255, 255, 255, 0.07) !important;
+  color: var(--dr-accent-strong) !important;
+  border: 1px solid var(--dr-border) !important;
+  border-radius: 4px !important;
+  padding: 0 3px !important;
+  font-size: 0.95em !important;
+  box-shadow: none !important;
+}
+#history_box pre {
+  padding: 3px 5px !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+#history_box pre code {
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+}
+#history_box strong { color: var(--dr-text) !important; }
+#history_box em { color: var(--dr-text-dim) !important; }
+#history_box a { color: var(--dr-accent-strong) !important; }
+/* Table-ish log rows and blockquotes were also light-filled. */
+#history_box blockquote {
+  border-left: 2px solid var(--dr-accent-border) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  margin: 2px 0 !important;
+  padding: 2px 6px !important;
+}
+#history_box mark {
+  background: var(--dr-accent-soft) !important;
+  color: var(--dr-text) !important;
+}
 
 /* Preview fills remaining viewport — image scales to the stage (object-fit: contain) */
 #preview_col {
@@ -3803,7 +3842,13 @@ def commit_develop(film_id, developer_id, development_minutes, contrast, grain, 
         "db_seconds_left": 0,
         "db_strokes": [],
     }
+    neg_download = _write_negative_package(neg_full, dn)
+    state["dl_negative"] = neg_download
     return (
+        gr.update(
+            choices=[("Negative", "negative")], value="negative", visible=True
+        ),
+        gr.update(value=neg_download, label="⇣ Download negative", visible=True),
         _viewer_frame(state, live=live_view, neg=neg_view),
         state.get("original_ref"),
         state.get("latent_ref"),
@@ -3825,24 +3870,71 @@ def commit_develop(film_id, developer_id, development_minutes, contrast, grain, 
     )
 
 
-def _write_print_file(print_rgb, dn, paper, grade, exposure) -> str:
-    """Save the committed print at full resolution for download."""
-    from PIL import Image
+def _safe_name(text: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in str(text)).strip("-")
 
-    source = dn.metadata.get("source", {}).get("original_filename") or "print"
-    stem = Path(str(source)).stem or "print"
-    safe_paper = "".join(
-        ch if ch.isalnum() or ch in "-_" else "-" for ch in str(paper.name)
-    ).strip("-")
-    name = f"{stem}__{safe_paper}_g{float(grade):.1f}_{float(exposure):g}s.png"
 
-    out_dir = Path(tempfile.gettempdir()) / "darkroom_prints"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / name
+def _source_stem(dn) -> str:
+    source = dn.metadata.get("source", {}).get("original_filename") or "frame"
+    return Path(str(source)).stem or "frame"
+
+
+def _downloads_dir() -> Path:
+    out = Path(tempfile.gettempdir()) / "darkroom_downloads"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def _save_png(rgb, path: Path) -> Path:
     # optimize=True buys almost nothing on photographic data and costs time on
     # a full-res frame, so stay on the default compression.
-    Image.fromarray(np.asarray(print_rgb).astype(np.uint8)).save(path, format="PNG")
+    from PIL import Image
+
+    Image.fromarray(np.asarray(rgb).astype(np.uint8)).save(path, format="PNG")
+    return path
+
+
+def _zip_package(members: list[tuple[str, Path]], zip_name: str) -> str:
+    """Bundle files as <folder>/<file> inside a zip, so they unpack into
+    print/ and negative/ directories rather than loose images."""
+    import zipfile
+
+    path = _downloads_dir() / zip_name
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as zf:
+        for arcname, src in members:
+            zf.write(src, arcname=arcname)
     return str(path)
+
+
+def _negative_png(neg_rgb, dn) -> Path:
+    stem = _source_stem(dn)
+    return _save_png(neg_rgb, _downloads_dir() / f"{stem}_negative.png")
+
+
+def _write_negative_package(neg_rgb, dn) -> str:
+    """Negative on its own — unpacks into negative/."""
+    stem = _source_stem(dn)
+    png = _negative_png(neg_rgb, dn)
+    return _zip_package([(f"negative/{png.name}", png)], f"{stem}_negative.zip")
+
+
+def _write_print_packages(print_rgb, dn, paper, grade, exposure) -> tuple[str, str]:
+    """(print-only, print+negative) zips. Print unpacks into print/, the
+    combined package into print/ and negative/ side by side."""
+    stem = _source_stem(dn)
+    recipe = f"{_safe_name(paper.name)}_g{float(grade):.1f}_{float(exposure):g}s"
+    print_png = _save_png(print_rgb, _downloads_dir() / f"{stem}__{recipe}.png")
+
+    print_only = _zip_package(
+        [(f"print/{print_png.name}", print_png)], f"{stem}__{recipe}_print.zip"
+    )
+
+    members = [(f"print/{print_png.name}", print_png)]
+    neg_png = _downloads_dir() / f"{stem}_negative.png"
+    if neg_png.exists():
+        members.append((f"negative/{neg_png.name}", neg_png))
+    combined = _zip_package(members, f"{stem}__{recipe}_print+negative.zip")
+    return print_only, combined
 
 
 def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
@@ -3884,8 +3976,17 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         f"**Print locked** — {paper.name} · g{float(print_grade):.1f} · "
         f"{_print_timer_label(print_exposure)}{db_note}\n\n{_history_md(dn)}"
     )
-    download_path = _write_print_file(print_full, dn, paper, print_grade, print_exposure)
-    state = {**state, "print": result, "live_rgb": live_rgb, "summary_cache": summary}
+    print_only, print_plus_neg = _write_print_packages(
+        print_full, dn, paper, print_grade, print_exposure
+    )
+    state = {
+        **state,
+        "print": result,
+        "live_rgb": live_rgb,
+        "summary_cache": summary,
+        "dl_print_only": print_only,
+        "dl_print_negative": print_plus_neg,
+    }
     return (
         live_rgb,
         state.get("original_ref"),
@@ -3898,7 +3999,16 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         gr.update(interactive=False),
         gr.update(interactive=False),
         gr.update(interactive=True),
-        gr.update(value=download_path, visible=True),
+        gr.update(value=print_only, label="⇣ Download print", visible=True),
+        gr.update(
+            choices=[
+                ("Print only", "print"),
+                ("Print + negative", "both"),
+                ("Negative only", "negative"),
+            ],
+            value="print",
+            visible=True,
+        ),
         state,
     )
 
@@ -4377,10 +4487,12 @@ def unlock_develop(state):
         off,
         gr.update(open=True),
         gr.update(open=True),
+        # download affordances no longer match the working state
+        gr.update(visible=False),
+        gr.update(visible=False),
         state,
         "develop",
     )
-
 
 def seed_dodge_burn_editor(state):
     """After Commit Develop — prepare the enlarger-card controls."""
@@ -4616,6 +4728,7 @@ def unlock_print(state):
         off,
         gr.update(open=True),
         gr.update(visible=False),
+        gr.update(visible=False),
         state,
     )
 
@@ -4660,6 +4773,7 @@ def reset_session():
         0.0,
         DEFAULT_CROP_RECT,
         "free",
+        gr.update(visible=False),
         gr.update(visible=False),
         None,
         "ingest",
@@ -4761,8 +4875,15 @@ def build_ui() -> gr.Blocks:
                                 "Commit Print", interactive=False, variant="primary", size="sm"
                             )
                             unlock_print_btn = gr.Button("Unlock", interactive=False, size="sm")
+                        download_scope = gr.Radio(
+                            choices=[("Negative", "negative")],
+                            value="negative",
+                            label="Download",
+                            visible=False,
+                            elem_id="download_scope",
+                        )
                         download_print_btn = gr.DownloadButton(
-                            "⇣ Download print",
+                            "⇣ Download negative",
                             visible=False,
                             size="sm",
                             elem_id="download_print",
@@ -5089,6 +5210,7 @@ def build_ui() -> gr.Blocks:
             fn=commit_develop,
             inputs=[film, developer, development_minutes, contrast, grain, state],
             outputs=[
+                download_scope, download_print_btn,
                 live_out, original_out, latent_out, neg_out, status, history,
                 film, developer, development_minutes, contrast, grain,
                 develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
@@ -5171,7 +5293,9 @@ def build_ui() -> gr.Blocks:
                 film, developer, development_minutes, contrast, grain,
                 develop_btn, unlock_develop_btn, print_btn,
                 paper, print_exposure, print_grade, print_contrast, unlock_print_btn,
-                develop_acc, print_acc, state, active_drawer,
+                develop_acc, print_acc,
+                download_print_btn, download_scope,
+                state, active_drawer,
             ],
         ).then(
             fn=live_preview_high,
@@ -5185,8 +5309,23 @@ def build_ui() -> gr.Blocks:
             outputs=[
                 live_out, original_out, latent_out, neg_out, status, history,
                 paper, print_exposure, print_grade, print_contrast,
-                print_btn, unlock_print_btn, download_print_btn, state,
+                print_btn, unlock_print_btn, download_print_btn, download_scope, state,
             ],
+        )
+
+        # Both packages are written at commit time, so switching scope just
+        # repoints the button at the file the user asked for.
+        def _pick_download(scope, state):
+            key, label = {
+                "both": ("dl_print_negative", "⇣ Download print + negative"),
+                "negative": ("dl_negative", "⇣ Download negative"),
+            }.get(scope, ("dl_print_only", "⇣ Download print"))
+            return gr.update(value=(state or {}).get(key), label=label)
+
+        download_scope.change(
+            fn=_pick_download,
+            inputs=[download_scope, state],
+            outputs=[download_print_btn],
         )
 
         unlock_print_btn.click(
@@ -5195,7 +5334,8 @@ def build_ui() -> gr.Blocks:
             outputs=[
                 live_out, status, history,
                 paper, print_exposure, print_grade, print_contrast,
-                print_btn, unlock_print_btn, print_acc, download_print_btn, state,
+                print_btn, unlock_print_btn, print_acc, download_print_btn,
+                download_scope, state,
             ],
         ).then(
             fn=live_preview_high,
@@ -5217,7 +5357,7 @@ def build_ui() -> gr.Blocks:
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
                 apply_framing_btn, reset_framing_btn, auto_crop_btn,
                 straighten_deg, crop_rect, crop_ratio,
-                download_print_btn,
+                download_print_btn, download_scope,
                 state, active_drawer,
             ],
         )
