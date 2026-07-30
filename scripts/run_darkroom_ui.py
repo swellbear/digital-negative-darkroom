@@ -142,10 +142,11 @@ html, body {
 }
 #app_header p, #app_header .md, #app_header ul { display: none !important; }
 
-/* Fixed non-scrolling workspace — leave room for Gradio footer */
+/* Fixed non-scrolling workspace — leave room for Gradio footer.
+   min-height keeps a short drawer (e.g. Frame) from collapsing the print. */
 #main_workspace {
   flex: 1 1 auto !important;
-  min-height: 0 !important;
+  min-height: calc(100vh - 96px) !important;
   height: 100% !important;
   max-height: calc(100vh - 64px) !important;
   display: flex !important;
@@ -312,7 +313,7 @@ body.drawer-collapsed #drawer_host {
 #preview_col {
   flex: 1 1 auto !important;
   min-width: 0 !important;
-  min-height: 0 !important;
+  min-height: calc(100vh - 96px) !important;
   height: 100% !important;
   display: flex !important;
   flex-direction: column !important;
@@ -467,7 +468,25 @@ body.drawer-collapsed #drawer_host {
   box-shadow: 0 12px 40px rgba(0,0,0,0.55) !important;
   display: none !important;
 }
-.float-toolbar.is-open { display: block !important; }
+/* Gradio renders the Group as wrapper + inner div sharing the elem_id, so the
+   inner copy must open with the outer and drop the fixed-panel chrome. */
+.float-toolbar.is-open,
+.float-toolbar.is-open .float-toolbar { display: block !important; }
+.float-toolbar .float-toolbar {
+  position: static !important;
+  inset: auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+  z-index: auto !important;
+}
 .float-toolbar .float-title {
   font-size: 0.85rem;
   font-weight: 650;
@@ -1538,11 +1557,16 @@ UI_JS = """
     if (id === 'float_easel') setTimeout(() => { try { syncWave(); } catch (_) {} }, 30);
     const pad = 12;
     const w = Math.min(420, window.innerWidth - 24);
-    let left = Math.min(Math.max(pad, x), window.innerWidth - w - pad);
-    let top = Math.min(Math.max(pad, y), window.innerHeight - 120);
+    const left = Math.min(Math.max(pad, x), window.innerWidth - w - pad);
     el.style.left = left + 'px';
-    el.style.top = top + 'px';
+    el.style.top = Math.max(pad, y) + 'px';
     el.style.width = w + 'px';
+    // Measure once open so a tall panel is lifted to stay on screen.
+    requestAnimationFrame(() => {
+      const h = el.getBoundingClientRect().height;
+      const top = Math.max(pad, Math.min(y, window.innerHeight - h - pad));
+      el.style.top = top + 'px';
+    });
   };
 
   const ensureCtxMenu = () => {
@@ -1589,10 +1613,10 @@ UI_JS = """
         }, 0);
       } else if (act === 'crop') {
         // Defer — building the crop overlay during the menu click freezes the tab.
+        // Leave the drawer alone: the float carries the full crop controls and
+        // swapping drawers here shrank the print.
         const mx = x, my = y;
         setTimeout(() => {
-          writeActiveDrawer('frame');
-          applyDrawer('frame', { fromServer: true });
           setPreviewToolValue('frame');
           openFloat('float_crop', mx, my);
           setTimeout(() => syncOverlay(), 30);
@@ -1602,8 +1626,6 @@ UI_JS = """
         // and recurses until the tab freezes. Defer all work off the click stack.
         const mx = x, my = y;
         setTimeout(() => {
-          writeActiveDrawer('frame');
-          applyDrawer('frame', { fromServer: true });
           setPreviewToolValue('frame');
           openFloat('float_crop', mx, my);
           setTimeout(() => {
