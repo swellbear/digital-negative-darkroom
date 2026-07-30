@@ -86,10 +86,10 @@ UI_CSS = """
   max-width: 340px !important;
   position: sticky !important;
   top: 6px !important;
-  max-height: calc(100vh - 16px) !important;
-  /* Scroll the column; keep x visible so open dropdowns are not clipped */
-  overflow-y: auto !important;
-  overflow-x: visible !important;
+  /* No max-height / internal scroll — that was clipping accordion bodies
+     and developer dropdown lists so options/controls never fully appeared. */
+  max-height: none !important;
+  overflow: visible !important;
   padding-right: 8px !important;
   align-self: flex-start !important;
   z-index: 30 !important;
@@ -1354,7 +1354,7 @@ def build_ui() -> gr.Blocks:
                     "_Commit Ingest to begin._",
                     elem_id="ritual_status",
                 )
-                with gr.Accordion("1 · Ingest", open=True) as ingest_acc:
+                with gr.Accordion("1 · Ingest", open=False) as ingest_acc:
                     sample = gr.Dropdown(
                         choices=SAMPLE_CHOICES,
                         value=default_sample,
