@@ -125,6 +125,12 @@ UI_CSS = """
   --dr-accent-contrast: #20140a !important;
   --dr-radius: 9px !important;
   --dr-font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Helvetica, Arial, sans-serif !important;
+  /* One type scale for both side panels so labels stay on a single line. */
+  --dr-fs-label: 0.62rem !important;
+  --dr-fs-control: 0.63rem !important;
+  --dr-fs-note: 0.58rem !important;
+  --dr-fs-title: 0.56rem !important;
+  --dr-fs-tiny: 0.52rem !important;
 
   /* Re-point Gradio's own theme variables at the darkroom palette so
      sliders, primary buttons, and focus rings match without touching
@@ -361,15 +367,48 @@ body.drawer-collapsed #drawer_host {
   border: none !important;
   background: transparent !important;
 }
-/* Slider/number rows: label above, control below, both tight. */
+/* Slider/number rows: label above, control below, both tight.
+   Labels wrapped to two and three lines in a 176px panel, so they're
+   clamped to one line and ellipsised instead. */
 #drawer_host .label-wrap,
 #drawer_host label,
 #drawer_host [data-testid="block-label"] {
   margin: 0 !important;
   padding: 0 !important;
-  font-size: 0.6rem !important;
-  line-height: 1.1 !important;
+  font-size: var(--dr-fs-label) !important;
+  line-height: 1.15 !important;
   color: var(--dr-text-dim) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 100% !important;
+}
+/* Radio/checkbox options must stay wrappable — they're multi-word choices. */
+#drawer_host fieldset label,
+#module_panel fieldset label {
+  white-space: normal !important;
+  overflow: visible !important;
+}
+/* Gradio's .prose sets its own 14px, which dwarfed the 10px controls and let
+   the explanatory notes dominate both panels. Pin markdown to the note size. */
+#drawer_host .prose,
+#drawer_host .prose *,
+#module_panel .prose,
+#module_panel .prose *,
+#ritual_status .prose,
+#ritual_status .prose * {
+  font-size: var(--dr-fs-note) !important;
+  line-height: 1.3 !important;
+}
+#drawer_host .prose p,
+#module_panel .prose p,
+#ritual_status .prose p {
+  margin: 0 0 3px 0 !important;
+}
+#drawer_host .prose :is(h1, h2, h3, h4),
+#module_panel .prose :is(h1, h2, h3, h4) {
+  font-size: var(--dr-fs-label) !important;
+  margin: 2px 0 !important;
 }
 #drawer_host .form {
   gap: 0 !important;
@@ -379,7 +418,7 @@ body.drawer-collapsed #drawer_host {
 #drawer_host button {
   min-height: 21px !important;
   height: 21px !important;
-  font-size: 0.63rem !important;
+  font-size: var(--dr-fs-control) !important;
   padding: 1px 5px !important;
   border-radius: 5px !important;
 }
@@ -387,16 +426,16 @@ body.drawer-collapsed #drawer_host {
 #drawer_host select,
 #drawer_host .wrap-inner,
 #drawer_host .secondary-wrap input {
-  font-size: 0.62rem !important;
+  font-size: var(--dr-fs-control) !important;
   min-height: 19px !important;
   height: 19px !important;
   padding: 0 4px !important;
 }
 /* Slider track + its number box */
 #drawer_host input[type="range"] { height: 12px !important; margin: 0 !important; }
-#drawer_host .head { font-size: 0.62rem !important; margin: 0 !important; }
+#drawer_host .head { font-size: var(--dr-fs-control) !important; margin: 0 !important; }
 #drawer_host .head input[type="number"] { width: 44px !important; }
-#drawer_host .min_value, #drawer_host .max_value { font-size: 0.52rem !important; }
+#drawer_host .min_value, #drawer_host .max_value { font-size: var(--dr-fs-note) !important; }
 #drawer_host .container > .wrap,
 #drawer_host .block > .wrap { padding: 0 !important; }
 #drawer_host .icon-button-wrapper,
@@ -743,7 +782,7 @@ body.module-collapsed #module_panel {
   pointer-events: none !important;
 }
 .module_panel_title {
-  font-size: 0.58rem;
+  font-size: var(--dr-fs-title);
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -765,7 +804,7 @@ body.module-collapsed #module_panel {
 }
 #module_panel .gr-accordion > .label-wrap {
   padding: 5px 8px !important;
-  font-size: 0.68rem !important;
+  font-size: var(--dr-fs-label) !important;
   font-weight: 600 !important;
   letter-spacing: 0.01em !important;
   color: var(--dr-text) !important;
@@ -800,7 +839,7 @@ body.module-collapsed #module_panel {
 #module_panel .label-wrap span,
 #module_panel [data-testid="block-label"],
 #module_panel .head {
-  font-size: 0.58rem !important;
+  font-size: var(--dr-fs-label) !important;
   line-height: 1.1 !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -809,26 +848,26 @@ body.module-collapsed #module_panel {
 #module_panel button {
   min-height: 20px !important;
   height: 20px !important;
-  font-size: 0.6rem !important;
+  font-size: var(--dr-fs-control) !important;
   padding: 1px 5px !important;
   border-radius: 5px !important;
 }
 #module_panel .prose,
 #module_panel .prose p,
 #module_panel .md {
-  font-size: 0.57rem !important;
+  font-size: var(--dr-fs-note) !important;
   line-height: 1.2 !important;
   margin: 1px 0 !important;
 }
 #module_panel input, #module_panel select {
-  font-size: 0.58rem !important;
+  font-size: var(--dr-fs-control) !important;
   min-height: 18px !important;
   height: 18px !important;
   padding: 0 4px !important;
 }
 #module_panel input[type="range"] { height: 12px !important; }
 #module_panel .head input[type="number"] { width: 40px !important; }
-#module_panel .min_value, #module_panel .max_value { font-size: 0.5rem !important; }
+#module_panel .min_value, #module_panel .max_value { font-size: var(--dr-fs-tiny) !important; }
 #module_panel .icon-button-wrapper,
 #module_panel .reset-button { transform: scale(0.75) !important; }
 /* Radio pills wrap two-up instead of one tall column per option. */
@@ -840,7 +879,7 @@ body.module-collapsed #module_panel {
 }
 #module_panel fieldset label {
   padding: 1px 5px !important;
-  font-size: 0.56rem !important;
+  font-size: var(--dr-fs-note) !important;
   line-height: 1.15 !important;
   min-height: 0 !important;
   flex: 0 1 auto !important;
@@ -2015,6 +2054,16 @@ UI_JS = """
     }
   };
 
+  // Only one module is open at a time, so the panel never needs to scroll.
+  const collapseOtherModules = (keepId) => {
+    document.querySelectorAll('#module_panel .gr-accordion').forEach((other) => {
+      if (other.id === keepId) return;
+      const olw = other.querySelector('.label-wrap');
+      if (olw && olw.classList.contains('open')) olw.click();
+      other.setAttribute('data-mod-open', '0');
+    });
+  };
+
   // Modules react to their own open/close (arm crop overlay, show the resting
   // dodge/burn card) whether toggled by hand or by the context-menu shortcut.
   document.addEventListener('click', (e) => {
@@ -2026,6 +2075,7 @@ UI_JS = """
     setTimeout(() => {
       const open = lw.classList.contains('open');
       acc.setAttribute('data-mod-open', open ? '1' : '0');
+      if (open) collapseOtherModules(id);
       if (id === 'mod_crop') {
         if (open) {
           setPreviewToolValue('frame');
@@ -2278,9 +2328,9 @@ def _chem_time_update(film_id: str, developer_id: str, *, reset_to_normal: bool 
     family = chem.get("curve_family") or []
     if isinstance(family, list) and len(family) >= 2:
         times = ", ".join(f"{float(m['minutes']):g}" for m in sorted(family, key=lambda x: x["minutes"]))
-        label = f"Dev time (min) · N={normal:g} · family [{times}]"
+        label = f"Dev time · N={normal:g} [{times}]"
     else:
-        label = f"Dev time (min) · N={normal:g} @ 20°C (morph)"
+        label = f"Dev time · N={normal:g} @20°C"
     return gr.update(minimum=tmin, maximum=tmax, value=normal, label=label, step=0.25)
 
 
@@ -2778,10 +2828,14 @@ def _ensure_geometry_bases(state: dict) -> dict:
         state = {**state, "geometry_base": np.asarray(dn.image).copy()}
     if state.get("original_base") is None:
         # Prefer the largest original we still have (inspect > live > ref).
-        src = (
-            state.get("original_inspect")
-            or state.get("original_view")
-            or state.get("original_ref")
+        # These are numpy arrays, so `a or b` raises on the truth-value test.
+        src = next(
+            (
+                state.get(key)
+                for key in ("original_inspect", "original_view", "original_ref")
+                if state.get(key) is not None
+            ),
+            None,
         )
         if src is not None:
             state = {**state, "original_base": np.asarray(src).copy()}
@@ -4172,7 +4226,9 @@ def guided_first_print(
         straighten_u = gr.skip()
         crop_rect_u = gr.skip()
         crop_ratio_u = gr.skip()
-        inspect_out = state.get("live_inspect") or live_rgb
+        inspect_out = state.get("live_inspect")
+        if inspect_out is None:
+            inspect_out = live_rgb
         # inspect_acc removed — Inspect is a live-preview tool mode
 
     if not _locked(state, "development"):
@@ -4404,10 +4460,10 @@ def build_ui() -> gr.Blocks:
                         sample = gr.Dropdown(
                             choices=SAMPLE_CHOICES,
                             value=default_sample,
-                            label="Sample (if no upload)",
+                            label="Sample",
                         )
                         file_in = gr.File(
-                            label="Upload (overrides sample)",
+                            label="Upload",
                             file_types=[
                                 ".arw", ".cr2", ".cr3", ".nef", ".dng", ".raf", ".orf", ".rw2",
                                 ".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp",
@@ -4435,9 +4491,9 @@ def build_ui() -> gr.Blocks:
                             _INIT_TMAX,
                             value=_INIT_TNORM,
                             step=0.25,
-                            label=f"Dev time (min) · N={_INIT_TNORM:g}",
+                            label=f"Dev time · N={_INIT_TNORM:g}",
                         )
-                        contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Contrast N− / N+")
+                        contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Contrast")
                         grain = gr.Slider(0.0, 2.5, value=1.0, step=0.05, label="Grain")
                         with gr.Row():
                             develop_btn = gr.Button(
@@ -4453,11 +4509,11 @@ def build_ui() -> gr.Blocks:
                             label="Paper",
                         )
                         print_exposure = gr.Slider(
-                            2.0, 64.0, value=8.0, step=0.5, label="Base exposure (seconds)"
+                            2.0, 64.0, value=8.0, step=0.5, label="Base exposure (s)"
                         )
                         base_math_md = gr.Markdown(_base_math_md(8.0), elem_id="base_math")
-                        print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="MG filtration")
-                        print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter nudge")
+                        print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="MG grade")
+                        print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter")
                         with gr.Row():
                             print_btn = gr.Button(
                                 "Commit Print", interactive=False, variant="primary", size="sm"
@@ -4551,7 +4607,7 @@ def build_ui() -> gr.Blocks:
                     db_shape = gr.Radio(
                         choices=[(label, key) for key, label in CARD_PRESETS],
                         value="soft_oval",
-                        label="Card / wand shape",
+                        label="Card shape",
                     )
                     db_editor = gr.ImageEditor(
                         label="Custom card (paint only if shape = Custom)",
@@ -4581,7 +4637,7 @@ def build_ui() -> gr.Blocks:
                         label="Mode",
                     )
                     db_seconds = gr.Slider(
-                        1, 32, value=4, step=1, label="Pass (seconds)"
+                        1, 32, value=4, step=1, label="Pass (s)"
                     )
                     pass_math_md = gr.Markdown(_pass_math_md(8.0, 4.0, "burn"), elem_id="pass_math")
                     db_timer_md = gr.Markdown("**Ready** — Start, then wave over the print")
@@ -4607,13 +4663,13 @@ def build_ui() -> gr.Blocks:
                         elem_id="crop_ratio",
                     )
                     straighten_deg = gr.Slider(
-                        -15.0, 15.0, value=0.0, step=0.1, label="Straighten (° CW)"
+                        -15.0, 15.0, value=0.0, step=0.1, label="Straighten °"
                     )
                     with gr.Row():
                         auto_crop_rule = gr.Dropdown(
                             choices=AUTO_CROP_RULE_CHOICES,
                             value="auto",
-                            label="Auto crop rule",
+                            label="Rule",
                             scale=3,
                         )
                         auto_crop_btn = gr.Button(
