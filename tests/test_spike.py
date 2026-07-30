@@ -375,3 +375,20 @@ def test_resolve_input_prefers_upload_over_sample():
     assert mod._resolve_input(None, "/tmp/sample.nef") == "/tmp/sample.nef"
     assert mod._resolve_input(None, None) is None
     assert mod._resolve_input(None, "") is None
+
+
+def test_heif_ingest_decodes():
+    pytest.importorskip("pillow_heif")
+    from pillow_heif import register_heif_opener
+    from PIL import Image
+
+    register_heif_opener()
+    path = ROOT / "output" / "_test_heif.heic"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(np.full((40, 60, 3), 140, dtype=np.uint8)).save(path)
+    dn = ingest_path(path)
+    assert dn.image.ndim == 3
+    assert dn.image.shape[2] == 3
+    assert float(dn.image.mean()) > 0
+    assert "HEIF" in dn.metadata["ingest"]["notes"] or "HEIC" in dn.metadata["ingest"]["notes"]
+    path.unlink(missing_ok=True)

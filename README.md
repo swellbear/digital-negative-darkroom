@@ -35,7 +35,7 @@ python scripts/run_darkroom_ui.py
 
 Camera raws are demosaiced to **linear CIE XYZ** with camera white balance and **no display tone curve** (`gamma=(1,1)`). The Digital Negative stores that payload; luminance for B&W development is the **Y** channel.
 
-Rendered JPEGs/PNGs use an inverse-sRGB approximation and are marked as such in metadata — prefer raws for a true latent-image path.
+Rendered JPEGs/PNGs/HEIFs use an inverse-sRGB approximation and are marked as such in metadata — prefer raws for a true latent-image path. HEIF/HEIC/AVIF require `pillow-heif`.
 
 Color development (per-channel vs luma + color-difference) is deferred; the B&W foundation stays luminance-based.
 

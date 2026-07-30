@@ -30,6 +30,35 @@ RAW_SUFFIXES = {
     ".srw",
 }
 
+# Phone / consumer stills that Pillow can open (HEIF via pillow-heif).
+IMAGE_SUFFIXES = {
+    ".tif",
+    ".tiff",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".heic",
+    ".heif",
+    ".avif",
+}
+
+_HEIF_REGISTERED = False
+
+
+def _ensure_heif_support() -> None:
+    """Register HEIF/HEIC/AVIF openers once (no-op if pillow-heif missing)."""
+    global _HEIF_REGISTERED
+    if _HEIF_REGISTERED:
+        return
+    try:
+        from pillow_heif import register_heif_opener
+
+        register_heif_opener()
+    except ImportError:
+        pass
+    _HEIF_REGISTERED = True
+
 
 def _file_hash(path: Path, nbytes: int = 1024 * 1024) -> str:
     h = hashlib.sha256()
@@ -113,13 +142,24 @@ def _read_image_linear(path: Path) -> tuple[np.ndarray, dict[str, Any], dict[str
     """Decode a rendered image by undoing sRGB TRC (pragmatic approximation)."""
     from PIL import ImageOps
 
-    with Image.open(path) as im:
-        # Honor embedded EXIF orientation so phone JPEGs aren't sideways
-        im = ImageOps.exif_transpose(im)
-        im = im.convert("RGB")
-        arr = np.asarray(im).astype(np.float32) / 255.0
+    _ensure_heif_support()
+    suffix = path.suffix.lower()
+    try:
+        with Image.open(path) as im:
+            # Honor embedded EXIF orientation so phone JPEGs/HEIFs aren't sideways
+            im = ImageOps.exif_transpose(im)
+            im = im.convert("RGB")
+            arr = np.asarray(im).astype(np.float32) / 255.0
+    except Exception as exc:  # noqa: BLE001 — surface a clear ingest error
+        if suffix in {".heic", ".heif", ".avif"}:
+            raise RuntimeError(
+                f"Could not decode {suffix} image. Install pillow-heif "
+                f"(pip install pillow-heif) and retry. Underlying error: {exc}"
+            ) from exc
+        raise
     # Approximate inverse sRGB for a near-linear working space
     linear = np.where(arr <= 0.04045, arr / 12.92, ((arr + 0.055) / 1.055) ** 2.4)
+    kind = "HEIF/HEIC" if suffix in {".heic", ".heif"} else ("AVIF" if suffix == ".avif" else "Rendered")
     source = {
         "original_filename": path.name,
         "camera_make": "",
@@ -137,7 +177,7 @@ def _read_image_linear(path: Path) -> tuple[np.ndarray, dict[str, Any], dict[str
         "working_space": "linear_sRGB_primaries",
         "luminance_channel": "Rec709",
         "notes": (
-            "Rendered file: inverse sRGB TRC applied. This is an approximation — "
+            f"{kind} file: inverse sRGB TRC applied. This is an approximation — "
             "prefer camera raws for a true Digital Negative."
         ),
     }
