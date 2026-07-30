@@ -303,15 +303,29 @@ def parse_pointer(pos: str | None) -> tuple[float, float] | None:
     return (float(np.clip(nx, 0.0, 1.0)), float(np.clip(ny, 0.0, 1.0)))
 
 
+def _as_float_mask(value: Any) -> np.ndarray | None:
+    """Coerce Gradio-roundtripped list/ndarray masks back to float32 arrays."""
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        if value.size == 0:
+            return None
+        return value.astype(np.float32, copy=False)
+    if isinstance(value, (list, tuple)):
+        arr = np.asarray(value, dtype=np.float32)
+        if arr.ndim < 2 or arr.size == 0:
+            return None
+        return arr
+    return None
+
+
 def ensure_accum(state: dict[str, Any], height: int, width: int) -> np.ndarray:
-    accum = state.get("db_accum")
-    if (
-        not isinstance(accum, np.ndarray)
-        or accum.shape != (height, width)
-        or accum.dtype != np.float32
-    ):
+    accum = _as_float_mask(state.get("db_accum"))
+    if accum is None or accum.shape != (height, width):
         accum = np.zeros((height, width), dtype=np.float32)
-        state["db_accum"] = accum
+    else:
+        accum = accum.astype(np.float32, copy=False)
+    state["db_accum"] = accum
     return accum
 
 
@@ -342,8 +356,20 @@ def apply_exposure_tick(
     tick_s = float(state.get("db_tick_seconds", TICK_SECONDS))
     sign = -1.0 if mode == "dodge" else 1.0
 
-    stamp = state.get("db_stamp")
-    if isinstance(stamp, np.ndarray) and stamp.size:
+    # Prefer explicit pointer; otherwise keep the card where it last was.
+    if position is None:
+        last = state.get("db_last_pos")
+        if isinstance(last, (list, tuple)) and len(last) == 2:
+            try:
+                position = (float(last[0]), float(last[1]))
+            except (TypeError, ValueError):
+                position = None
+    if position is not None:
+        state["db_last_pos"] = [float(position[0]), float(position[1])]
+
+    stamp = _as_float_mask(state.get("db_stamp"))
+    if stamp is not None:
+        state["db_stamp"] = stamp  # keep coerced copy on state
         if position is None:
             mask = np.zeros((height, width), dtype=np.float32)
         else:
@@ -359,6 +385,9 @@ def apply_exposure_tick(
     accum = ensure_accum(state, height, width)
     # Accumulate light-time under the card (seconds), not prebaked stops.
     # Positive = extra burn light; negative = dodged (held back) light.
+    applied = float(mask.max()) > 1e-4
+    if applied:
+        state["db_applied_ticks"] = int(state.get("db_applied_ticks", 0)) + 1
     accum = accum + (sign * tick_s) * mask
     state["db_accum"] = accum.astype(np.float32)
 
@@ -382,6 +411,7 @@ def apply_exposure_tick(
                     ),
                     3,
                 ),
+                "applied_ticks": int(state.get("db_applied_ticks", 0)),
             }
         )
     return state["db_accum"], bool(state.get("db_exposing"))
@@ -395,6 +425,8 @@ def reset_local_work(state: dict[str, Any]) -> dict[str, Any]:
     state["db_stamp"] = None
     state["db_stamp_url"] = None
     state["db_stamp_frac"] = None
+    state["db_last_pos"] = None
+    state["db_applied_ticks"] = 0
     return state
 
 
@@ -402,11 +434,12 @@ def local_stops_from_state(state: dict[str, Any] | None) -> np.ndarray | None:
     """Local stop map from accumulated light-time, relative to the base timer."""
     if not state:
         return None
-    accum = state.get("db_accum")
-    if not isinstance(accum, np.ndarray) or not accum.size:
+    accum = _as_float_mask(state.get("db_accum"))
+    if accum is None or not accum.size:
         return None
     if float(np.max(np.abs(accum))) <= 1e-6:
         return None
+    state["db_accum"] = accum
     base = float(state.get("print_base_seconds") or state.get("db_base_seconds") or REFERENCE_BASE_SECONDS)
     return delta_seconds_to_local_stops(accum, base)
 
