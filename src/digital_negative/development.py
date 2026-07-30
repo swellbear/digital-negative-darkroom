@@ -6,7 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .curves import DEVELOPER_STYLES, FilmProfile, modify_curve
+from .chemistry import resolve_relative_time
+from .curves import FilmProfile, modify_curve
 from .digital_negative import DigitalNegative
 from .grain import apply_grain
 from .variability import process_micro_variation
@@ -60,6 +61,7 @@ def develop(
     profile: FilmProfile,
     *,
     relative_time: float | None = None,
+    development_minutes: float | None = None,
     contrast_modifier: float | None = None,
     grain_strength: float | None = None,
     developer_id: str | None = None,
@@ -70,9 +72,26 @@ def develop(
     """Apply film characteristic curve development to a Digital Negative.
 
     commit=False: live preview only — updates working params, no history/lock.
+
+    Prefer ``development_minutes`` with a named film chemistry; ``relative_time``
+    remains for legacy abstract styles and tests.
     """
     dev = dn.metadata.setdefault("development", {})
-    rel = float(relative_time if relative_time is not None else dev.get("relative_time", 1.0))
+    developer = str(
+        developer_id if developer_id is not None else dev.get("developer_id", "standard")
+    )
+    minutes_arg = development_minutes
+    if minutes_arg is None and "development_minutes" in dev and relative_time is None:
+        minutes_arg = float(dev["development_minutes"])
+    rel_arg = relative_time if relative_time is not None else (
+        None if minutes_arg is not None else float(dev.get("relative_time", 1.0))
+    )
+    rel, minutes, style = resolve_relative_time(
+        profile,
+        developer,
+        development_minutes=minutes_arg,
+        relative_time=rel_arg,
+    )
     contrast = float(
         contrast_modifier if contrast_modifier is not None else dev.get("contrast_modifier", 0.0)
     )
@@ -81,12 +100,6 @@ def develop(
         if grain_strength is not None
         else dev.get("grain_strength", profile.defaults.get("grain_strength", 1.0))
     )
-    developer = str(
-        developer_id if developer_id is not None else dev.get("developer_id", "standard")
-    )
-    if developer not in DEVELOPER_STYLES:
-        developer = "standard"
-    style = DEVELOPER_STYLES[developer]
     # Push slightly increases perceived grain; pull reduces it
     grain_eff = grain * float(style["grain_bias"]) * (0.85 + 0.25 * rel)
 
@@ -127,17 +140,18 @@ def develop(
         "version": profile.version,
         "iso": profile.iso,
     }
-    dn.metadata["development"].update(
-        {
-            "enabled": True,
-            "developer_id": developer,
-            "developer_name": style["name"],
-            "relative_time": rel,
-            "contrast_modifier": contrast,
-            "grain_strength": user_grain,
-            "process_variation": float(process_variation),
-        }
-    )
+    update = {
+        "enabled": True,
+        "developer_id": developer,
+        "developer_name": style["name"],
+        "relative_time": rel,
+        "contrast_modifier": contrast,
+        "grain_strength": user_grain,
+        "process_variation": float(process_variation),
+    }
+    if minutes is not None:
+        update["development_minutes"] = float(minutes)
+    dn.metadata["development"].update(update)
     dn.metadata.setdefault("ui_state", {})["current_stage"] = "development"
 
     if commit:
@@ -145,17 +159,19 @@ def develop(
         if "development" not in stages:
             stages.append("development")
         dn.touch()
-        dn.metadata.setdefault("history", []).append(
-            {
-                "op": "develop",
-                "film_profile_id": profile.id,
-                "developer_id": developer,
-                "relative_time": rel,
-                "contrast_modifier": contrast,
-                "grain_strength": user_grain,
-                "process_variation": float(process_variation),
-            }
-        )
+        hist = {
+            "op": "develop",
+            "film_profile_id": profile.id,
+            "developer_id": developer,
+            "developer_name": style["name"],
+            "relative_time": rel,
+            "contrast_modifier": contrast,
+            "grain_strength": user_grain,
+            "process_variation": float(process_variation),
+        }
+        if minutes is not None:
+            hist["development_minutes"] = float(minutes)
+        dn.metadata.setdefault("history", []).append(hist)
 
     return DevelopmentResult(
         density=density,

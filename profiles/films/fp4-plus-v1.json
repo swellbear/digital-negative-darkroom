@@ -2,50 +2,415 @@
   "id": "fp4-plus-v1",
   "name": "FP4 Plus",
   "type": "bw",
-  "version": "1.1",
+  "version": "1.2",
   "iso": 125,
   "manufacturer": "ILFORD / HARMAN technology",
   "grain_scale": 0.52,
   "source": {
     "document": "ILFORD FP4 Plus technical information",
     "reference_url": "https://www.ilfordphoto.com/amfile/file/download/file/1919/product/690/product_datasheet_fp4plus.pdf",
-    "process": "ILFORD ILFOTEC HC (1+31), 8 minutes at 20°C, intermittent agitation",
+    "process": "ILFORD ILFOTEC HC (1+31), 8 minutes at 20\u00b0C, intermittent agitation",
     "digitization_date": "2026-07-30",
-    "digitization_notes": "v1.1 refined approximate digitization: lower fog than HP5, clean gentle toe into a long straight line (~0.65 avg gradient), open shoulder that holds highlight scale. Distinct from Delta (slightly fuller midtones / a touch more grain) and HP5 (finer, slower, cleaner). Re-digitize from a high-res datasheet plot for production."
+    "digitization_notes": "v1.1 refined approximate digitization: lower fog than HP5, clean gentle toe into a long straight line (~0.65 avg gradient), open shoulder that holds highlight scale. Distinct from Delta (slightly fuller midtones / a touch more grain) and HP5 (finer, slower, cleaner). Re-digitize from a high-res datasheet plot for production.",
+    "chemistry_notes": "Named developers + EI 125 spiral-tank times from ILFORD FP4 Plus technical information. Base curve remains ILFOTEC HC 1+31 digitization."
   },
   "curve": {
     "x_label": "relative_log_exposure",
     "y_label": "density",
     "base_plus_fog": 0.08,
     "points": [
-      [0.50, 0.08],
-      [0.75, 0.085],
-      [0.95, 0.10],
-      [1.15, 0.14],
-      [1.35, 0.22],
-      [1.50, 0.31],
-      [1.65, 0.42],
-      [1.80, 0.55],
-      [1.95, 0.69],
-      [2.10, 0.84],
-      [2.25, 0.99],
-      [2.40, 1.14],
-      [2.55, 1.29],
-      [2.70, 1.43],
-      [2.85, 1.56],
-      [3.00, 1.68],
-      [3.20, 1.82],
-      [3.40, 1.94],
-      [3.60, 2.04],
-      [3.80, 2.12],
-      [4.00, 2.17],
-      [4.25, 2.21]
+      [
+        0.5,
+        0.08
+      ],
+      [
+        0.75,
+        0.085
+      ],
+      [
+        0.95,
+        0.1
+      ],
+      [
+        1.15,
+        0.14
+      ],
+      [
+        1.35,
+        0.22
+      ],
+      [
+        1.5,
+        0.31
+      ],
+      [
+        1.65,
+        0.42
+      ],
+      [
+        1.8,
+        0.55
+      ],
+      [
+        1.95,
+        0.69
+      ],
+      [
+        2.1,
+        0.84
+      ],
+      [
+        2.25,
+        0.99
+      ],
+      [
+        2.4,
+        1.14
+      ],
+      [
+        2.55,
+        1.29
+      ],
+      [
+        2.7,
+        1.43
+      ],
+      [
+        2.85,
+        1.56
+      ],
+      [
+        3.0,
+        1.68
+      ],
+      [
+        3.2,
+        1.82
+      ],
+      [
+        3.4,
+        1.94
+      ],
+      [
+        3.6,
+        2.04
+      ],
+      [
+        3.8,
+        2.12
+      ],
+      [
+        4.0,
+        2.17
+      ],
+      [
+        4.25,
+        2.21
+      ]
     ]
   },
   "defaults": {
-    "developer_id": "standard",
+    "developer_id": "ilfotec_hc_1_31",
+    "development_minutes": 8.0,
     "relative_time": 1.0,
     "contrast_modifier": 0.0,
     "grain_strength": 0.75
-  }
+  },
+  "chemistries": [
+    {
+      "id": "ilfotec_hc_1_31",
+      "name": "ILFOTEC HC (1+31)",
+      "normal_minutes": 8.0,
+      "time_min": 4.0,
+      "time_max": 16.0,
+      "temperature_c": 20,
+      "is_base": true,
+      "character": "balanced",
+      "ci_points": [
+        [
+          4.0,
+          0.4048
+        ],
+        [
+          4.8,
+          0.44
+        ],
+        [
+          6.0,
+          0.5
+        ],
+        [
+          8.0,
+          0.56
+        ],
+        [
+          10.0,
+          0.64
+        ],
+        [
+          12.0,
+          0.72
+        ],
+        [
+          14.4,
+          0.82
+        ],
+        [
+          16.0,
+          0.861
+        ]
+      ],
+      "source": "ILFORD FP4 Plus tech info \u00b7 EI 125"
+    },
+    {
+      "id": "ilfotec_ddx_1_4",
+      "name": "ILFOTEC DD-X (1+4)",
+      "normal_minutes": 10.0,
+      "time_min": 6.0,
+      "time_max": 18.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "balanced",
+      "ci_points": [
+        [
+          6.0,
+          0.44
+        ],
+        [
+          7.5,
+          0.5
+        ],
+        [
+          10.0,
+          0.56
+        ],
+        [
+          12.5,
+          0.64
+        ],
+        [
+          15.0,
+          0.72
+        ],
+        [
+          18.0,
+          0.82
+        ]
+      ],
+      "source": "ILFORD FP4 Plus \u00b7 EI 125"
+    },
+    {
+      "id": "id11_stock",
+      "name": "ID-11 (stock)",
+      "normal_minutes": 8.5,
+      "time_min": 5.0,
+      "time_max": 16.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "balanced",
+      "ci_points": [
+        [
+          5.0,
+          0.4048
+        ],
+        [
+          5.1,
+          0.44
+        ],
+        [
+          6.38,
+          0.5
+        ],
+        [
+          8.5,
+          0.56
+        ],
+        [
+          10.62,
+          0.64
+        ],
+        [
+          12.75,
+          0.72
+        ],
+        [
+          15.3,
+          0.82
+        ],
+        [
+          16.0,
+          0.861
+        ]
+      ],
+      "source": "ILFORD FP4 Plus \u00b7 EI 125"
+    },
+    {
+      "id": "id11_1_1",
+      "name": "ID-11 (1+1)",
+      "normal_minutes": 11.0,
+      "time_min": 7.0,
+      "time_max": 20.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "solvent",
+      "ci_points": [
+        [
+          7.0,
+          0.46
+        ],
+        [
+          8.25,
+          0.5
+        ],
+        [
+          11.0,
+          0.56
+        ],
+        [
+          13.75,
+          0.64
+        ],
+        [
+          16.5,
+          0.72
+        ],
+        [
+          19.8,
+          0.82
+        ],
+        [
+          20.0,
+          0.861
+        ]
+      ],
+      "source": "ILFORD FP4 Plus \u00b7 EI 125"
+    },
+    {
+      "id": "perceptol_stock",
+      "name": "PERCEPTOL (stock)",
+      "normal_minutes": 12.0,
+      "time_min": 8.0,
+      "time_max": 22.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "solvent",
+      "ci_points": [
+        [
+          8.0,
+          0.46
+        ],
+        [
+          9.0,
+          0.5
+        ],
+        [
+          12.0,
+          0.56
+        ],
+        [
+          15.0,
+          0.64
+        ],
+        [
+          18.0,
+          0.72
+        ],
+        [
+          21.6,
+          0.82
+        ],
+        [
+          22.0,
+          0.861
+        ]
+      ],
+      "source": "ILFORD FP4 Plus \u00b7 EI 125"
+    },
+    {
+      "id": "ilfosol3_1_9",
+      "name": "ILFOSOL 3 (1+9)",
+      "normal_minutes": 4.25,
+      "time_min": 3.0,
+      "time_max": 10.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "acutance",
+      "ci_points": [
+        [
+          3.0,
+          0.46
+        ],
+        [
+          3.19,
+          0.5
+        ],
+        [
+          4.25,
+          0.56
+        ],
+        [
+          5.31,
+          0.64
+        ],
+        [
+          6.38,
+          0.72
+        ],
+        [
+          7.65,
+          0.82
+        ],
+        [
+          9.35,
+          0.94
+        ],
+        [
+          10.0,
+          0.987
+        ]
+      ],
+      "source": "ILFORD FP4 Plus \u00b7 EI 125"
+    },
+    {
+      "id": "d76",
+      "name": "D-76 (stock)",
+      "normal_minutes": 8.0,
+      "time_min": 5.0,
+      "time_max": 16.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "balanced",
+      "ci_points": [
+        [
+          5.0,
+          0.46
+        ],
+        [
+          6.0,
+          0.5
+        ],
+        [
+          8.0,
+          0.56
+        ],
+        [
+          10.0,
+          0.64
+        ],
+        [
+          12.0,
+          0.72
+        ],
+        [
+          14.4,
+          0.82
+        ],
+        [
+          16.0,
+          0.861
+        ]
+      ],
+      "source": "ILFORD FP4 Plus non-ILFORD table \u00b7 EI 125"
+    }
+  ]
 }

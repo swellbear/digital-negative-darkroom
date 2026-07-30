@@ -2,51 +2,425 @@
   "id": "tri-x-400-v1",
   "name": "Tri-X 400",
   "type": "bw",
-  "version": "1.0",
+  "version": "1.1",
   "iso": 400,
   "manufacturer": "Kodak Alaris / Kodak Professional",
   "grain_scale": 1.12,
   "source": {
-    "document": "KODAK PROFESSIONAL TRI-X 320 and 400 Films — Technical Data F-4017 (February 2016)",
+    "document": "KODAK PROFESSIONAL TRI-X 320 and 400 Films \u2014 Technical Data F-4017 (February 2016)",
     "reference_url": "https://business.kodakmoments.com/sites/default/files/files/resources/f4017_TriX.pdf",
-    "process": "KODAK PROFESSIONAL D-76, large tank, ~8 minutes at 20°C, agitation at 1-minute intervals (near the published CI 0.56 starting recommendation; small-tank D-76 stock is 6¾ min at 20°C)",
+    "process": "KODAK PROFESSIONAL D-76, large tank, ~8 minutes at 20\u00b0C, agitation at 1-minute intervals (near the published CI 0.56 starting recommendation; small-tank D-76 stock is 6\u00be min at 20\u00b0C)",
     "digitization_date": "2026-07-30",
-    "digitization_notes": "Approximate digitization of the published 400TX / 35 mm D–logE characteristic curve for D-76 large-tank ~8 min (F-4017 p.8). Absolute log exposure (lux-seconds, bar notation) remapped onto the project's relative log-exposure axis (rel ≈ kodak_logE + 4.0). Longer softer toe than HP5, mid-curve average gradient ~0.56–0.60 matching the datasheet CI target, open highlight scale into ~2.2 D. Diffuse rms granularity listed as 17 (fine); grain_scale set slightly above HP5 for classic Tri-X texture. Re-digitize from a high-res plot for production calibration."
+    "digitization_notes": "Approximate digitization of the published 400TX / 35 mm D\u2013logE characteristic curve for D-76 large-tank ~8 min (F-4017 p.8). Absolute log exposure (lux-seconds, bar notation) remapped onto the project's relative log-exposure axis (rel \u2248 kodak_logE + 4.0). Longer softer toe than HP5, mid-curve average gradient ~0.56\u20130.60 matching the datasheet CI target, open highlight scale into ~2.2 D. Diffuse rms granularity listed as 17 (fine); grain_scale set slightly above HP5 for classic Tri-X texture. Re-digitize from a high-res plot for production calibration.",
+    "chemistry_notes": "Named developers + normal times from F-4017. Base curve remains D-76 ~8 min large-tank digitization; other chems reuse that curve with character biases. CI vs time for D-76 / HC-110 / XTOL / T-MAX approximated from published CI plots; dilute variants use synthetic CI scaled to datasheet normal."
   },
   "curve": {
     "x_label": "relative_log_exposure",
     "y_label": "density",
     "base_plus_fog": 0.24,
     "points": [
-      [0.50, 0.24],
-      [0.70, 0.245],
-      [0.90, 0.27],
-      [1.10, 0.32],
-      [1.30, 0.40],
-      [1.50, 0.50],
-      [1.70, 0.60],
-      [1.90, 0.70],
-      [2.10, 0.81],
-      [2.30, 0.92],
-      [2.50, 1.03],
-      [2.70, 1.14],
-      [2.90, 1.25],
-      [3.10, 1.36],
-      [3.30, 1.47],
-      [3.50, 1.58],
-      [3.70, 1.68],
-      [3.90, 1.78],
-      [4.10, 1.88],
-      [4.30, 1.97],
-      [4.50, 2.05],
-      [4.70, 2.12],
-      [4.90, 2.17]
+      [
+        0.5,
+        0.24
+      ],
+      [
+        0.7,
+        0.245
+      ],
+      [
+        0.9,
+        0.27
+      ],
+      [
+        1.1,
+        0.32
+      ],
+      [
+        1.3,
+        0.4
+      ],
+      [
+        1.5,
+        0.5
+      ],
+      [
+        1.7,
+        0.6
+      ],
+      [
+        1.9,
+        0.7
+      ],
+      [
+        2.1,
+        0.81
+      ],
+      [
+        2.3,
+        0.92
+      ],
+      [
+        2.5,
+        1.03
+      ],
+      [
+        2.7,
+        1.14
+      ],
+      [
+        2.9,
+        1.25
+      ],
+      [
+        3.1,
+        1.36
+      ],
+      [
+        3.3,
+        1.47
+      ],
+      [
+        3.5,
+        1.58
+      ],
+      [
+        3.7,
+        1.68
+      ],
+      [
+        3.9,
+        1.78
+      ],
+      [
+        4.1,
+        1.88
+      ],
+      [
+        4.3,
+        1.97
+      ],
+      [
+        4.5,
+        2.05
+      ],
+      [
+        4.7,
+        2.12
+      ],
+      [
+        4.9,
+        2.17
+      ]
     ]
   },
   "defaults": {
-    "developer_id": "standard",
+    "developer_id": "d76",
+    "development_minutes": 6.75,
     "relative_time": 1.0,
     "contrast_modifier": 0.0,
     "grain_strength": 1.05
-  }
+  },
+  "chemistries": [
+    {
+      "id": "d76",
+      "name": "D-76 (stock)",
+      "normal_minutes": 6.75,
+      "time_min": 4.0,
+      "time_max": 14.0,
+      "temperature_c": 20,
+      "agitation": "small_tank_30s",
+      "target_ci": 0.56,
+      "is_base": true,
+      "character": "balanced",
+      "ci_points": [
+        [
+          4.0,
+          0.38
+        ],
+        [
+          5.0,
+          0.45
+        ],
+        [
+          6.0,
+          0.52
+        ],
+        [
+          6.75,
+          0.56
+        ],
+        [
+          8.0,
+          0.62
+        ],
+        [
+          10.0,
+          0.72
+        ],
+        [
+          12.0,
+          0.8
+        ],
+        [
+          15.0,
+          0.9
+        ],
+        [
+          20.0,
+          1.0
+        ]
+      ],
+      "source": "Kodak F-4017 small-tank 20\u00b0C; CI curve approx. from p.8"
+    },
+    {
+      "id": "d76_1_1",
+      "name": "D-76 (1+1)",
+      "normal_minutes": 9.75,
+      "time_min": 6.0,
+      "time_max": 18.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "solvent",
+      "ci_points": [
+        [
+          6.0,
+          0.46
+        ],
+        [
+          7.31,
+          0.5
+        ],
+        [
+          9.75,
+          0.56
+        ],
+        [
+          12.19,
+          0.64
+        ],
+        [
+          14.62,
+          0.72
+        ],
+        [
+          17.55,
+          0.82
+        ],
+        [
+          18.0,
+          0.861
+        ]
+      ],
+      "source": "Kodak F-4017 small-tank 20\u00b0C normal 9\u00be min"
+    },
+    {
+      "id": "hc110_b",
+      "name": "HC-110 (Dilution B)",
+      "normal_minutes": 3.75,
+      "time_min": 2.5,
+      "time_max": 10.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "vigorous",
+      "ci_points": [
+        [
+          2.5,
+          0.4
+        ],
+        [
+          3.0,
+          0.48
+        ],
+        [
+          3.75,
+          0.56
+        ],
+        [
+          5.0,
+          0.68
+        ],
+        [
+          6.5,
+          0.8
+        ],
+        [
+          8.0,
+          0.92
+        ],
+        [
+          10.0,
+          1.02
+        ]
+      ],
+      "source": "Kodak F-4017 small-tank 20\u00b0C; CI approx."
+    },
+    {
+      "id": "xtol",
+      "name": "XTOL (stock)",
+      "normal_minutes": 7.0,
+      "time_min": 4.5,
+      "time_max": 16.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "solvent",
+      "ci_points": [
+        [
+          4.5,
+          0.42
+        ],
+        [
+          5.5,
+          0.5
+        ],
+        [
+          7.0,
+          0.56
+        ],
+        [
+          8.5,
+          0.64
+        ],
+        [
+          10.0,
+          0.72
+        ],
+        [
+          12.0,
+          0.82
+        ],
+        [
+          16.0,
+          0.94
+        ]
+      ],
+      "source": "Kodak F-4017 small-tank 20\u00b0C"
+    },
+    {
+      "id": "xtol_1_1",
+      "name": "XTOL (1+1)",
+      "normal_minutes": 9.0,
+      "time_min": 6.0,
+      "time_max": 18.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "solvent",
+      "ci_points": [
+        [
+          6.0,
+          0.46
+        ],
+        [
+          6.75,
+          0.5
+        ],
+        [
+          9.0,
+          0.56
+        ],
+        [
+          11.25,
+          0.64
+        ],
+        [
+          13.5,
+          0.72
+        ],
+        [
+          16.2,
+          0.82
+        ],
+        [
+          18.0,
+          0.861
+        ]
+      ],
+      "source": "Kodak F-4017 small-tank 20\u00b0C"
+    },
+    {
+      "id": "tmax",
+      "name": "T-MAX Developer",
+      "normal_minutes": 6.0,
+      "time_min": 4.0,
+      "time_max": 14.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "vigorous",
+      "ci_points": [
+        [
+          4.0,
+          0.42
+        ],
+        [
+          5.0,
+          0.5
+        ],
+        [
+          6.0,
+          0.56
+        ],
+        [
+          7.5,
+          0.66
+        ],
+        [
+          9.0,
+          0.76
+        ],
+        [
+          11.0,
+          0.88
+        ],
+        [
+          14.0,
+          1.0
+        ]
+      ],
+      "source": "Kodak F-4017 small-tank 20\u00b0C"
+    },
+    {
+      "id": "tmax_rs",
+      "name": "T-MAX RS",
+      "normal_minutes": 4.5,
+      "time_min": 3.0,
+      "time_max": 10.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "vigorous",
+      "ci_points": [
+        [
+          3.0,
+          0.46
+        ],
+        [
+          3.38,
+          0.5
+        ],
+        [
+          4.5,
+          0.56
+        ],
+        [
+          5.62,
+          0.64
+        ],
+        [
+          6.75,
+          0.72
+        ],
+        [
+          8.1,
+          0.82
+        ],
+        [
+          9.9,
+          0.94
+        ],
+        [
+          10.0,
+          0.987
+        ]
+      ],
+      "source": "Kodak F-4017 small-tank 20\u00b0C"
+    }
+  ]
 }

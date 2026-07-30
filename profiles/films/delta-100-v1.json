@@ -2,50 +2,370 @@
   "id": "delta-100-v1",
   "name": "Delta 100",
   "type": "bw",
-  "version": "1.1",
+  "version": "1.2",
   "iso": 100,
   "manufacturer": "ILFORD / HARMAN technology",
   "grain_scale": 0.38,
   "source": {
     "document": "ILFORD Delta 100 professional technical information",
     "reference_url": "https://www.ilfordphoto.com/amfile/file/download/file/1909/product/691/",
-    "process": "Representative of ID-11 / ILFOTEC-style normal development at EI 100",
+    "process": "ILFORD ID-11 stock, 8\u00bd minutes at 20\u00b0C, intermittent agitation (datasheet characteristic curve)",
     "digitization_date": "2026-07-30",
-    "digitization_notes": "v1.1 refined Level-3 curve: very low fog, slightly snappier mid-line than FP4, long clean highlight scale, fine-grain bias. Defaults to High Definition developer. Re-digitize from a high-res datasheet plot for production."
+    "digitization_notes": "v1.1 refined Level-3 curve: very low fog, slightly snappier mid-line than FP4, long clean highlight scale, fine-grain bias. Defaults to High Definition developer. Re-digitize from a high-res datasheet plot for production.",
+    "chemistry_notes": "Named developers + EI 100 spiral-tank times from ILFORD Delta 100 Professional technical information. Base curve treated as ID-11 stock normal."
   },
   "curve": {
     "x_label": "relative_log_exposure",
     "y_label": "density",
     "base_plus_fog": 0.06,
     "points": [
-      [0.45, 0.06],
-      [0.70, 0.065],
-      [0.90, 0.08],
-      [1.10, 0.12],
-      [1.30, 0.20],
-      [1.45, 0.30],
-      [1.60, 0.42],
-      [1.75, 0.56],
-      [1.90, 0.72],
-      [2.05, 0.88],
-      [2.20, 1.04],
-      [2.35, 1.20],
-      [2.50, 1.35],
-      [2.65, 1.49],
-      [2.80, 1.62],
-      [2.95, 1.74],
-      [3.15, 1.88],
-      [3.35, 2.00],
-      [3.55, 2.10],
-      [3.75, 2.17],
-      [3.95, 2.22],
-      [4.20, 2.26]
+      [
+        0.45,
+        0.06
+      ],
+      [
+        0.7,
+        0.065
+      ],
+      [
+        0.9,
+        0.08
+      ],
+      [
+        1.1,
+        0.12
+      ],
+      [
+        1.3,
+        0.2
+      ],
+      [
+        1.45,
+        0.3
+      ],
+      [
+        1.6,
+        0.42
+      ],
+      [
+        1.75,
+        0.56
+      ],
+      [
+        1.9,
+        0.72
+      ],
+      [
+        2.05,
+        0.88
+      ],
+      [
+        2.2,
+        1.04
+      ],
+      [
+        2.35,
+        1.2
+      ],
+      [
+        2.5,
+        1.35
+      ],
+      [
+        2.65,
+        1.49
+      ],
+      [
+        2.8,
+        1.62
+      ],
+      [
+        2.95,
+        1.74
+      ],
+      [
+        3.15,
+        1.88
+      ],
+      [
+        3.35,
+        2.0
+      ],
+      [
+        3.55,
+        2.1
+      ],
+      [
+        3.75,
+        2.17
+      ],
+      [
+        3.95,
+        2.22
+      ],
+      [
+        4.2,
+        2.26
+      ]
     ]
   },
   "defaults": {
-    "developer_id": "high_definition",
+    "developer_id": "id11_stock",
+    "development_minutes": 8.5,
     "relative_time": 1.0,
     "contrast_modifier": 0.0,
     "grain_strength": 0.65
-  }
+  },
+  "chemistries": [
+    {
+      "id": "id11_stock",
+      "name": "ID-11 (stock)",
+      "normal_minutes": 8.5,
+      "time_min": 5.0,
+      "time_max": 16.0,
+      "temperature_c": 20,
+      "is_base": true,
+      "character": "solvent",
+      "ci_points": [
+        [
+          5.0,
+          0.4048
+        ],
+        [
+          5.1,
+          0.44
+        ],
+        [
+          6.38,
+          0.5
+        ],
+        [
+          8.5,
+          0.56
+        ],
+        [
+          10.62,
+          0.64
+        ],
+        [
+          12.75,
+          0.72
+        ],
+        [
+          15.3,
+          0.82
+        ],
+        [
+          16.0,
+          0.861
+        ]
+      ],
+      "source": "ILFORD Delta 100 Professional \u00b7 EI 100 (datasheet curve process)"
+    },
+    {
+      "id": "ilfotec_ddx_1_4",
+      "name": "ILFOTEC DD-X (1+4)",
+      "normal_minutes": 10.5,
+      "time_min": 6.0,
+      "time_max": 18.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "balanced",
+      "ci_points": [
+        [
+          6.0,
+          0.4048
+        ],
+        [
+          6.3,
+          0.44
+        ],
+        [
+          7.88,
+          0.5
+        ],
+        [
+          10.5,
+          0.56
+        ],
+        [
+          13.12,
+          0.64
+        ],
+        [
+          15.75,
+          0.72
+        ],
+        [
+          18.0,
+          0.756
+        ]
+      ],
+      "source": "ILFORD Delta 100 \u00b7 EI 100"
+    },
+    {
+      "id": "ilfotec_hc_1_31",
+      "name": "ILFOTEC HC (1+31)",
+      "normal_minutes": 6.0,
+      "time_min": 3.5,
+      "time_max": 12.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "balanced",
+      "ci_points": [
+        [
+          3.5,
+          0.4048
+        ],
+        [
+          3.6,
+          0.44
+        ],
+        [
+          4.5,
+          0.5
+        ],
+        [
+          6.0,
+          0.56
+        ],
+        [
+          7.5,
+          0.64
+        ],
+        [
+          9.0,
+          0.72
+        ],
+        [
+          10.8,
+          0.82
+        ],
+        [
+          12.0,
+          0.861
+        ]
+      ],
+      "source": "ILFORD Delta 100 \u00b7 EI 100"
+    },
+    {
+      "id": "microphen_stock",
+      "name": "MICROPHEN (stock)",
+      "normal_minutes": 6.5,
+      "time_min": 4.0,
+      "time_max": 14.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "vigorous",
+      "ci_points": [
+        [
+          4.0,
+          0.46
+        ],
+        [
+          4.88,
+          0.5
+        ],
+        [
+          6.5,
+          0.56
+        ],
+        [
+          8.12,
+          0.64
+        ],
+        [
+          9.75,
+          0.72
+        ],
+        [
+          11.7,
+          0.82
+        ],
+        [
+          14.0,
+          0.861
+        ]
+      ],
+      "source": "ILFORD Delta 100 \u00b7 EI 100"
+    },
+    {
+      "id": "perceptol_stock",
+      "name": "PERCEPTOL (stock)",
+      "normal_minutes": 15.0,
+      "time_min": 10.0,
+      "time_max": 24.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "solvent",
+      "ci_points": [
+        [
+          10.0,
+          0.46
+        ],
+        [
+          11.25,
+          0.5
+        ],
+        [
+          15.0,
+          0.56
+        ],
+        [
+          18.75,
+          0.64
+        ],
+        [
+          22.5,
+          0.72
+        ],
+        [
+          24.0,
+          0.756
+        ]
+      ],
+      "source": "ILFORD Delta 100 \u00b7 EI 100"
+    },
+    {
+      "id": "id11_1_1",
+      "name": "ID-11 (1+1)",
+      "normal_minutes": 11.0,
+      "time_min": 7.0,
+      "time_max": 20.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "solvent",
+      "ci_points": [
+        [
+          7.0,
+          0.46
+        ],
+        [
+          8.25,
+          0.5
+        ],
+        [
+          11.0,
+          0.56
+        ],
+        [
+          13.75,
+          0.64
+        ],
+        [
+          16.5,
+          0.72
+        ],
+        [
+          19.8,
+          0.82
+        ],
+        [
+          20.0,
+          0.861
+        ]
+      ],
+      "source": "ILFORD Delta 100 \u00b7 EI 100"
+    }
+  ]
 }
