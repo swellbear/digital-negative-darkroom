@@ -377,3 +377,141 @@ def curve_summary_markdown(report: CurveReport) -> str:
         )
 
     return "  \n".join(lines)
+
+
+
+def spot_at(
+    reflectance: np.ndarray | None,
+    density: np.ndarray | None,
+    nx: float,
+    ny: float,
+) -> dict[str, float | str]:
+    """Sample Zone / density under a normalised print pointer."""
+    if reflectance is None or np.asarray(reflectance).size == 0:
+        return {"ok": 0}
+    r = np.asarray(reflectance, dtype=np.float64)
+    h, w = r.shape[:2]
+    x = int(np.clip(round(float(nx) * (w - 1)), 0, w - 1))
+    y = int(np.clip(round(float(ny) * (h - 1)), 0, h - 1))
+    refl = float(r[y, x])
+    if density is not None and np.asarray(density).shape[:2] == (h, w):
+        dens = float(np.asarray(density, dtype=np.float64)[y, x])
+    else:
+        dens = float(-np.log10(max(refl, 1e-6)))
+    zone = float(reflectance_to_zone(refl))
+    return {
+        "ok": 1,
+        "x": x,
+        "y": y,
+        "reflectance": refl,
+        "density": dens,
+        "zone": zone,
+        "zone_label": _roman(int(round(zone))),
+    }
+
+
+def spot_markdown(sample: dict[str, float | str]) -> str:
+    if not sample.get("ok"):
+        return "_Hover the print for Zone / density._"
+    return (
+        f"**Spot** Zone `{sample['zone_label']}`"
+        f" ({float(sample['zone']):.1f}) · D `{float(sample['density']):.2f}`"
+        f" · R `{float(sample['reflectance']):.3f}`"
+    )
+
+
+def render_print_histogram(
+    reflectance: np.ndarray | None,
+    *,
+    width: int = 520,
+    height: int = 160,
+) -> np.ndarray | None:
+    """Compact reflectance histogram with Zone tick marks."""
+    if reflectance is None or np.asarray(reflectance).size == 0:
+        return None
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    r = np.asarray(reflectance, dtype=np.float64).reshape(-1)
+    r = r[np.isfinite(r)]
+    if r.size == 0:
+        return None
+    dpi = 100.0
+    fig, ax = plt.subplots(figsize=(width / dpi, height / dpi), dpi=dpi)
+    fig.patch.set_facecolor(_BG)
+    ax.set_facecolor(_PANEL)
+    log_r = np.log10(np.maximum(r, 1e-4))
+    ax.hist(log_r, bins=64, color=_ACCENT, alpha=0.85, range=(-3.0, 0.0))
+    for zone in range(ZONE_COUNT):
+        zr = zone_reflectance(zone)
+        ax.axvline(np.log10(zr), color=_GRID, linewidth=0.7, alpha=0.9)
+        if zone % 2 == 0:
+            ax.text(
+                np.log10(zr),
+                1.0,
+                _roman(zone),
+                color=_DIM,
+                fontsize=7,
+                ha="center",
+                va="bottom",
+                transform=ax.get_xaxis_transform(),
+            )
+    ax.set_xlim(-3.0, 0.0)
+    ax.set_xticks([np.log10(zone_reflectance(z)) for z in range(0, 11, 2)])
+    ax.set_xticklabels([_roman(z) for z in range(0, 11, 2)], color=_DIM, fontsize=8)
+    ax.set_yticks([])
+    ax.tick_params(colors=_DIM, labelsize=7)
+    for spine in ax.spines.values():
+        spine.set_color(_GRID)
+    ax.set_title("print reflectance · zones", color=_TEXT, fontsize=9, pad=4)
+    fig.subplots_adjust(left=0.04, right=0.98, top=0.82, bottom=0.22)
+    fig.canvas.draw()
+    buf = np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()
+    plt.close(fig)
+    return buf
+
+
+def apply_clipping_overlay(
+    preview_rgb: np.ndarray,
+    reflectance: np.ndarray | None,
+    *,
+    show_highlights: bool = True,
+    show_shadows: bool = True,
+    hi_zone: float = 7.2,
+    lo_zone: float = 1.2,
+) -> np.ndarray:
+    """Tint near-paper-white / near-Dmax regions on a preview RGB.
+
+    Zone IX–X sit above what fibre paper can return, so the highlight warning
+    arms around Zone VII (paper white) rather than a theoretical Zone X.
+    """
+    rgb = np.asarray(preview_rgb)
+    if reflectance is None or rgb.size == 0:
+        return rgb
+    r = np.asarray(reflectance, dtype=np.float32)
+    if r.shape[:2] != rgb.shape[:2]:
+        try:
+            from PIL import Image
+
+            im = Image.fromarray(r, mode="F")
+            im = im.resize((rgb.shape[1], rgb.shape[0]), resample=Image.Resampling.BILINEAR)
+            r = np.asarray(im, dtype=np.float32)
+        except Exception:
+            return rgb
+    out = rgb.astype(np.float32).copy()
+    if out.ndim == 2:
+        out = np.stack([out, out, out], axis=-1)
+    zone = reflectance_to_zone(r)
+    if show_highlights:
+        hi = zone >= hi_zone
+        out[hi, 0] = np.minimum(255.0, out[hi, 0] * 0.35 + 220)
+        out[hi, 1] = out[hi, 1] * 0.25
+        out[hi, 2] = out[hi, 2] * 0.25
+    if show_shadows:
+        lo = zone <= lo_zone
+        out[lo, 0] = out[lo, 0] * 0.25
+        out[lo, 1] = out[lo, 1] * 0.35
+        out[lo, 2] = np.minimum(255.0, out[lo, 2] * 0.35 + 200)
+    return np.clip(out, 0, 255).astype(np.uint8)

@@ -24,10 +24,15 @@ from digital_negative.auto_crop import (
     suggest_crop_box,
 )
 from digital_negative.analysis import (
+    apply_clipping_overlay,
     build_curve_report,
     curve_summary_markdown,
     render_curve_plot,
+    render_print_histogram,
+    spot_at,
+    spot_markdown,
 )
+from digital_negative.recipes import build_recipe, load_recipe, save_recipe
 from digital_negative.chemistry import (
     chemistry_choices,
     default_chemistry_id,
@@ -937,7 +942,7 @@ body.drawer-collapsed #drawer_host {
   overflow: hidden !important;
   pointer-events: none !important;
 }
-#preview_tool, #active_drawer, #crop_rect, #db_pos, #curves_open {
+#preview_tool, #active_drawer, #crop_rect, #db_pos, #curves_open, #spot_pos, #inspect_open {
   position: absolute !important;
   left: -9999px !important;
   width: 1px !important;
@@ -1139,6 +1144,38 @@ body.module-collapsed #module_panel {
 #curve_plot [data-testid="block-label"],
 #curve_plot .icon-button-wrapper { display: none !important; }
 #curve_summary { margin-bottom: 4px !important; }
+#spot_readout {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 40;
+  max-width: min(420px, 70%);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--dr-border);
+  background: rgba(18, 18, 21, 0.82);
+  color: var(--dr-text);
+  font-size: 12px;
+  pointer-events: none;
+}
+#spot_readout p { margin: 0 !important; }
+#hist_plot,
+#hist_plot > div,
+#hist_plot button,
+#hist_plot .image-container {
+  height: auto !important;
+  min-height: 120px !important;
+  max-height: none !important;
+  width: 100% !important;
+  background: var(--dr-bg-panel) !important;
+}
+#hist_plot img {
+  width: 100% !important;
+  height: auto !important;
+  object-fit: contain !important;
+}
+#module_panel #hist_plot button { height: auto !important; min-height: 120px !important; }
+
 .mod-icon {
   display: inline-flex;
   vertical-align: -2px;
@@ -1427,6 +1464,8 @@ UI_JS = """
   }, 900);
 
   window.__dbPos = '';
+  window.__spotPos = '';
+
   window.__dbGetPos = () => window.__dbPos || '';
   window.__dbToolArmed = true;
   window.__dbToolScale = 1.0;
@@ -1652,6 +1691,23 @@ UI_JS = """
     const ny = (clientY - r.top) / r.height;
     if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return null;
     return [Math.min(1, Math.max(0, nx)), Math.min(1, Math.max(0, ny))];
+  };
+
+  const writeSpotBox = (nx, ny) => {
+    const text = Number(nx).toFixed(4) + ',' + Number(ny).toFixed(4);
+    if (text === window.__spotPos) return;
+    // Throttle Gradio traffic — ~8 Hz is enough for a readout.
+    const now = performance.now();
+    if (window.__spotLastWrite && now - window.__spotLastWrite < 120) return;
+    window.__spotLastWrite = now;
+    window.__spotPos = text;
+    const root = document.querySelector('#spot_pos');
+    if (!root) return;
+    const box = root.querySelector('textarea') || root.querySelector('input');
+    if (!box || box.value === text) return;
+    box.value = text;
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    box.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
   const forceNoCursor = (live) => {
@@ -1897,7 +1953,20 @@ UI_JS = """
       // Keep scale+pos warm so Start picks up the size you scrolled to.
       writePosBox(formatPos(n[0], n[1]));
     }
+    writeSpotBox(n[0], n[1]);
     showToolAt(e.clientX, e.clientY, flag, false);
+  };
+
+  // Spot readout even when dodge/burn card is not engaged.
+  const onSpotMove = (e) => {
+    const live = document.querySelector('#live_preview');
+    const img = live && live.querySelector('img');
+    if (!img) return;
+    const flag = readFlag();
+    if (flag && flag.exposing) return;
+    const n = normOverImg(img, e.clientX, e.clientY);
+    if (!n) return;
+    writeSpotBox(n[0], n[1]);
   };
 
   let bootScheduled = false;
@@ -1917,6 +1986,11 @@ UI_JS = """
         try {
           enhance('#live_preview');
           enhance('#inspect_preview');
+          const liveSpot = document.querySelector('#live_preview');
+          if (liveSpot && liveSpot.dataset.spotReady !== '1') {
+            liveSpot.dataset.spotReady = '1';
+            liveSpot.addEventListener('mousemove', onSpotMove, { passive: true });
+          }
           hideClockChrome();
           syncWave();
         } finally {
@@ -2414,6 +2488,14 @@ UI_JS = """
           box.dispatchEvent(new Event('input', { bubbles: true }));
           box.dispatchEvent(new Event('change', { bubbles: true }));
         }
+      } else if (id === 'mod_inspect' && open) {
+        const root = document.querySelector('#inspect_open');
+        const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+        if (box) {
+          box.value = String(Date.now());
+          box.dispatchEvent(new Event('input', { bubbles: true }));
+          box.dispatchEvent(new Event('change', { bubbles: true }));
+        }
       }
     }, 30);
   });
@@ -2705,6 +2787,166 @@ def _profile_path(paths, profile_id: str) -> Path:
 
 def _film_profile(film_id: str):
     return load_film_profile(_profile_path(list_film_profiles(), film_id))
+
+
+
+
+def _print_maps(state):
+    """Reflectance / density under the current print draft."""
+    draft = (state or {}).get("print_draft")
+    if draft is None:
+        return None, None
+    return getattr(draft, "reflectance", None), getattr(draft, "print_density", None)
+
+
+def _display_live_rgb(state, live=None):
+    """Live RGB with optional A/B swap and clipping overlay."""
+    s = state or {}
+    if s.get("ab_showing") == "A" and s.get("ab_rgb") is not None:
+        return s["ab_rgb"]
+    rgb = live if live is not None else s.get("live_rgb")
+    if rgb is None:
+        return None
+    if s.get("clip_hi") or s.get("clip_lo"):
+        refl, _ = _print_maps(s)
+        return apply_clipping_overlay(
+            rgb,
+            refl,
+            show_highlights=bool(s.get("clip_hi")),
+            show_shadows=bool(s.get("clip_lo")),
+        )
+    return rgb
+
+
+def read_spot(spot_pos, state):
+    """Zone / density under the print pointer."""
+    if not state or state.get("print_draft") is None:
+        return "_Develop + print preview first, then hover the print._"
+    text = str(spot_pos or "").strip()
+    if not text or "," not in text:
+        return "_Hover the print for Zone / density._"
+    try:
+        parts = [p.strip() for p in text.split(",")]
+        nx, ny = float(parts[0]), float(parts[1])
+    except Exception:
+        return "_Hover the print for Zone / density._"
+    refl, dens = _print_maps(state)
+    return spot_markdown(spot_at(refl, dens, nx, ny))
+
+
+def refresh_inspect_tools(clip_hi, clip_lo, state):
+    """Histogram + clipping overlay for the Inspect module."""
+    state = {**(state or {})}
+    state["clip_hi"] = bool(clip_hi)
+    state["clip_lo"] = bool(clip_lo)
+    refl, _ = _print_maps(state)
+    hist = render_print_histogram(refl)
+    live = _display_live_rgb(state)
+    if hist is None:
+        hist = gr.update()
+    tip = (
+        "_Histogram of print reflectance with Zone ticks. "
+        "Clipping paints blown paper-white (red) and crushed Dmax (blue)._"
+    )
+    return hist, tip, _viewer_frame(state, live=live), state
+
+
+def pin_ab_print(state):
+    """Pin the current live print as reference A."""
+    if not state or state.get("live_rgb") is None:
+        raise gr.Error("Nothing to pin — run a print preview first.")
+    state = {
+        **state,
+        "ab_rgb": np.asarray(state["live_rgb"]).copy(),
+        "ab_showing": "live",
+    }
+    return (
+        state,
+        "**A pinned** — keep working, then toggle A / Live.",
+        gr.update(interactive=True, value="Show A"),
+    )
+
+
+def toggle_ab_print(state):
+    """Flip the large preview between pinned A and the live print."""
+    if not state or state.get("ab_rgb") is None:
+        raise gr.Error("Pin A first.")
+    showing = "A" if state.get("ab_showing") != "A" else "live"
+    state = {**state, "ab_showing": showing}
+    label = "Show Live" if showing == "A" else "Show A"
+    tip = (
+        "**Viewing A** — pinned reference."
+        if showing == "A"
+        else "**Viewing Live** — current theoretical print."
+    )
+    return (
+        _viewer_frame(state, live=_display_live_rgb(state)),
+        tip,
+        gr.update(value=label),
+        state,
+    )
+
+
+def export_recipe_file(
+    film_id, developer_id, development_minutes, contrast, grain,
+    paper_id, print_grade, print_exposure, print_contrast, recipe_name,
+):
+    recipe = build_recipe(
+        film_id=film_id,
+        developer_id=developer_id,
+        development_minutes=float(development_minutes),
+        contrast=float(contrast),
+        grain=float(grain),
+        paper_id=paper_id,
+        print_grade=float(print_grade),
+        print_exposure=float(print_exposure),
+        print_contrast=float(print_contrast),
+        name=str(recipe_name or "recipe"),
+    )
+    out = Path(tempfile.gettempdir()) / "darkroom_downloads"
+    out.mkdir(parents=True, exist_ok=True)
+    stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in (recipe_name or "recipe"))[:48]
+    path = out / f"{stem or 'recipe'}.json"
+    save_recipe(path, recipe)
+    return gr.update(value=str(path))
+
+
+def apply_recipe_file(recipe_file, state):
+    """Load a recipe JSON onto the control surface."""
+    if recipe_file is None:
+        raise gr.Error("Choose a recipe JSON first.")
+    path = recipe_file if isinstance(recipe_file, (str, Path)) else getattr(recipe_file, "name", None)
+    if not path:
+        raise gr.Error("Choose a recipe JSON first.")
+    recipe = load_recipe(path)
+    tip = f"**Recipe loaded** — {recipe.get('name', 'untitled')}."
+    film_id = recipe["film_id"]
+    profile = _film_profile(film_id)
+    chem = get_chemistry(profile, recipe["developer_id"])
+    if chem is not None:
+        tmin, tmax, _normal = time_slider_bounds(chem)
+        minutes_update = gr.update(
+            minimum=tmin,
+            maximum=tmax,
+            value=float(np.clip(recipe["development_minutes"], tmin, tmax)),
+            step=0.25,
+        )
+    else:
+        minutes_update = gr.update(value=float(recipe["development_minutes"]))
+    return (
+        gr.update(value=film_id),
+        gr.update(choices=chemistry_choices(profile), value=recipe["developer_id"]),
+        minutes_update,
+        gr.update(value=float(recipe.get("contrast", 0.0))),
+        gr.update(value=float(recipe.get("grain", 1.0))),
+        gr.update(value=recipe["paper_id"]),
+        gr.update(value=float(recipe["print_grade"])),
+        gr.update(value=float(recipe["print_exposure"])),
+        gr.update(value=float(recipe.get("print_contrast", 0.0))),
+        gr.update(value=str(recipe.get("name", ""))),
+        tip,
+        state,
+    )
 
 
 def refresh_curves(
@@ -3087,7 +3329,7 @@ def _viewer_frame(state, live=None, original=None, latent=None, neg=None):
             img = neg if neg is not None else (state or {}).get("neg_ref")
     else:
         mode = "live"
-        img = live if live is not None else (state or {}).get("live_rgb")
+        img = _display_live_rgb(state, live=live)
     return gr.update(value=img, label=_VIEWER_LABELS.get(mode, _VIEWER_LABELS["live"]))
 
 
@@ -5100,6 +5342,11 @@ def build_ui() -> gr.Blocks:
                     "_Commit Ingest to begin._",
                     elem_id="ritual_status",
                 )
+                spot_readout = gr.Markdown(
+                    "_Hover the print for Zone / density._",
+                    elem_id="spot_readout",
+                )
+                spot_pos = gr.Textbox(value="0.5000,0.5000", elem_id="spot_pos", show_label=False)
                 preview_tool = gr.Radio(
                     choices=[
                         ("print", "print"),
@@ -5148,9 +5395,28 @@ def build_ui() -> gr.Blocks:
                 gr.HTML('<div class="module_panel_title">Modules</div>')
                 with gr.Accordion("Inspect · zoom", open=False, elem_id="mod_inspect"):
                     gr.Markdown(
-                        "Scroll to zoom · drag to pan when zoomed · double-click resets · "
-                        "fullscreen for a larger view."
+                        "Scroll to zoom · drag to pan when zoomed · double-click resets. "
+                        "Hover the print for a Zone / density spot reading."
                     )
+                    hist_plot = gr.Image(
+                        label="Histogram",
+                        type="numpy",
+                        elem_id="hist_plot",
+                        height=140,
+                        buttons=[],
+                        show_label=False,
+                    )
+                    inspect_tip = gr.Markdown(
+                        "_Histogram appears once a print preview exists._",
+                        elem_id="inspect_tip",
+                    )
+                    with gr.Row():
+                        clip_hi = gr.Checkbox(label="Blown (Z VII+)", value=False)
+                        clip_lo = gr.Checkbox(label="Crushed (Z I−)", value=False)
+                    with gr.Row():
+                        pin_ab_btn = gr.Button("Pin A", size="sm")
+                        toggle_ab_btn = gr.Button("Show A", size="sm", interactive=False)
+                    inspect_open = gr.Textbox(value="", elem_id="inspect_open", show_label=False)
 
                 with gr.Accordion("Curves", open=False, elem_id="mod_curves"):
                     curve_summary = gr.Markdown(
@@ -5173,6 +5439,26 @@ def build_ui() -> gr.Blocks:
                     # rebuilt from current settings on open.
                     curves_open = gr.Textbox(
                         value="", elem_id="curves_open", show_label=False
+                    )
+
+                with gr.Accordion("Recipes", open=False, elem_id="mod_recipes"):
+                    recipe_name = gr.Textbox(
+                        value="session", label="Name", elem_id="recipe_name_box"
+                    )
+                    with gr.Row():
+                        save_recipe_btn = gr.Button("Save recipe", size="sm")
+                        recipe_download = gr.DownloadButton(
+                            "recipe.json", size="sm", elem_id="recipe_download"
+                        )
+                    recipe_file = gr.File(
+                        label="Load recipe",
+                        file_types=[".json"],
+                        height=80,
+                        elem_id="recipe_upload",
+                    )
+                    load_recipe_btn = gr.Button("Apply recipe", size="sm")
+                    recipe_tip = gr.Markdown(
+                        "_Save film / chemistry / print controls as JSON._"
                     )
 
                 with gr.Accordion("Dodge & burn", open=False, elem_id="mod_dodge_burn"):
@@ -5605,6 +5891,45 @@ def build_ui() -> gr.Blocks:
         # The JS sets #curves_open when the accordion expands.
         curves_open.change(
             fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
+        )
+
+        spot_pos.change(fn=read_spot, inputs=[spot_pos, state], outputs=[spot_readout])
+
+        inspect_inputs = [clip_hi, clip_lo, state]
+        inspect_outputs = [hist_plot, inspect_tip, live_out, state]
+        for ctrl in (clip_hi, clip_lo):
+            ctrl.change(fn=refresh_inspect_tools, inputs=inspect_inputs, outputs=inspect_outputs)
+        inspect_open.change(
+            fn=refresh_inspect_tools, inputs=inspect_inputs, outputs=inspect_outputs
+        )
+        pin_ab_btn.click(
+            fn=pin_ab_print, inputs=[state], outputs=[state, inspect_tip, toggle_ab_btn]
+        )
+        toggle_ab_btn.click(
+            fn=toggle_ab_print,
+            inputs=[state],
+            outputs=[live_out, inspect_tip, toggle_ab_btn, state],
+        )
+
+        recipe_controls = [
+            film, developer, development_minutes, contrast, grain,
+            paper, print_grade, print_exposure, print_contrast, recipe_name,
+        ]
+        save_recipe_btn.click(
+            fn=export_recipe_file,
+            inputs=recipe_controls,
+            outputs=[recipe_download],
+        )
+        load_recipe_btn.click(
+            fn=apply_recipe_file,
+            inputs=[recipe_file, state],
+            outputs=[
+                film, developer, development_minutes, contrast, grain,
+                paper, print_grade, print_exposure, print_contrast,
+                recipe_name, recipe_tip, state,
+            ],
+        ).then(
+            fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
         )
 
         # Thumbnail / button → enlarge in main preview
