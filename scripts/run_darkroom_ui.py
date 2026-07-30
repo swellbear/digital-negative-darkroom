@@ -409,6 +409,19 @@ footer, .gradio-container footer {
   flex: 0 0 40px !important;
   box-sizing: border-box !important;
 }
+/* Camera roll thumbs — compact grid in the narrow ingest drawer. */
+#camera_roll {
+  max-width: 100% !important;
+}
+#camera_roll .grid-wrap,
+#camera_roll .gallery-item,
+#camera_roll .thumb {
+  max-width: 100% !important;
+}
+#camera_roll img {
+  object-fit: cover !important;
+}
+
 /* Kill any leftover horizontal scrollbar chrome inside the drawer. */
 #drawer_host *::-webkit-scrollbar:horizontal {
   height: 0 !important;
@@ -3166,17 +3179,160 @@ if FILM_CHOICES:
 
 def _resolve_input(file_obj, sample_path: str | None) -> str | None:
     """Prefer an uploaded file over the sample dropdown when both are set."""
-    upload_path = None
+    paths = _collect_input_paths(file_obj, sample_path)
+    return paths[0] if paths else None
+
+
+def _collect_input_paths(file_obj, sample_path: str | None) -> list[str]:
+    """Collect one or more upload paths; fall back to the sample when empty."""
+    paths: list[str] = []
     if file_obj is not None:
-        if isinstance(file_obj, str):
-            upload_path = file_obj
-        else:
-            upload_path = getattr(file_obj, "name", None) or str(file_obj)
-        if upload_path:
-            return upload_path
-    if sample_path:
-        return sample_path
-    return None
+        items = file_obj if isinstance(file_obj, (list, tuple)) else [file_obj]
+        for item in items:
+            if item is None:
+                continue
+            if isinstance(item, str):
+                path = item
+            else:
+                path = getattr(item, "name", None) or str(item)
+            if path:
+                paths.append(path)
+    if not paths and sample_path:
+        paths.append(str(sample_path))
+    return paths
+
+
+# Per-frame working state lives on the session dict; the camera roll keeps a
+# snapshot list so frames can be added, switched, and removed independently.
+_ROLL_KEYS = ("roll", "roll_index")
+
+
+def _frame_payload(state: dict) -> dict:
+    return {k: v for k, v in state.items() if k not in _ROLL_KEYS}
+
+
+def _ensure_roll(state) -> dict:
+    if not state:
+        return {"roll": [], "roll_index": -1}
+    if "roll" in state:
+        return state
+    # Migrate single-frame sessions created before the camera roll existed.
+    if state.get("dn") is not None:
+        frame = _frame_payload(state)
+        return {**state, "roll": [frame], "roll_index": 0}
+    return {**state, "roll": [], "roll_index": -1}
+
+
+def _sync_active_into_roll(state) -> dict:
+    state = _ensure_roll(state)
+    roll = list(state.get("roll") or [])
+    idx = int(state.get("roll_index", -1))
+    if state.get("dn") is not None and 0 <= idx < len(roll):
+        roll[idx] = _frame_payload(state)
+        return {**state, "roll": roll}
+    return state
+
+
+def _activate_roll_index(state, index: int) -> dict:
+    state = _sync_active_into_roll(state)
+    roll = list(state.get("roll") or [])
+    if not roll:
+        return {"roll": [], "roll_index": -1}
+    index = max(0, min(int(index), len(roll) - 1))
+    activated = dict(roll[index])
+    activated["roll"] = roll
+    activated["roll_index"] = index
+    return activated
+
+
+def _roll_gallery_update(state):
+    roll = (state or {}).get("roll") or []
+    items = []
+    for i, frame in enumerate(roll):
+        thumb = frame.get("original_view")
+        if thumb is None:
+            thumb = frame.get("latent_view")
+        if thumb is None:
+            thumb = frame.get("live_rgb")
+        name = f"Frame {i + 1}"
+        dn = frame.get("dn")
+        if dn is not None:
+            name = dn.metadata.get("source", {}).get("original_filename") or name
+        items.append((thumb, f"{i + 1}. {name}"))
+    idx = (state or {}).get("roll_index")
+    if not roll or idx is None or int(idx) < 0:
+        return gr.update(value=items, selected_index=None)
+    return gr.update(value=items, selected_index=int(idx))
+
+
+def _drawer_for_frame(state) -> str:
+    locks = set(_locks(state))
+    stage = (state or {}).get("stage") or "ingest"
+    if "print" in locks or stage == "print":
+        return "print"
+    if "ingest" in locks or stage in ("development", "develop"):
+        return "develop"
+    return "ingest"
+
+
+def _build_ingest_frame(path: str | None) -> dict:
+    """Ingest one path into a fresh per-frame state payload (no roll meta)."""
+    dn = ingest_path(path or None)
+    ui = dn.metadata.setdefault("ui_state", {})
+    stages = ui.setdefault("committed_stages", [])
+    locks = ui.setdefault("locked_stages", [])
+    if "ingest" not in stages:
+        stages.append("ingest")
+    if "ingest" not in locks:
+        locks.append("ingest")
+    ui["current_stage"] = "ingest"
+    dn.metadata.setdefault("history", []).append(
+        {
+            "op": "ingest",
+            "source": dn.metadata["source"]["original_filename"],
+            "working_space": dn.metadata.get("ingest", {}).get("working_space"),
+        }
+    )
+
+    latent_full = _to_rgb_u8(dn.to_luminance(), assume_linear=True)
+    latent_view = _downscale_rgb(latent_full, LIVE_MAX_SIDE)
+    latent_inspect = _downscale_rgb(latent_full, INSPECT_MAX_SIDE)
+    latent_ref = _downscale_rgb(latent_full, REF_MAX_SIDE)
+    original_full = original_photo_preview(path, dn_image=dn.image)
+    original_view = _downscale_rgb(original_full, LIVE_MAX_SIDE)
+    original_inspect = _downscale_rgb(original_full, INSPECT_MAX_SIDE)
+    original_ref = _downscale_rgb(original_full, REF_MAX_SIDE)
+    summary = (
+        f"{_stage_banner('development', ['ingest'])}\n\n"
+        f"**Ingest locked** — `{dn.metadata['source']['original_filename']}`  \n"
+        f"_Use the live preview tools: **Frame** to crop, **Inspect** to zoom._\n\n"
+        f"{_history_md(dn)}"
+    )
+    return {
+        "dn": dn,
+        "proxy": _proxy_dn(dn, LIVE_MAX_SIDE),
+        "proxy_drag": _proxy_dn(dn, DRAG_MAX_SIDE),
+        "original_ref": original_ref,
+        "original_view": original_view,
+        "original_inspect": original_inspect,
+        "geometry_base": dn.image.copy(),
+        "original_base": original_full.copy(),
+        "latent_ref": latent_ref,
+        "latent_view": latent_view,
+        "latent_inspect": latent_inspect,
+        "neg_ref": None,
+        "neg_view": None,
+        "neg_inspect": None,
+        "live_rgb": latent_view,
+        "live_inspect": latent_inspect,
+        "viewer_mode": "live",
+        "strip_slots": list(STRIP_DEFAULT_SLOTS),
+        "development": None,
+        "development_full": None,
+        "stage": "development",
+        "summary_cache": summary,
+        "source_path": path,
+    }
 
 
 def _to_rgb_u8(gray_float: np.ndarray, *, assume_linear: bool = False) -> np.ndarray:
@@ -4005,92 +4161,196 @@ def rotate_180(state):
     return rotate_working(2, state)
 
 
-def commit_ingest(sample_path, file_obj, state):
-    path = _resolve_input(file_obj, sample_path)
-    dn = ingest_path(path or None)
-    ui = dn.metadata.setdefault("ui_state", {})
-    stages = ui.setdefault("committed_stages", [])
-    locks = ui.setdefault("locked_stages", [])
-    if "ingest" not in stages:
-        stages.append("ingest")
-    if "ingest" not in locks:
-        locks.append("ingest")
-    ui["current_stage"] = "ingest"
-    dn.metadata.setdefault("history", []).append(
-        {
-            "op": "ingest",
-            "source": dn.metadata["source"]["original_filename"],
-            "working_space": dn.metadata.get("ingest", {}).get("working_space"),
-        }
-    )
+def _stage_control_updates(state):
+    """Button interactivity for the active roll frame."""
+    on, off = gr.update(interactive=True), gr.update(interactive=False)
+    # Camera roll stays open so more frames can be added later.
+    # Clear the file widget so a later "Add to roll" (sample) does not
+    # re-ingest the previous upload batch.
+    sample_u, file_u, ingest_u = on, gr.update(interactive=True, value=None), on
+    if not state or state.get("dn") is None:
+        return sample_u, file_u, ingest_u, off, off, off, off, off
+    locks = set(_locks(state))
+    if "print" in locks:
+        return sample_u, file_u, ingest_u, off, on, off, on, on
+    if "development" in locks:
+        return sample_u, file_u, ingest_u, off, on, on, off, on
+    if "ingest" in locks:
+        return sample_u, file_u, ingest_u, on, off, off, off, on
+    return sample_u, file_u, ingest_u, off, off, off, off, on
 
-    latent_full = _to_rgb_u8(dn.to_luminance(), assume_linear=True)
-    latent_view = _downscale_rgb(latent_full, LIVE_MAX_SIDE)
-    latent_inspect = _downscale_rgb(latent_full, INSPECT_MAX_SIDE)
-    latent_ref = _downscale_rgb(latent_full, REF_MAX_SIDE)
-    original_full = original_photo_preview(path, dn_image=dn.image)
-    original_view = _downscale_rgb(original_full, LIVE_MAX_SIDE)
-    original_inspect = _downscale_rgb(original_full, INSPECT_MAX_SIDE)
-    original_ref = _downscale_rgb(original_full, REF_MAX_SIDE)
-    summary = (
-        f"{_stage_banner('development', ['ingest'])}\n\n"
-        f"**Ingest locked** — `{dn.metadata['source']['original_filename']}`  \n"
-        f"_Use the live preview tools: **Frame** to crop, **Inspect** to zoom._\n\n"
-        f"{_history_md(dn)}"
-    )
-    state = {
-        "dn": dn,
-        "proxy": _proxy_dn(dn, LIVE_MAX_SIDE),
-        "proxy_drag": _proxy_dn(dn, DRAG_MAX_SIDE),
-        "original_ref": original_ref,
-        "original_view": original_view,
-        "original_inspect": original_inspect,
-        "geometry_base": dn.image.copy(),
-        "original_base": original_full.copy(),
-        "latent_ref": latent_ref,
-        "latent_view": latent_view,
-        "latent_inspect": latent_inspect,
-        "neg_ref": None,
-        "neg_view": None,
-        "neg_inspect": None,
-        "live_rgb": latent_view,
-        "live_inspect": latent_inspect,
-        "viewer_mode": "live",
-        "strip_slots": list(STRIP_DEFAULT_SLOTS),
-        "development": None,
-        "development_full": None,
-        "stage": "development",
-        "summary_cache": summary,
-        "source_path": path,
-    }
+def _roll_session_outputs(state):
+    """UI tuple shared by add / select / remove on the camera roll."""
+    on, off = gr.update(interactive=True), gr.update(interactive=False)
+    if not state or state.get("dn") is None:
+        summary = (
+            "**1. Ingest — working** → 2. Develop → 3. Print\n\n"
+            "*Add photos to the camera roll to begin.*"
+        )
+        return (
+            None,
+            None,
+            None,
+            None,
+            *_split_summary(summary),
+            on,
+            on,
+            on,
+            off,
+            off,
+            off,
+            off,
+            gr.update(open=True),
+            gr.update(open=True),
+            gr.update(open=True),
+            off,
+            off,
+            off,
+            off,
+            off,
+            off,
+            off,
+            0.0,
+            DEFAULT_CROP_RECT,
+            "free",
+            None,
+            {"roll": [], "roll_index": -1},
+            "ingest",
+            _roll_gallery_update({"roll": [], "roll_index": -1}),
+            off,
+        )
+
+    summary = state.get("summary_cache") or ""
+    n = len(state.get("roll") or [])
+    idx = int(state.get("roll_index", 0)) + 1
+    if n > 1 and "**Ingest locked**" in summary:
+        summary = summary.replace(
+            "**Ingest locked**",
+            f"**Ingest locked** (frame {idx}/{n})",
+            1,
+        )
+    elif n > 1 and "frame " not in summary.split("\n", 1)[0]:
+        banner_note = f"_Camera roll · frame {idx}/{n}_\n\n"
+        if banner_note.strip() not in summary:
+            summary = summary.replace("\n\n", f"\n\n{banner_note}", 1)
+
+    (
+        sample_u,
+        file_u,
+        ingest_u,
+        develop_u,
+        unlock_dev_u,
+        print_u,
+        unlock_print_u,
+        remove_u,
+    ) = _stage_control_updates(state)
+
+    live = state.get("live_rgb")
+    if live is None:
+        live = state.get("latent_view")
+    inspect_live = state.get("live_inspect")
+    if inspect_live is None:
+        inspect_live = state.get("latent_inspect")
+    mode = state.get("viewer_mode", "live")
     return (
-        gr.update(value=latent_view, label=_VIEWER_LABELS["live"]),
-        original_ref,
-        latent_ref,
-        None,
+        gr.update(value=live, label=_VIEWER_LABELS.get(mode, _VIEWER_LABELS["live"])),
+        state.get("original_ref"),
+        state.get("latent_ref"),
+        state.get("neg_ref"),
         *_split_summary(summary),
-        gr.update(interactive=False),
-        gr.update(interactive=False),
-        gr.update(interactive=False),
-        gr.update(interactive=True),
-        gr.update(interactive=False),
-        gr.update(open=False),  # collapse Ingest
-        gr.update(open=True),   # show Develop
-        gr.update(open=True),   # keep Print reachable
-        gr.update(interactive=True),
-        gr.update(interactive=True),
-        gr.update(interactive=True),
-        gr.update(interactive=True),  # apply framing
-        gr.update(interactive=True),  # reset framing
-        gr.update(interactive=True),  # auto crop
-        gr.update(interactive=True),  # auto straighten
+        sample_u,
+        file_u,
+        ingest_u,
+        develop_u,
+        print_u,
+        unlock_dev_u,
+        unlock_print_u,
+        gr.update(open=True),
+        gr.update(open=True),
+        gr.update(open=True),
+        on,
+        on,
+        on,
+        on,
+        on,
+        on,
+        on,
         0.0,
         DEFAULT_CROP_RECT,
         "free",
-        _inspect_frame(state, live=latent_inspect),
+        _inspect_frame(state, live=inspect_live),
         state,
-        "develop",
+        _drawer_for_frame(state),
+        _roll_gallery_update(state),
+        remove_u,
     )
+
+def commit_ingest(sample_path, file_obj, state):
+    """Append one or more photos to the camera roll and activate the last one."""
+    paths = _collect_input_paths(file_obj, sample_path)
+    if not paths:
+        raise gr.Error("Choose a sample or upload one or more photos.")
+
+    state = _ensure_roll(state)
+    if state.get("dn") is not None and state.get("roll"):
+        state = _sync_active_into_roll(state)
+
+    roll = list(state.get("roll") or [])
+    for path in paths:
+        roll.append(_build_ingest_frame(path))
+
+    new_index = len(roll) - 1
+    state = {**roll[new_index], "roll": roll, "roll_index": new_index}
+    n = len(roll)
+    added = len(paths)
+    summary = state["summary_cache"]
+    if n > 1 or added > 1:
+        summary = (
+            f"{_stage_banner('development', ['ingest'])}\n\n"
+            f"**Added {added} to camera roll** — frame {new_index + 1}/{n} active  \n"
+            f"`{state['dn'].metadata['source']['original_filename']}`  \n"
+            f"_Select a thumbnail to switch · Remove drops the active frame._\n\n"
+            f"{_history_md(state['dn'])}"
+        )
+        state["summary_cache"] = summary
+        roll[new_index] = _frame_payload(state)
+        state["roll"] = roll
+    return _roll_session_outputs(state)
+
+
+def select_roll_frame(state, evt: SelectData | None = None):
+    """Switch the working session to a camera-roll thumbnail."""
+    if not state or not state.get("roll"):
+        return _roll_session_outputs(state)
+    index = evt.index if evt is not None else state.get("roll_index", 0)
+    if isinstance(index, (list, tuple)):
+        index = index[0]
+    state = _activate_roll_index(state, int(index))
+    return _roll_session_outputs(state)
+
+def remove_from_roll(state):
+    """Drop the active frame from the camera roll."""
+    state = _ensure_roll(state or {})
+    roll = list(state.get("roll") or [])
+    idx = int(state.get("roll_index", -1))
+    if not roll or idx < 0:
+        return _roll_session_outputs(None)
+    roll.pop(idx)
+    if not roll:
+        return _roll_session_outputs(None)
+    new_idx = min(idx, len(roll) - 1)
+    state = {**roll[new_idx], "roll": roll, "roll_index": new_idx}
+    n = len(roll)
+    summary = (
+        f"{_stage_banner(state.get('stage', 'development'), _locks(state))}\n\n"
+        f"**Removed from roll** — frame {new_idx + 1}/{n} active  \n"
+        f"`{state['dn'].metadata['source']['original_filename']}`\n\n"
+        f"{_history_md(state['dn'])}"
+    )
+    state["summary_cache"] = summary
+    roll[new_idx] = _frame_payload(state)
+    state["roll"] = roll
+    return _roll_session_outputs(state)
 
 
 def _run_live_develop_then_print(
@@ -4526,6 +4786,7 @@ def commit_develop(
         f"**Develop locked** — refine Print below, then Commit Print.\n\n{_history_md(dn)}"
     )
     state = {
+        **state,
         "dn": dn,
         "proxy": state.get("proxy"),
         "proxy_drag": state.get("proxy_drag"),
@@ -4554,6 +4815,8 @@ def commit_develop(
     }
     neg_download = _write_negative_package(neg_full, dn)
     state["dl_negative"] = neg_download
+    # Keep the camera-roll snapshot aligned with the active frame.
+    state = _sync_active_into_roll(state)
     return (
         # Only the negative exists yet, so the trigger downloads it directly
         # rather than opening a menu with one entry.
@@ -4735,6 +4998,7 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         "dl_print_only": print_only,
         "dl_print_negative": print_plus_neg,
     }
+    state = _sync_active_into_roll(state)
     return (
         live_rgb,
         state.get("original_ref"),
@@ -5496,7 +5760,7 @@ def unlock_print(state):
 def reset_session():
     summary = (
         "**1. Ingest — working** → 2. Develop → 3. Print\n\n"
-        "*Commit Ingest to begin.*"
+        "*Add photos to the camera roll to begin.*"
     )
     on, off = gr.update(interactive=True), gr.update(interactive=False)
     return (
@@ -5536,10 +5800,11 @@ def reset_session():
         "free",
         gr.update(visible=False),
         "",
-        None,
+        {"roll": [], "roll_index": -1},
         "ingest",
+        _roll_gallery_update({"roll": [], "roll_index": -1}),
+        off,
     )
-
 
 def build_ui() -> gr.Blocks:
     default_sample = SAMPLE_CHOICES[1][1] if len(SAMPLE_CHOICES) > 1 else ""
@@ -5580,17 +5845,29 @@ def build_ui() -> gr.Blocks:
                             label="Sample",
                         )
                         file_in = gr.File(
-                            label="Upload",
+                            label="Upload to roll",
+                            file_count="multiple",
                             file_types=[
                                 ".arw", ".cr2", ".cr3", ".nef", ".dng", ".raf", ".orf", ".rw2",
                                 ".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp",
                                 ".heic", ".heif", ".avif",
                             ],
-                            height=140,
+                            height=120,
                             elem_id="ingest_upload",
                         )
-                        ingest_btn = gr.Button("Commit Ingest", variant="primary", size="sm")
-
+                        ingest_btn = gr.Button("Add to roll", variant="primary", size="sm")
+                        roll_gallery = gr.Gallery(
+                            label="Camera roll",
+                            columns=2,
+                            height=150,
+                            object_fit="cover",
+                            preview=False,
+                            allow_preview=False,
+                            elem_id="camera_roll",
+                        )
+                        remove_roll_btn = gr.Button(
+                            "Remove from roll", size="sm", interactive=False
+                        )
                 with gr.Group(elem_id="drawer_develop", elem_classes=["drawer-panel"]):
                     with gr.Accordion("Develop", open=True, elem_id="acc_develop") as develop_acc:
                         film = gr.Dropdown(
@@ -5995,11 +6272,13 @@ def build_ui() -> gr.Blocks:
         ingest_outputs = [
             live_out, original_out, latent_out, neg_out, status, history,
             sample, file_in, ingest_btn, develop_btn, print_btn,
+            unlock_develop_btn, unlock_print_btn,
             ingest_acc, develop_acc, print_acc,
             rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
             apply_framing_btn, reset_framing_btn, auto_crop_btn, auto_straighten_btn,
             straighten_deg, crop_rect, crop_ratio,
             inspect_out, state, active_drawer,
+            roll_gallery, remove_roll_btn,
         ]
 
         ingest_btn.click(
@@ -6012,8 +6291,7 @@ def build_ui() -> gr.Blocks:
             outputs=preview_outputs,
         )
 
-        # Uploading a frame is the intent — commit it straight away instead of
-        # making the button a second, redundant step.
+        # Uploading appends to the camera roll immediately (multi-file OK).
         file_in.upload(
             fn=commit_ingest,
             inputs=[sample, file_in, state],
@@ -6024,6 +6302,25 @@ def build_ui() -> gr.Blocks:
             outputs=preview_outputs,
         )
 
+        roll_gallery.select(
+            fn=select_roll_frame,
+            inputs=[state],
+            outputs=ingest_outputs,
+        ).then(
+            fn=live_preview_high,
+            inputs=preview_inputs,
+            outputs=preview_outputs,
+        )
+
+        remove_roll_btn.click(
+            fn=remove_from_roll,
+            inputs=[state],
+            outputs=ingest_outputs,
+        ).then(
+            fn=live_preview_high,
+            inputs=preview_inputs,
+            outputs=preview_outputs,
+        )
         for ctrl in (
             development_minutes,
             contrast,
@@ -6267,9 +6564,9 @@ def build_ui() -> gr.Blocks:
                 straighten_deg, crop_rect, crop_ratio,
                 download_trigger, download_modes,
                 state, active_drawer,
+                roll_gallery, remove_roll_btn,
             ],
         )
-
         preview_tool.change(
             fn=on_preview_tool_change,
             inputs=[preview_tool],
