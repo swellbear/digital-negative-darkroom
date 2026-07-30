@@ -367,5 +367,10 @@
       ],
       "source": "ILFORD Delta 100 \u00b7 EI 100"
     }
-  ]
+  ],
+  "reciprocity": {
+    "threshold_s": 0.5,
+    "p": 0.82,
+    "contrast_gain": 0.12
+  }
 }

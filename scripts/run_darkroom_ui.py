@@ -40,6 +40,7 @@ from digital_negative.chemistry import (
     resolve_relative_time,
     time_slider_bounds,
 )
+from digital_negative.capture import FILTER_LABELS
 from digital_negative.curves import load_film_profile
 from digital_negative.development import develop
 from digital_negative.digital_negative import DigitalNegative
@@ -2889,6 +2890,7 @@ def toggle_ab_print(state):
 
 def export_recipe_file(
     film_id, developer_id, development_minutes, contrast, grain,
+    exposure_index, contrast_filter, scene_exposure, halation,
     paper_id, print_grade, print_exposure, print_contrast, recipe_name,
 ):
     recipe = build_recipe(
@@ -2902,6 +2904,12 @@ def export_recipe_file(
         print_exposure=float(print_exposure),
         print_contrast=float(print_contrast),
         name=str(recipe_name or "recipe"),
+        extras={
+            "exposure_index": float(exposure_index),
+            "contrast_filter": str(contrast_filter),
+            "scene_exposure_seconds": float(scene_exposure),
+            "halation": float(halation),
+        },
     )
     out = Path(tempfile.gettempdir()) / "darkroom_downloads"
     out.mkdir(parents=True, exist_ok=True)
@@ -2933,12 +2941,17 @@ def apply_recipe_file(recipe_file, state):
         )
     else:
         minutes_update = gr.update(value=float(recipe["development_minutes"]))
+    extras = recipe.get("extensions") or {}
     return (
         gr.update(value=film_id),
         gr.update(choices=chemistry_choices(profile), value=recipe["developer_id"]),
         minutes_update,
         gr.update(value=float(recipe.get("contrast", 0.0))),
         gr.update(value=float(recipe.get("grain", 1.0))),
+        gr.update(value=float(extras.get("exposure_index", profile.iso))),
+        gr.update(value=str(extras.get("contrast_filter", "none"))),
+        gr.update(value=float(extras.get("scene_exposure_seconds", 0.01))),
+        gr.update(value=float(extras.get("halation", 0.0))),
         gr.update(value=recipe["paper_id"]),
         gr.update(value=float(recipe["print_grade"])),
         gr.update(value=float(recipe["print_exposure"])),
@@ -3010,6 +3023,7 @@ def on_film_change(film_id: str):
     return (
         gr.update(choices=choices, value=chem_id),
         _chem_time_update(film_id, chem_id, reset_to_normal=True),
+        gr.update(value=float(profile.iso)),
     )
 
 
@@ -3940,6 +3954,10 @@ def _run_live_develop_then_print(
     development_minutes,
     contrast,
     grain,
+    exposure_index,
+    contrast_filter,
+    scene_exposure,
+    halation,
     paper_id,
     print_exposure,
     print_grade,
@@ -3967,6 +3985,10 @@ def _run_live_develop_then_print(
         grain_strength=float(grain),
         developer_id=developer_id,
         process_variation=1.0,
+        exposure_index=float(exposure_index),
+        contrast_filter=str(contrast_filter),
+        scene_exposure_seconds=float(scene_exposure),
+        halation=float(halation),
         commit=False,
     )
     paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
@@ -4028,6 +4050,10 @@ def live_preview(
     development_minutes,
     contrast,
     grain,
+    exposure_index,
+    contrast_filter,
+    scene_exposure,
+    halation,
     paper_id,
     print_exposure,
     print_grade,
@@ -4119,6 +4145,10 @@ def live_preview(
         development_minutes,
         contrast,
         grain,
+        exposure_index,
+        contrast_filter,
+        scene_exposure,
+         halation,
         paper_id,
         print_exposure,
         print_grade,
@@ -4137,6 +4167,10 @@ def live_preview_drag(
     development_minutes,
     contrast,
     grain,
+    exposure_index,
+    contrast_filter,
+    scene_exposure,
+    halation,
     paper_id,
     print_exposure,
     print_grade,
@@ -4149,6 +4183,10 @@ def live_preview_drag(
         development_minutes,
         contrast,
         grain,
+        exposure_index,
+        contrast_filter,
+        scene_exposure,
+        halation,
         paper_id,
         print_exposure,
         print_grade,
@@ -4164,6 +4202,10 @@ def live_preview_high(
     development_minutes,
     contrast,
     grain,
+    exposure_index,
+    contrast_filter,
+    scene_exposure,
+    halation,
     paper_id,
     print_exposure,
     print_grade,
@@ -4176,6 +4218,10 @@ def live_preview_high(
         development_minutes,
         contrast,
         grain,
+        exposure_index,
+        contrast_filter,
+        scene_exposure,
+        halation,
         paper_id,
         print_exposure,
         print_grade,
@@ -4185,7 +4231,10 @@ def live_preview_high(
     )
 
 
-def commit_develop(film_id, developer_id, development_minutes, contrast, grain, state):
+def commit_develop(
+    film_id, developer_id, development_minutes, contrast, grain,
+    exposure_index, contrast_filter, scene_exposure, halation, state,
+):
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
     if _locked(state, "development"):
@@ -4201,6 +4250,10 @@ def commit_develop(film_id, developer_id, development_minutes, contrast, grain, 
         grain_strength=float(grain),
         developer_id=developer_id,
         process_variation=1.0,
+        exposure_index=float(exposure_index),
+        contrast_filter=str(contrast_filter),
+        scene_exposure_seconds=float(scene_exposure),
+        halation=float(halation),
         commit=True,
     )
     locks = dn.metadata["ui_state"].setdefault("locked_stages", [])
@@ -4923,6 +4976,10 @@ def guided_first_print(
     development_minutes,
     contrast,
     grain,
+    exposure_index,
+    contrast_filter,
+    scene_exposure,
+    halation,
     paper_id,
     print_exposure,
     print_grade,
@@ -5020,6 +5077,10 @@ def guided_first_print(
             development_minutes,
             contrast,
             grain,
+            exposure_index,
+            contrast_filter,
+            scene_exposure,
+            halation,
             state,
         )
     else:
@@ -5036,6 +5097,10 @@ def guided_first_print(
         development_minutes,
         contrast,
         grain,
+        exposure_index,
+        contrast_filter,
+        scene_exposure,
+        halation,
         paper_id,
         print_exposure,
         print_grade,
@@ -5257,6 +5322,19 @@ def build_ui() -> gr.Blocks:
                         )
                         contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Contrast")
                         grain = gr.Slider(0.0, 2.5, value=1.0, step=0.05, label="Grain")
+                        exposure_index = gr.Slider(
+                            25, 6400, value=400, step=25, label="Exposure index (EI)"
+                        )
+                        contrast_filter = gr.Dropdown(
+                            choices=FILTER_LABELS,
+                            value="none",
+                            label="Contrast filter",
+                        )
+                        scene_exposure = gr.Slider(
+                            0.001, 120.0, value=0.01, step=0.001,
+                            label="Scene shutter (s)",
+                        )
+                        halation = gr.Slider(0.0, 1.5, value=0.0, step=0.05, label="Halation")
                         with gr.Row():
                             develop_btn = gr.Button(
                                 "Commit Develop", interactive=False, variant="primary", size="sm"
@@ -5561,6 +5639,10 @@ def build_ui() -> gr.Blocks:
             development_minutes,
             contrast,
             grain,
+            exposure_index,
+            contrast_filter,
+            scene_exposure,
+             halation,
             paper,
             print_exposure,
             print_grade,
@@ -5607,6 +5689,10 @@ def build_ui() -> gr.Blocks:
             development_minutes,
             contrast,
             grain,
+            exposure_index,
+            contrast_filter,
+            scene_exposure,
+             halation,
             paper,
             print_exposure,
             print_grade,
@@ -5672,7 +5758,7 @@ def build_ui() -> gr.Blocks:
         film.change(
             fn=on_film_change,
             inputs=[film],
-            outputs=[developer, development_minutes],
+            outputs=[developer, development_minutes, exposure_index],
         ).then(
             fn=live_preview_high,
             inputs=preview_inputs,
@@ -5690,7 +5776,10 @@ def build_ui() -> gr.Blocks:
 
         develop_btn.click(
             fn=commit_develop,
-            inputs=[film, developer, development_minutes, contrast, grain, state],
+            inputs=[
+                film, developer, development_minutes, contrast, grain,
+                exposure_index, contrast_filter, scene_exposure, halation, state,
+            ],
             outputs=[
                 download_trigger, download_modes, dl_pkg_negative,
                 live_out, original_out, latent_out, neg_out, status, history,
@@ -5913,6 +6002,7 @@ def build_ui() -> gr.Blocks:
 
         recipe_controls = [
             film, developer, development_minutes, contrast, grain,
+            exposure_index, contrast_filter, scene_exposure, halation,
             paper, print_grade, print_exposure, print_contrast, recipe_name,
         ]
         save_recipe_btn.click(
@@ -5925,6 +6015,7 @@ def build_ui() -> gr.Blocks:
             inputs=[recipe_file, state],
             outputs=[
                 film, developer, development_minutes, contrast, grain,
+                exposure_index, contrast_filter, scene_exposure, halation,
                 paper, print_grade, print_exposure, print_contrast,
                 recipe_name, recipe_tip, state,
             ],
