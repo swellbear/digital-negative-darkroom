@@ -2699,14 +2699,17 @@ def _pack_preview(live, original, latent, neg, summary, state):
         if live is not None:
             state = {**state, "live_rgb": live, "live_inspect": live}
         if neg is not None:
-            state = {
-                **state,
-                "neg_ref": neg,
-                "neg_view": neg,
-                "neg_inspect": state.get("neg_inspect")
-                if state.get("neg_inspect") is not None
-                else neg,
-            }
+            # `neg` is the filmstrip-sized reference (REF_MAX_SIDE). Callers
+            # that actually recompute the negative store full-size neg_view /
+            # neg_inspect on the state first, so only fill those in when they
+            # are missing — writing the thumbnail into them made the negative
+            # render small in the preview and soft under Inspect zoom.
+            updates = {"neg_ref": neg}
+            if state.get("neg_view") is None:
+                updates["neg_view"] = neg
+            if state.get("neg_inspect") is None:
+                updates["neg_inspect"] = neg
+            state = {**state, **updates}
     shown = _viewer_frame(state, live=live, original=original, latent=latent, neg=neg)
     slot_a, slot_b, slot_c = _strip_updates(
         state, live=live, original=original, latent=latent, neg=neg
