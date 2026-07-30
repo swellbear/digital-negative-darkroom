@@ -1169,6 +1169,17 @@ body.module-collapsed #module_panel {
 #crop_overlay .crop-handle.w { left: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
 #crop_overlay .crop-handle.e { right: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
 #live_preview.inspect-armed img { cursor: zoom-in; }
+/* Native image drag-and-drop fired pointercancel and killed panning after a
+   single move; touch gestures would do the same on a trackpad/tablet. */
+#live_preview img {
+  -webkit-user-drag: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+#live_preview.inspect-armed,
+#live_preview.inspect-armed * {
+  touch-action: none !important;
+}
 
 #db_tool_cursor {
   position: fixed;
@@ -1389,6 +1400,18 @@ UI_JS = """
       root.classList.contains('db-tool-hover') ||
       document.body.classList.contains('db-exposing');
 
+    // Keep the zoomed frame overlapping the stage so it can't be flung away.
+    const clampPan = (img) => {
+      if (!img) return;
+      const stage = root.getBoundingClientRect();
+      const w = img.offsetWidth * scale;
+      const h = img.offsetHeight * scale;
+      const maxX = Math.max(0, (w - stage.width) / 2);
+      const maxY = Math.max(0, (h - stage.height) / 2);
+      panX = Math.min(maxX, Math.max(-maxX, panX));
+      panY = Math.min(maxY, Math.max(-maxY, panY));
+    };
+
     const apply = (img) => {
       if (!img) return;
       img.style.transformOrigin = 'center center';
@@ -1455,12 +1478,18 @@ UI_JS = """
       apply(img);
     }, { passive: false });
 
+    // The image is natively draggable, so the browser started its own
+    // drag-and-drop on pointerdown and fired pointercancel — the pan died
+    // after a single move. Refuse the native drag so the stream survives.
+    root.addEventListener('dragstart', (e) => e.preventDefault());
+
     root.addEventListener('pointerdown', (e) => {
       if (root.classList.contains('db-waving')) return;
       const mode = readPreviewTool();
       if (sel === '#live_preview' && mode === 'frame') return;
       const img = findImg();
       if (!img || scale <= 1.02) return;
+      e.preventDefault();
       dragging = true; lastX = e.clientX; lastY = e.clientY;
       root.setPointerCapture?.(e.pointerId);
       apply(img);
@@ -1469,9 +1498,11 @@ UI_JS = """
       if (!dragging || root.classList.contains('db-waving')) return;
       const img = findImg();
       if (!img) return;
+      e.preventDefault();
       panX += e.clientX - lastX;
       panY += e.clientY - lastY;
       lastX = e.clientX; lastY = e.clientY;
+      clampPan(img);
       apply(img);
     });
     const endDrag = () => {
