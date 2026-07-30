@@ -177,14 +177,22 @@ html, body {
   overflow: hidden !important;
 }
 #icon_rail button {
-  min-height: 44px !important;
-  height: 44px !important;
+  min-height: 48px !important;
+  height: 48px !important;
   width: 100% !important;
-  padding: 2px !important;
-  font-size: 0.62rem !important;
-  line-height: 1.05 !important;
+  padding: 4px 2px !important;
+  font-size: 0.58rem !important;
+  line-height: 1.1 !important;
   white-space: pre-line !important;
   border-radius: 8px !important;
+  letter-spacing: 0.01em;
+}
+#icon_rail button .rail-glyph,
+#icon_rail .rail-glyph {
+  display: block;
+  font-size: 1.05rem;
+  line-height: 1.15;
+  margin-bottom: 1px;
 }
 #icon_rail button.rail-active {
   outline: 1px solid #f2d28a !important;
@@ -313,32 +321,63 @@ body.drawer-collapsed #drawer_host {
   box-sizing: border-box !important;
   overflow: hidden !important;
   z-index: 1 !important;
+  position: relative !important;
 }
+/* Solid stage height — Gradio + flex min-height:0 was collapsing the print to blank */
 #preview_col > .block:has(#live_preview),
 #live_preview {
   flex: 1 1 auto !important;
-  min-height: 0 !important;
-}
-#live_preview {
-  height: 100% !important;
+  min-height: min(68vh, 640px) !important;
+  height: auto !important;
   max-height: none !important;
 }
 #live_preview .image-frame,
-#live_preview .image-container {
+#live_preview .image-container,
+#live_preview [data-testid="image"],
+#live_preview .image-container > div {
+  min-height: min(68vh, 640px) !important;
   height: 100% !important;
   max-height: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: #0a0a0a !important;
 }
 #live_preview img,
 #live_preview .image-container img,
 #live_preview .image-frame img {
-  max-height: calc(100vh - 120px) !important;
+  max-height: min(68vh, 640px) !important;
+  max-width: 100% !important;
   width: auto !important;
+  height: auto !important;
   object-fit: contain !important;
 }
 #seq_strip {
   flex: 0 0 auto !important;
   gap: 6px !important;
   align-items: center !important;
+  min-height: 64px !important;
+}
+/* Floating toolbars live in #float_host — never steal preview flex space */
+#float_host {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+  z-index: 100040 !important;
+}
+#float_host > .block,
+#float_host .float-toolbar {
+  pointer-events: none !important;
+}
+#float_host .float-toolbar.is-open {
+  pointer-events: auto !important;
 }
 #seq_strip .image-container,
 #seq_strip .image-frame {
@@ -368,7 +407,7 @@ body.drawer-collapsed #drawer_host {
   z-index: 100050 !important;
   min-width: 280px;
   max-width: min(420px, 92vw);
-  max-height: min(70vh, 560px);
+  max-height: min(78vh, 640px);
   overflow: auto;
   padding: 10px 12px !important;
   border-radius: 10px !important;
@@ -3555,13 +3594,24 @@ def build_ui() -> gr.Blocks:
         with gr.Row(elem_id="main_workspace", equal_height=False):
             # ——— Icon rail ———
             with gr.Column(scale=0, elem_id="icon_rail", min_width=56):
-                rail_ingest = gr.Button("Ingest", elem_id="rail_ingest", size="sm", elem_classes=["rail-btn", "rail-active"])
-                rail_develop = gr.Button("Develop", elem_id="rail_develop", size="sm", elem_classes=["rail-btn"])
-                rail_print = gr.Button("Print", elem_id="rail_print", size="sm", elem_classes=["rail-btn"])
-                rail_frame = gr.Button("Frame", elem_id="rail_frame", size="sm", elem_classes=["rail-btn"])
-                rail_log = gr.Button("Log", elem_id="rail_log", size="sm", elem_classes=["rail-btn"])
+                rail_ingest = gr.Button(
+                    "⬇\nIngest", elem_id="rail_ingest", size="sm",
+                    elem_classes=["rail-btn", "rail-active"],
+                )
+                rail_develop = gr.Button(
+                    "⚗\nDev", elem_id="rail_develop", size="sm", elem_classes=["rail-btn"]
+                )
+                rail_print = gr.Button(
+                    "▣\nPrint", elem_id="rail_print", size="sm", elem_classes=["rail-btn"]
+                )
+                rail_frame = gr.Button(
+                    "✂\nFrame", elem_id="rail_frame", size="sm", elem_classes=["rail-btn"]
+                )
+                rail_log = gr.Button(
+                    "☰\nLog", elem_id="rail_log", size="sm", elem_classes=["rail-btn"]
+                )
                 gr.HTML('<div class="rail-spacer"></div>')
-                reset_btn = gr.Button("New", elem_id="rail_new", size="sm")
+                reset_btn = gr.Button("+\nNew", elem_id="rail_new", size="sm")
 
             # ——— Drawer panels (one visible) ———
             with gr.Column(scale=0, elem_id="drawer_host", min_width=0):
@@ -3645,40 +3695,11 @@ def build_ui() -> gr.Blocks:
                             rotate_ccw_btn = gr.Button("⟲ 90°", size="sm", interactive=False)
                             rotate_180_btn = gr.Button("180°", size="sm", interactive=False)
                             rotate_cw_btn = gr.Button("90° ⟳", size="sm", interactive=False)
-                        crop_ratio = gr.Radio(
-                            choices=CROP_RATIO_CHOICES,
-                            value="free",
-                            label="Aspect ratio",
-                            elem_id="crop_ratio",
-                        )
-                        with gr.Row():
-                            auto_crop_rule = gr.Dropdown(
-                                choices=AUTO_CROP_RULE_CHOICES,
-                                value="auto",
-                                label="Auto crop rule",
-                                scale=3,
-                            )
-                            auto_crop_btn = gr.Button(
-                                "Auto crop", interactive=False, variant="secondary", size="sm", scale=1
-                            )
-                        crop_hint = gr.Markdown(
-                            "_Right-click print → Crop, or draw the box in Frame mode._",
+                        gr.Markdown(
+                            "_Rotate here. **Right-click the print** → "
+                            "**Crop & straighten** or **Auto crop** for the framing toolbar._",
                             elem_id="crop_hint",
                         )
-                        straighten_deg = gr.Slider(
-                            -15.0, 15.0, value=0.0, step=0.1, label="Straighten (° CW)"
-                        )
-                        crop_rect = gr.Textbox(
-                            value=DEFAULT_CROP_RECT,
-                            label="crop_rect",
-                            elem_id="crop_rect",
-                            show_label=False,
-                        )
-                        with gr.Row():
-                            apply_framing_btn = gr.Button(
-                                "Apply framing", interactive=False, variant="secondary", size="sm"
-                            )
-                            reset_framing_btn = gr.Button("Reset framing", interactive=False, size="sm")
 
                 with gr.Group(elem_id="drawer_log", elem_classes=["drawer-panel"]):
                     with gr.Accordion("Decision log", open=True, elem_id="acc_log") as log_acc:
@@ -3714,73 +3735,6 @@ def build_ui() -> gr.Blocks:
                     buttons=["fullscreen", "download"],
                 )
 
-                # Floating toolbars (shown via right-click JS)
-                with gr.Group(elem_id="float_zoom", elem_classes=["float-toolbar"]):
-                    gr.HTML('<div class="float-title">Inspect · zoom</div>')
-                    gr.Markdown(
-                        "Scroll to zoom · drag to pan when zoomed · double-click resets · "
-                        "fullscreen for a larger view."
-                    )
-                    float_zoom_close = gr.Button("Close", size="sm")
-
-                with gr.Group(elem_id="float_easel", elem_classes=["float-toolbar"]):
-                    gr.HTML('<div class="float-title">Dodge & burn · enlarger easel</div>')
-                    db_shape = gr.Radio(
-                        choices=[(label, key) for key, label in CARD_PRESETS],
-                        value="soft_oval",
-                        label="Card / wand shape",
-                    )
-                    db_editor = gr.ImageEditor(
-                        label="Custom card (paint only if shape = Custom)",
-                        type="numpy",
-                        image_mode="RGBA",
-                        height=160,
-                        value=tool_workshop_canvas(),
-                        brush=gr.Brush(
-                            default_size=48,
-                            colors=["#ffcc66", "#ffffff", "#66ccff"],
-                            default_color="#ffcc66",
-                            color_mode="defaults",
-                        ),
-                        eraser=gr.Eraser(),
-                        layers=True,
-                        transforms=(),
-                        sources=(),
-                        buttons=["fullscreen"],
-                        visible=False,
-                    )
-                    db_mode = gr.Radio(
-                        choices=[
-                            ("Dodge — hold back light (lighter)", "dodge"),
-                            ("Burn — add enlarger light (darker)", "burn"),
-                        ],
-                        value="burn",
-                        label="Mode",
-                    )
-                    db_seconds = gr.Slider(
-                        1, 32, value=4, step=1, label="Pass (seconds)"
-                    )
-                    pass_math_md = gr.Markdown(_pass_math_md(8.0, 4.0, "burn"), elem_id="pass_math")
-                    db_timer_md = gr.Markdown("**Ready** — Start, then wave over the print")
-                    with gr.Row(elem_id="db_actions"):
-                        db_start_btn = gr.Button(
-                            "Start — wave over print →", variant="primary", size="sm"
-                        )
-                        db_reset_btn = gr.Button("Reset local work", size="sm")
-                    db_flag = gr.HTML(_db_flag_html(None), elem_id="db_flag")
-                    db_pos = gr.Textbox(value="0.5000,0.5000", elem_id="db_pos", show_label=False)
-                    with gr.Column(elem_classes=["db_clock_hidden"]):
-                        db_clock = gr.Timer(value=TICK_SECONDS, active=False)
-                    float_easel_close = gr.Button("Close", size="sm")
-
-                with gr.Group(elem_id="float_crop", elem_classes=["float-toolbar"]):
-                    gr.HTML('<div class="float-title">Crop & straighten</div>')
-                    gr.Markdown(
-                        "Frame mode is on — draw/resize the box on the print. "
-                        "Full controls also live under the **Frame** icon."
-                    )
-                    float_crop_close = gr.Button("Close", size="sm")
-
                 with gr.Row(elem_id="seq_strip"):
                     original_out = gr.Image(
                         label="Original", type="numpy", height=56, buttons=["fullscreen"]
@@ -3803,8 +3757,107 @@ def build_ui() -> gr.Blocks:
                     visible=False,
                     buttons=["fullscreen", "download"],
                 )
-                # Compatibility aliases used by older handlers expecting frame_tools group
-                frame_tools = frame_acc
+
+        # Floating toolbars (right-click) — outside preview flex so they never collapse the print
+        with gr.Group(elem_id="float_host"):
+            with gr.Group(elem_id="float_zoom", elem_classes=["float-toolbar"]):
+                gr.HTML('<div class="float-title">Inspect · zoom</div>')
+                gr.Markdown(
+                    "Scroll to zoom · drag to pan when zoomed · double-click resets · "
+                    "fullscreen for a larger view."
+                )
+                float_zoom_close = gr.Button("Close", size="sm")
+
+            with gr.Group(elem_id="float_easel", elem_classes=["float-toolbar"]):
+                gr.HTML('<div class="float-title">Dodge & burn · enlarger easel</div>')
+                db_shape = gr.Radio(
+                    choices=[(label, key) for key, label in CARD_PRESETS],
+                    value="soft_oval",
+                    label="Card / wand shape",
+                )
+                db_editor = gr.ImageEditor(
+                    label="Custom card (paint only if shape = Custom)",
+                    type="numpy",
+                    image_mode="RGBA",
+                    height=160,
+                    value=tool_workshop_canvas(),
+                    brush=gr.Brush(
+                        default_size=48,
+                        colors=["#ffcc66", "#ffffff", "#66ccff"],
+                        default_color="#ffcc66",
+                        color_mode="defaults",
+                    ),
+                    eraser=gr.Eraser(),
+                    layers=True,
+                    transforms=(),
+                    sources=(),
+                    buttons=["fullscreen"],
+                    visible=False,
+                )
+                db_mode = gr.Radio(
+                    choices=[
+                        ("Dodge — hold back light (lighter)", "dodge"),
+                        ("Burn — add enlarger light (darker)", "burn"),
+                    ],
+                    value="burn",
+                    label="Mode",
+                )
+                db_seconds = gr.Slider(
+                    1, 32, value=4, step=1, label="Pass (seconds)"
+                )
+                pass_math_md = gr.Markdown(_pass_math_md(8.0, 4.0, "burn"), elem_id="pass_math")
+                db_timer_md = gr.Markdown("**Ready** — Start, then wave over the print")
+                with gr.Row(elem_id="db_actions"):
+                    db_start_btn = gr.Button(
+                        "Start — wave over print →", variant="primary", size="sm"
+                    )
+                    db_reset_btn = gr.Button("Reset local work", size="sm")
+                db_flag = gr.HTML(_db_flag_html(None), elem_id="db_flag")
+                db_pos = gr.Textbox(value="0.5000,0.5000", elem_id="db_pos", show_label=False)
+                with gr.Column(elem_classes=["db_clock_hidden"]):
+                    db_clock = gr.Timer(value=TICK_SECONDS, active=False)
+                float_easel_close = gr.Button("Close", size="sm")
+
+            with gr.Group(elem_id="float_crop", elem_classes=["float-toolbar"]):
+                gr.HTML('<div class="float-title">Crop & straighten</div>')
+                crop_hint = gr.Markdown(
+                    "_Frame mode is on — draw/resize the box on the print, then Apply._",
+                    elem_id="crop_float_hint",
+                )
+                crop_ratio = gr.Radio(
+                    choices=CROP_RATIO_CHOICES,
+                    value="free",
+                    label="Aspect ratio",
+                    elem_id="crop_ratio",
+                )
+                straighten_deg = gr.Slider(
+                    -15.0, 15.0, value=0.0, step=0.1, label="Straighten (° CW)"
+                )
+                with gr.Row():
+                    auto_crop_rule = gr.Dropdown(
+                        choices=AUTO_CROP_RULE_CHOICES,
+                        value="auto",
+                        label="Auto crop rule",
+                        scale=3,
+                    )
+                    auto_crop_btn = gr.Button(
+                        "Auto crop", interactive=False, variant="secondary", size="sm", scale=1
+                    )
+                crop_rect = gr.Textbox(
+                    value=DEFAULT_CROP_RECT,
+                    label="crop_rect",
+                    elem_id="crop_rect",
+                    show_label=False,
+                )
+                with gr.Row():
+                    apply_framing_btn = gr.Button(
+                        "Apply framing", interactive=False, variant="secondary", size="sm"
+                    )
+                    reset_framing_btn = gr.Button("Reset framing", interactive=False, size="sm")
+                float_crop_close = gr.Button("Close", size="sm")
+
+        # Compatibility aliases used by older handlers expecting frame_tools group
+        frame_tools = frame_acc
 
         # Always pass develop + print controls so the large viewer can show a
         # theoretical print through the working negative while developing.
