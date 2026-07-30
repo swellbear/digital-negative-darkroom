@@ -308,7 +308,12 @@ def _chem_time_update(film_id: str, developer_id: str, *, reset_to_normal: bool 
         label = "Dev time (rel. ×8 min stand-in)"
         return gr.update(minimum=4.0, maximum=16.0, value=8.0, label=label, step=0.25)
     tmin, tmax, normal = time_slider_bounds(chem)
-    label = f"Dev time (min) · N={normal:g} @ 20°C"
+    family = chem.get("curve_family") or []
+    if isinstance(family, list) and len(family) >= 2:
+        times = ", ".join(f"{float(m['minutes']):g}" for m in sorted(family, key=lambda x: x["minutes"]))
+        label = f"Dev time (min) · N={normal:g} · family [{times}]"
+    else:
+        label = f"Dev time (min) · N={normal:g} @ 20°C (morph)"
     return gr.update(minimum=tmin, maximum=tmax, value=normal, label=label, step=0.25)
 
 
@@ -836,11 +841,12 @@ def _run_live_develop_then_print(
         "filter_speed", 1.0
     )
     quality_note = "drag" if max_side <= DRAG_MAX_SIDE else "hq"
+    curve_src = proxy.metadata.get("development", {}).get("curve_source", "?")
     summary = (
         f"{_stage_banner('development', _locks(state))}\n\n"
         f"**Live print** {live_rgb.shape[1]}×{live_rgb.shape[0]} ({quality_note})  \n"
         f"{profile.name} · {developer_id} · {float(development_minutes):g} min · "
-        f"N±={float(contrast):+.2f} · grain={float(grain):.2f}  \n"
+        f"curve={curve_src} · N±={float(contrast):+.2f} · grain={float(grain):.2f}  \n"
         f"{paper.name} · g{float(print_grade):.1f} · exp {float(print_exposure):+.2f} "
         f"· ×{float(speed):.2f}\n\n"
         f"{_history_md(state['dn'])}"

@@ -108,7 +108,9 @@ def develop(
         relative_time=rel,
         contrast_modifier=contrast,
         developer_id=developer,
+        development_minutes=minutes,
     )
+    curve_meta = working_profile.raw.get("_last_curve_meta") or {}
     luminance = dn.to_luminance()
     log_e = linear_to_relative_log_exposure(luminance, mid_log_e=mid_log_e)
     density = working_profile.density_from_log_exposure(log_e)
@@ -148,9 +150,12 @@ def develop(
         "contrast_modifier": contrast,
         "grain_strength": user_grain,
         "process_variation": float(process_variation),
+        "curve_source": curve_meta.get("curve_source", "morph"),
     }
     if minutes is not None:
         update["development_minutes"] = float(minutes)
+    if curve_meta.get("family_mode"):
+        update["curve_family_mode"] = curve_meta["family_mode"]
     dn.metadata["development"].update(update)
     dn.metadata.setdefault("ui_state", {})["current_stage"] = "development"
 

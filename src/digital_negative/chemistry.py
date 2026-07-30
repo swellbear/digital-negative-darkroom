@@ -128,7 +128,14 @@ def chemistry_choices(profile: Any) -> list[tuple[str, str]]:
     """Return Gradio choices ``(label, id)`` for this film."""
     chems = chemistries_map(profile)
     if chems:
-        return [(str(c.get("name", cid)), cid) for cid, c in chems.items()]
+        out = []
+        for cid, c in chems.items():
+            name = str(c.get("name", cid))
+            family = c.get("curve_family")
+            if isinstance(family, list) and len(family) >= 2:
+                name = f"{name} · curve family"
+            out.append((name, cid))
+        return out
     return [(v["name"], k) for k, v in DEVELOPER_STYLES.items()]
 
 

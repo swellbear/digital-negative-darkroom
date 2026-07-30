@@ -62,4 +62,4 @@ pytest -q
 
 ## Notes
 
-Film curves are approximate digitizations of public manufacturer datasheets (Ilford / Kodak F-4017); source URLs live inside each profile JSON. Each film also lists named developers with datasheet-normal tank times (minutes @ 20°C); contrast-index vs time (when available) drives push/pull. Do **not** copy curves/code from GPLv3 / CC BY-SA research projects.
+Film curves are approximate digitizations of public manufacturer datasheets (Ilford / Kodak F-4017). Tri-X D-76 and T-MAX include **multi-time curve families** interpolated between published characteristic curves; other chemistries morph from a single base curve. Source URLs live inside each profile JSON. Do **not** copy curves/code from GPLv3 / CC BY-SA research projects.

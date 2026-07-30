@@ -40,11 +40,12 @@ The live + Commit/Unlock model is good. Now refine the *experience* of the ritua
 
 Resist the urge to add many more films/papers yet. Tri-X 400 was added as one carefully chosen favorite (Kodak F-4017 approximate digitization) — still prefer deepening existing stocks over a large catalog.
 
-**Chemistries (v1):** Develop now exposes named developers + tank minutes from public datasheets (Ilford / Kodak). The base D–logE curve is still one digitization per film; other chems reuse that curve with character biases, and minutes map through CI (or time ratio) into relative development. Next calibration: side-by-side real tanks vs these mappings.
+**Chemistries (v1 → v1.2):** Develop exposes named developers + tank minutes from public datasheets. **Breakthrough:** Tri-X D-76 and T-MAX now use digitized multi-time characteristic **curve families** from Kodak F-4017 (interpolate between published times). Other film×chem pairs still morph from a single base curve until their datasheet curve families are digitized.
 
 **Next critique focus:**
-- Side-by-side Tri-X / HP5 / FP4 / Delta against real references; refine toe/shoulder where they diverge.
-- Do D-76 vs HC-110 vs XTOL (and Ilford equivalents) feel distinct enough, or only the times?
+- Side-by-side Tri-X D-76 @ 6 / 8 / 12 min vs real tanks — does the family feel right?
+- Digitize remaining Tri-X chemistries (HC-110, XTOL) when plots exist; Ilford stocks need multi-time plots or densitometer sessions.
+- Do D-76 vs T-MAX curve families feel distinct (not just grain bias)?
 - Which profile currently feels weakest?
 - Would one carefully refined additional paper (e.g., a different surface) add more value than three mediocre new films?
 
