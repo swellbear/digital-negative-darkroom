@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .digital_negative import DigitalNegative
+from .dodge_burn import REFERENCE_BASE_SECONDS, base_seconds_to_stops, stops_to_base_seconds
 from .papers import PaperProfile
 
 # Approximate relative speeds vs grade 2 (Ilford MG filter family, simplified).
@@ -103,6 +104,7 @@ def print_negative(
     paper: PaperProfile,
     *,
     overall_exposure: float | None = None,
+    base_exposure_seconds: float | None = None,
     grade: float | None = None,
     contrast: float | None = None,
     local_stops: np.ndarray | None = None,
@@ -111,15 +113,28 @@ def print_negative(
     """Expose paper through a developed negative.
 
     overall_exposure: timer stops (+ = more light = darker print)
+    base_exposure_seconds: enlarger timer in seconds (preferred UI unit);
+        when set, overrides overall_exposure via log2(seconds / 8s reference)
     grade: multigrade filtration 00–5 (also applies filter speed factor)
     contrast: fine nudge between filter steps
     local_stops: optional HxW map of extra exposure stops (burn +, dodge −)
     commit=False: live preview only — no history entry
     """
     print_meta = dn.metadata.setdefault("print", {})
-    exposure_stops = float(
-        overall_exposure if overall_exposure is not None else print_meta.get("overall_exposure", 0.0)
-    )
+    if base_exposure_seconds is not None:
+        base_seconds = float(base_exposure_seconds)
+        exposure_stops = base_seconds_to_stops(base_seconds)
+    elif overall_exposure is not None:
+        exposure_stops = float(overall_exposure)
+        base_seconds = stops_to_base_seconds(exposure_stops)
+    else:
+        if "base_exposure_seconds" in print_meta:
+            base_seconds = float(print_meta.get("base_exposure_seconds", REFERENCE_BASE_SECONDS))
+            exposure_stops = base_seconds_to_stops(base_seconds)
+        else:
+            exposure_stops = float(print_meta.get("overall_exposure", 0.0))
+            base_seconds = stops_to_base_seconds(exposure_stops)
+
     grade_value = float(
         grade if grade is not None else print_meta.get("filtration", {}).get("grade", paper.default_grade)
     )
@@ -173,6 +188,7 @@ def print_negative(
                     "filter_speed": speed,
                 },
             },
+            "base_exposure_seconds": round(base_seconds, 3),
             "overall_exposure": exposure_stops,
             "contrast": contrast_nudge,
             "dodge_burn": strokes,
@@ -186,6 +202,7 @@ def print_negative(
             "op": "print",
             "paper_id": paper.id,
             "grade": grade_value,
+            "base_exposure_seconds": round(base_seconds, 3),
             "overall_exposure": exposure_stops,
             "contrast": contrast_nudge,
             "filter_speed": speed,

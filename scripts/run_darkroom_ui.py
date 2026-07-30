@@ -32,15 +32,16 @@ from digital_negative.display import (
     to_u8_gray,
 )
 from digital_negative.dodge_burn import (
+    REFERENCE_BASE_SECONDS,
     TICK_SECONDS,
     apply_exposure_tick,
+    base_seconds_to_stops,
     extract_tool_stamp,
     local_stops_from_state,
     parse_pointer,
+    relative_pass_stops,
     reset_local_work,
     stamp_to_png_data_url,
-    seconds_to_stops,
-    stops_per_tick,
     tool_workshop_canvas,
 )
 from digital_negative.ingest import ingest_path
@@ -627,9 +628,14 @@ def _history_md(dn) -> str:
         elif op == "print":
             db = h.get("dodge_burn") or []
             db_bit = f" · {len(db)} local pass(es)" if db else ""
+            if h.get("base_exposure_seconds") is not None:
+                stops = float(h.get("overall_exposure", 0.0))
+                exp_bit = f"{float(h['base_exposure_seconds']):g}s (≈ {stops:+.2f} stops)"
+            else:
+                exp_bit = f"{h.get('overall_exposure'):+g} stops"
             lines.append(
                 f"{i}. **Print** — `{h.get('paper_id')}` · grade {h.get('grade')} · "
-                f"exp {h.get('overall_exposure'):+g} stops"
+                f"exp {exp_bit}"
                 + (f" · nudge={h.get('contrast')}" if h.get("contrast") not in (None, 0, 0.0) else "")
                 + db_bit
             )
@@ -1041,7 +1047,7 @@ def _run_live_develop_then_print(
         development.transmittance,
         state["dn"],
         paper,
-        overall_exposure=float(print_exposure),
+        base_exposure_seconds=float(print_exposure),
         grade=float(print_grade),
         contrast=float(print_contrast),
         local_stops=local_stops_from_state(state),
@@ -1062,7 +1068,7 @@ def _run_live_develop_then_print(
         f"**Live print** {live_rgb.shape[1]}×{live_rgb.shape[0]} ({quality_note})  \n"
         f"{profile.name} · {developer_id} · {float(development_minutes):g} min · "
         f"curve={curve_src} · N±={float(contrast):+.2f} · grain={float(grain):.2f}  \n"
-        f"{paper.name} · g{float(print_grade):.1f} · exp {float(print_exposure):+.2f} "
+        f"{paper.name} · g{float(print_grade):.1f} · {_print_timer_label(print_exposure)} "
         f"· ×{float(speed):.2f}\n\n"
         f"{_history_md(state['dn'])}"
     )
@@ -1085,6 +1091,7 @@ def _run_live_develop_then_print(
             "print_contrast": float(print_contrast),
         },
     }
+    state = _remember_print_seconds(state, print_exposure)
     return live_rgb, neg_ref, summary, state
 
 
@@ -1149,7 +1156,7 @@ def live_preview(
             t,
             state["dn"],
             paper,
-            overall_exposure=float(print_exposure),
+            base_exposure_seconds=float(print_exposure),
             grade=float(print_grade),
             contrast=float(print_contrast),
             local_stops=local_stops_from_state(state),
@@ -1164,10 +1171,11 @@ def live_preview(
         summary = (
             f"{_stage_banner('print', _locks(state))}\n\n"
             f"**Print preview** {live_rgb.shape[1]}×{live_rgb.shape[0]} ({quality_note})  \n"
-            f"{paper.name} · g{float(print_grade):.1f} · exp {float(print_exposure):+.2f} · "
+            f"{paper.name} · g{float(print_grade):.1f} · {_print_timer_label(print_exposure)} · "
             f"×{float(speed):.2f}{db_note}{exposing}\n\n{_history_md(state['dn'])}"
         )
         state = {**state, "print_draft": result, "live_rgb": live_rgb, "summary_cache": summary}
+        state = _remember_print_seconds(state, print_exposure)
         return _pack_preview(
             live_rgb,
             state.get("original_ref"),
@@ -1356,7 +1364,7 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         development.transmittance,
         dn,
         paper,
-        overall_exposure=float(print_exposure),
+        base_exposure_seconds=float(print_exposure),
         grade=float(print_grade),
         contrast=float(print_contrast),
         local_stops=local_stops_from_state(state),
@@ -1375,7 +1383,7 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
     summary = (
         f"{_stage_banner('print', locks)}\n\n"
         f"**Print locked** — {paper.name} · g{float(print_grade):.1f} · "
-        f"exp {float(print_exposure):+.2f}{db_note}\n\n{_history_md(dn)}"
+        f"{_print_timer_label(print_exposure)}{db_note}\n\n{_history_md(dn)}"
     )
     state = {**state, "print": result, "live_rgb": live_rgb, "summary_cache": summary}
     return (
@@ -1404,6 +1412,26 @@ def _unlock_stage(dn, stage: str) -> None:
         committed.remove(stage)
     dn.metadata.setdefault("history", []).append({"op": "unlock", "stage": stage})
     dn.touch()
+
+
+
+def _print_timer_label(print_seconds) -> str:
+    """Human label for the enlarger base timer (seconds + calibrated stops)."""
+    seconds = float(print_seconds)
+    stops = base_seconds_to_stops(seconds)
+    return f"{seconds:g}s base (≈ {stops:+.2f} stops)"
+
+
+def _remember_print_seconds(state, print_seconds):
+    """Keep base timer on state so dodge/burn converts light-time correctly."""
+    if not state:
+        return state
+    seconds = float(print_seconds)
+    return {
+        **state,
+        "print_base_seconds": seconds,
+        "db_base_seconds": seconds,
+    }
 
 
 def _db_target_shape(state) -> tuple[int, int]:
@@ -1465,13 +1493,20 @@ def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print
         raise gr.Error("Paint a card / wand shape in the dark workshop first, then Start exposure.")
 
     mode = "dodge" if str(mode).lower().startswith("dodge") else "burn"
+    base_seconds = float(print_exposure)
+    if mode == "dodge" and seconds > base_seconds:
+        raise gr.Error(
+            f"Dodge pass ({seconds}s) can’t exceed the base exposure ({base_seconds:g}s). "
+            "Shorten the dodge timer or lengthen the base."
+        )
+
     state = {**state}
+    state = _remember_print_seconds(state, base_seconds)
     state["db_exposing"] = True
     state["db_mode"] = mode
     state["db_seconds_left"] = float(seconds)
     state["db_total_seconds"] = seconds
     state["db_tick_seconds"] = TICK_SECONDS
-    state["db_stops_per_tick"] = stops_per_tick(seconds, TICK_SECONDS)
     state["db_feather_px"] = 4.0
     state["db_stamp"] = stamp
     tint = (120, 200, 255) if mode == "dodge" else (255, 200, 90)
@@ -1489,14 +1524,14 @@ def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print
     state["db_stamp_frac"] = float(stamp.shape[1]) / float(max(w, 1))
 
     verb = "Dodging" if mode == "dodge" else "Burning"
-    total_stops = seconds_to_stops(seconds)
+    total_stops = relative_pass_stops(seconds, base_seconds, mode)
     status = (
-        f"**{verb}** — {seconds}s · ~{total_stops:.2f} stops if held still.  \n"
+        f"**{verb}** — {seconds}s of {base_seconds:g}s base · ~{total_stops:+.2f} stops if held still.  \n"
         f"_Wave the card over the **live print** on the right. Result appears when the timer ends._"
     )
     timer_md = (
-        f"**{verb}… {seconds}s** — move the card over the live print "
-        f"(hold pointer on the print)"
+        f"**{verb}… {seconds}s** — wave over the live print "
+        f"(base timer {base_seconds:g}s)"
     )
     if state.get("dn") is not None:
         summary = f"{_stage_banner('print', _locks(state))}\n\n{status}\n\n{_history_md(state['dn'])}"
@@ -1534,7 +1569,7 @@ def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, sta
         t,
         state["dn"],
         paper,
-        overall_exposure=float(print_exposure),
+        base_exposure_seconds=float(print_exposure),
         grade=float(print_grade),
         contrast=float(print_contrast),
         local_stops=local_stops_from_state(state),
@@ -1559,7 +1594,7 @@ def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, sta
         f"{_stage_banner('print', _locks(state))}\n\n"
         f"{status_md}\n\n"
         f"**Print preview** {live_rgb.shape[1]}×{live_rgb.shape[0]}  \n"
-        f"{paper.name} · g{float(print_grade):.1f} · exp {float(print_exposure):+.2f} · "
+        f"{paper.name} · g{float(print_grade):.1f} · {_print_timer_label(print_exposure)} · "
         f"local passes={len(strokes)}\n\n{_history_md(state['dn'])}"
     )
     state = {
@@ -1569,6 +1604,7 @@ def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, sta
         "summary_cache": summary,
         "viewer_mode": "live",
     }
+    state = _remember_print_seconds(state, print_exposure)
     st, hi = _split_summary(summary)
     return live_rgb, timer_line, st, hi, state
 
@@ -1842,15 +1878,23 @@ def build_ui() -> gr.Blocks:
                         value=PAPER_CHOICES[0][1] if PAPER_CHOICES else None,
                         label="Paper",
                     )
-                    print_exposure = gr.Slider(-2.0, 2.0, value=0.0, step=0.05, label="Exposure (stops)")
+                    print_exposure = gr.Slider(
+                        2.0,
+                        64.0,
+                        value=8.0,
+                        step=0.5,
+                        label="Base exposure (seconds)",
+                        info="Enlarger timer — dodge/burn is relative to this base",
+                    )
                     print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="MG filtration")
                     print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter nudge")
                     with gr.Accordion("Dodge & burn (enlarger card)", open=True):
                         gr.Markdown(
-                            "1) Paint a **card / wand** shape on the dark pad  \n"
-                            "2) **Start exposure**  \n"
-                            "3) **Wave** that card over the live print while the timer counts  \n"
-                            "4) When it stops, inspect the result. Reset clears local work only.",
+                            "Set the **base exposure** timer above first. Then:  \n"
+                            "1) Paint a **card / wand** on the dark pad  \n"
+                            "2) **Start** a dodge or burn pass (seconds of that base)  \n"
+                            "3) **Wave** over the live print while it counts  \n"
+                            "4) When it stops, inspect. Reset clears local work only.",
                             elem_id="db_hint",
                         )
                         db_editor = gr.ImageEditor(
@@ -1876,7 +1920,14 @@ def build_ui() -> gr.Blocks:
                             value="burn",
                             label="Mode",
                         )
-                        db_seconds = gr.Slider(1, 16, value=4, step=1, label="Timer (seconds)")
+                        db_seconds = gr.Slider(
+                            1,
+                            32,
+                            value=4,
+                            step=1,
+                            label="Dodge/burn pass (seconds)",
+                            info="Relative to the base exposure timer above",
+                        )
                         db_timer_md = gr.Markdown(
                             "**Ready** — Commit Develop, cut a card shape, then Start exposure."
                         )
@@ -1997,6 +2048,26 @@ def build_ui() -> gr.Blocks:
             # Drag = fast lower-res; release/change = commit-quality preview
             ctrl.input(fn=live_preview_drag, inputs=preview_inputs, outputs=preview_outputs)
             ctrl.change(fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs)
+
+        def _sync_db_pass_timer(base_seconds, mode, current_pass):
+            base = max(2.0, float(base_seconds))
+            cur = int(round(float(current_pass)))
+            if str(mode).lower().startswith("dodge"):
+                mx = max(1, int(round(base)))
+                return gr.update(maximum=mx, value=min(cur, mx))
+            mx = max(1, int(round(base * 2)))
+            return gr.update(maximum=mx, value=min(cur, mx))
+
+        print_exposure.change(
+            fn=_sync_db_pass_timer,
+            inputs=[print_exposure, db_mode, db_seconds],
+            outputs=[db_seconds],
+        )
+        db_mode.change(
+            fn=_sync_db_pass_timer,
+            inputs=[print_exposure, db_mode, db_seconds],
+            outputs=[db_seconds],
+        )
 
         # Film / developer swap chemistry list + datasheet-normal minutes, then refresh.
         film.change(

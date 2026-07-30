@@ -396,14 +396,16 @@ def test_heif_ingest_decodes():
 
 def test_dodge_burn_timer_darkens_and_lightens():
     from digital_negative.dodge_burn import (
+        REFERENCE_BASE_SECONDS,
+        TICK_SECONDS,
         apply_exposure_tick,
+        base_seconds_to_stops,
         ensure_accum,
         extract_tool_stamp,
+        local_stops_from_state,
         mask_from_editor,
         place_stamp,
-        seconds_to_stops,
-        stops_per_tick,
-        TICK_SECONDS,
+        relative_pass_stops,
     )
 
     dn = ingest_path(None)
@@ -411,7 +413,12 @@ def test_dodge_burn_timer_darkens_and_lightens():
     paper = load_paper_profile(ROOT / "profiles" / "papers" / "mg-standard-v1.json")
     developed = develop(dn, profile, grain_strength=0.0, commit=False)
     base = print_negative(
-        developed.transmittance, dn, paper, overall_exposure=0.0, grade=2.5, commit=False
+        developed.transmittance,
+        dn,
+        paper,
+        base_exposure_seconds=REFERENCE_BASE_SECONDS,
+        grade=2.5,
+        commit=False,
     )
     h, w = base.preview.shape
     layer = np.zeros((h, w, 4), dtype=np.float32)
@@ -436,7 +443,8 @@ def test_dodge_burn_timer_darkens_and_lightens():
             "db_seconds_left": float(seconds),
             "db_total_seconds": seconds,
             "db_tick_seconds": TICK_SECONDS,
-            "db_stops_per_tick": stops_per_tick(seconds, TICK_SECONDS),
+            "db_base_seconds": REFERENCE_BASE_SECONDS,
+            "print_base_seconds": REFERENCE_BASE_SECONDS,
             "db_feather_px": 3.0,
             "db_strokes": [],
             "db_stamp": stamp,
@@ -451,9 +459,9 @@ def test_dodge_burn_timer_darkens_and_lightens():
             developed.transmittance,
             dn,
             paper,
-            overall_exposure=0.0,
+            base_exposure_seconds=REFERENCE_BASE_SECONDS,
             grade=2.5,
-            local_stops=st["db_accum"],
+            local_stops=local_stops_from_state(st),
             commit=False,
         )
 
@@ -470,7 +478,8 @@ def test_dodge_burn_timer_darkens_and_lightens():
         "db_seconds_left": 1.0,
         "db_total_seconds": 1,
         "db_tick_seconds": 0.5,
-        "db_stops_per_tick": seconds_to_stops(1) * 0.5,
+        "db_base_seconds": REFERENCE_BASE_SECONDS,
+        "print_base_seconds": REFERENCE_BASE_SECONDS,
         "db_strokes": [],
         "db_stamp": card,
     }
@@ -478,16 +487,37 @@ def test_dodge_burn_timer_darkens_and_lightens():
     apply_exposure_tick(st, None, height=100, width=100, position=(0.2, 0.2))
     a = st["db_accum"].copy()
     apply_exposure_tick(st, None, height=100, width=100, position=(0.8, 0.8))
-    # Corner near first stamp should not increase on the second tick.
     assert float(st["db_accum"][20, 20]) == float(a[20, 20])
     assert float(st["db_accum"][80, 80]) > float(a[80, 80])
     placed = place_stamp(100, 100, card, 0.5, 0.5)
     assert float(placed[50, 50]) > 0.5
 
 
-def test_dodge_burn_seconds_helpers():
-    from digital_negative.dodge_burn import seconds_to_stops, stops_per_tick, TICK_SECONDS
+def test_print_base_seconds_maps_to_stops():
+    from digital_negative.dodge_burn import (
+        REFERENCE_BASE_SECONDS,
+        base_seconds_to_stops,
+        relative_pass_stops,
+        seconds_to_stops,
+    )
 
-    assert abs(seconds_to_stops(8.0) - 1.0) < 1e-6
-    assert stops_per_tick(8.0, TICK_SECONDS) > 0
+    assert abs(base_seconds_to_stops(REFERENCE_BASE_SECONDS) - 0.0) < 1e-6
+    assert base_seconds_to_stops(16.0) > 0.9
+    assert base_seconds_to_stops(4.0) < -0.9
+    assert abs(seconds_to_stops(REFERENCE_BASE_SECONDS) - 1.0) < 1e-6
+    assert relative_pass_stops(4.0, 8.0, "burn") > 0
+    assert relative_pass_stops(4.0, 8.0, "dodge") < 0
+
+    dn = ingest_path(None)
+    profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
+    paper = load_paper_profile(ROOT / "profiles" / "papers" / "mg-standard-v1.json")
+    developed = develop(dn, profile, grain_strength=0.0, commit=False)
+    short = print_negative(
+        developed.transmittance, dn, paper, base_exposure_seconds=4.0, grade=2.5, commit=False
+    )
+    long = print_negative(
+        developed.transmittance, dn, paper, base_exposure_seconds=16.0, grade=2.5, commit=False
+    )
+    assert float(long.preview.mean()) < float(short.preview.mean())
+    assert abs(float(dn.metadata["print"]["base_exposure_seconds"]) - 16.0) < 1e-6
 
