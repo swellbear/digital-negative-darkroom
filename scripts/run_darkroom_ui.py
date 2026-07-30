@@ -361,9 +361,26 @@ UI_JS = """
     apply(findImg());
   }
 
+  const hideClockChrome = () => {
+    document.querySelectorAll('.db_clock_hidden').forEach((el) => {
+      el.style.cssText =
+        'position:absolute;left:-9999px;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;';
+      el.setAttribute('aria-hidden', 'true');
+    });
+    document.querySelectorAll('#db_actions, #controls_col').forEach((root) => {
+      root.querySelectorAll('span, p, div').forEach((node) => {
+        const t = (node.textContent || '').trim();
+        if (/^\d+(\.\d+)?s$/.test(t) && node.children.length === 0) {
+          node.style.display = 'none';
+        }
+      });
+    });
+  };
+
   const boot = () => {
     enhance('#live_preview');
     enhance('#inspect_preview');
+    hideClockChrome();
   };
   boot();
   new MutationObserver(boot).observe(document.body, { childList: true, subtree: true });
