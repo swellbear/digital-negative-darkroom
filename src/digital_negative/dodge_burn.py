@@ -267,18 +267,22 @@ def place_stamp(
 
 
 def stamp_to_png_data_url(stamp: np.ndarray, *, tint: tuple[int, int, int] = (255, 200, 90)) -> str:
-    """Encode stamp as a translucent PNG data-URL for the wave cursor overlay."""
+    """Encode stamp as a translucent PNG with a hard outline for the wave cursor."""
     from PIL import Image
 
     s = np.clip(stamp, 0.0, 1.0)
     h, w = s.shape
+    # Soft fill + crisp edge so the tool silhouette reads on grainy prints.
+    edge = np.clip(s - gaussian_filter(s, sigma=1.1), 0.0, 1.0)
+    if float(edge.max()) > 1e-6:
+        edge = edge / float(edge.max())
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
     rgba[..., 0] = tint[0]
     rgba[..., 1] = tint[1]
     rgba[..., 2] = tint[2]
-    rgba[..., 3] = (s * 200.0).astype(np.uint8)
+    rgba[..., 3] = np.clip(s * 110.0 + edge * 220.0, 0, 255).astype(np.uint8)
     buf = io.BytesIO()
-    Image.fromarray(rgba, mode="RGBA").save(buf, format="PNG")
+    Image.fromarray(rgba, mode="RGBA").save(buf, format="PNG", optimize=True)
     b64 = base64.b64encode(buf.getvalue()).decode("ascii")
     return f"data:image/png;base64,{b64}"
 
