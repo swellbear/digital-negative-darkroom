@@ -23,10 +23,16 @@ from digital_negative.auto_crop import (
     parse_aspect_ratio,
     suggest_crop_box,
 )
+from digital_negative.analysis import (
+    build_curve_report,
+    curve_summary_markdown,
+    render_curve_plot,
+)
 from digital_negative.chemistry import (
     chemistry_choices,
     default_chemistry_id,
     get_chemistry,
+    resolve_relative_time,
     time_slider_bounds,
 )
 from digital_negative.curves import load_film_profile
@@ -931,7 +937,7 @@ body.drawer-collapsed #drawer_host {
   overflow: hidden !important;
   pointer-events: none !important;
 }
-#preview_tool, #active_drawer, #crop_rect, #db_pos {
+#preview_tool, #active_drawer, #crop_rect, #db_pos, #curves_open {
   position: absolute !important;
   left: -9999px !important;
   width: 1px !important;
@@ -1099,6 +1105,40 @@ body.module-collapsed #module_panel {
   min-height: 0 !important;
   margin-right: 3px !important;
 }
+/* Gradio wraps an Image in a <button>; the module-panel button height rule
+   above squeezed the curve plot to 20px. Let this one size to its box. */
+#module_panel #curve_plot,
+#module_panel #curve_plot .image-container,
+#module_panel #curve_plot .image-frame,
+#module_panel #curve_plot > button,
+#module_panel #curve_plot .image-container > button,
+#module_panel #curve_plot .wrap,
+#module_panel #curve_plot [data-testid="image"] {
+  height: auto !important;
+  min-height: 280px !important;
+  max-height: none !important;
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: var(--dr-bg-panel) !important;
+  border-radius: 5px !important;
+  overflow: visible !important;
+  padding: 0 !important;
+  flex: 0 0 auto !important;
+}
+#module_panel #curve_plot img {
+  width: 100% !important;
+  height: auto !important;
+  min-height: 260px !important;
+  max-height: none !important;
+  object-fit: contain !important;
+  cursor: zoom-in;
+  display: block !important;
+}
+#curve_plot [data-testid="block-label"],
+#curve_plot .icon-button-wrapper { display: none !important; }
+#curve_summary { margin-bottom: 4px !important; }
 .mod-icon {
   display: inline-flex;
   vertical-align: -2px;
@@ -1332,6 +1372,7 @@ UI_JS = """
   // ——— Module panel header icons (Inspect / Dodge & burn / Crop & straighten) ———
   const MODULE_ICONS = {
     mod_inspect: '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16" y2="16"/>',
+    mod_curves: '<path d="M3 20V4"/><path d="M3 20h18"/><path d="M4 17c4-1 6-9 8-11s4 3 8 4"/>',
     mod_dodge_burn: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2"/><path d="M12 19v2"/><path d="M5 5l1.4 1.4"/><path d="M17.6 17.6 19 19"/><path d="M3 12h2"/><path d="M19 12h2"/><path d="M5 19l1.4-1.4"/><path d="M17.6 6.4 19 5"/>',
     mod_crop: '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
   };
@@ -2364,6 +2405,15 @@ UI_JS = """
         } else {
           hideTool();
         }
+      } else if (id === 'mod_curves' && open) {
+        // Nudge the hidden box so the server rebuilds the plot on open.
+        const root = document.querySelector('#curves_open');
+        const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+        if (box) {
+          box.value = String(Date.now());
+          box.dispatchEvent(new Event('input', { bubbles: true }));
+          box.dispatchEvent(new Event('change', { bubbles: true }));
+        }
       }
     }, 30);
   });
@@ -2655,6 +2705,43 @@ def _profile_path(paths, profile_id: str) -> Path:
 
 def _film_profile(film_id: str):
     return load_film_profile(_profile_path(list_film_profiles(), film_id))
+
+
+def refresh_curves(
+    film_id, developer_id, development_minutes, contrast, paper_id, print_grade,
+    print_exposure, state,
+):
+    """Sample the curves currently in play and report where this frame lands."""
+    if not state or state.get("dn") is None:
+        return (
+            gr.update(),
+            "_Commit Ingest first — the scene is what makes these curves useful._",
+        )
+    profile = _film_profile(film_id)
+    chem = get_chemistry(profile, developer_id)
+    minutes = float(development_minutes) if chem is not None else None
+    rel, minutes_resolved, _style = resolve_relative_time(
+        profile,
+        str(developer_id),
+        development_minutes=minutes,
+        relative_time=None if minutes is not None else 1.0,
+    )
+    paper = None
+    if _locked(state, "development"):
+        paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
+
+    report = build_curve_report(
+        state["dn"],
+        profile,
+        relative_time=rel,
+        contrast_modifier=float(contrast),
+        developer_id=str(developer_id),
+        development_minutes=minutes_resolved,
+        paper=paper,
+        grade=float(print_grade),
+        base_exposure_seconds=float(print_exposure),
+    )
+    return render_curve_plot(report), curve_summary_markdown(report)
 
 
 def _chem_time_update(film_id: str, developer_id: str, *, reset_to_normal: bool = True):
@@ -5065,6 +5152,29 @@ def build_ui() -> gr.Blocks:
                         "fullscreen for a larger view."
                     )
 
+                with gr.Accordion("Curves", open=False, elem_id="mod_curves"):
+                    curve_summary = gr.Markdown(
+                        "_Commit Ingest, then refresh to see where this frame "
+                        "lands on the film and paper curves._",
+                        elem_id="curve_summary",
+                    )
+                    curve_plot = gr.Image(
+                        label="Curves",
+                        type="numpy",
+                        elem_id="curve_plot",
+                        height=300,
+                        buttons=["fullscreen"],
+                        show_label=False,
+                    )
+                    curve_refresh_btn = gr.Button(
+                        "Refresh curves", size="sm", elem_id="curve_refresh"
+                    )
+                    # Bumped by JS when the module expands, so the plot is
+                    # rebuilt from current settings on open.
+                    curves_open = gr.Textbox(
+                        value="", elem_id="curves_open", show_label=False
+                    )
+
                 with gr.Accordion("Dodge & burn", open=False, elem_id="mod_dodge_burn"):
                     db_shape = gr.Radio(
                         choices=[(label, key) for key, label in CARD_PRESETS],
@@ -5481,6 +5591,20 @@ def build_ui() -> gr.Blocks:
             fn=suggest_auto_crop,
             inputs=[auto_crop_rule, crop_ratio, straighten_deg, state],
             outputs=[crop_rect, crop_hint],
+        )
+
+        curve_inputs = [
+            film, developer, development_minutes, contrast,
+            paper, print_grade, print_exposure, state,
+        ]
+        curve_outputs = [curve_plot, curve_summary]
+        curve_refresh_btn.click(
+            fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
+        )
+        # Opening the module should show the current state, not a stale plot.
+        # The JS sets #curves_open when the accordion expands.
+        curves_open.change(
+            fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
         )
 
         # Thumbnail / button → enlarge in main preview
