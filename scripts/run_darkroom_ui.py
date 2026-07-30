@@ -142,12 +142,12 @@ html, body {
 }
 #app_header p, #app_header .md, #app_header ul { display: none !important; }
 
-/* Fixed non-scrolling workspace */
+/* Fixed non-scrolling workspace — leave room for Gradio footer */
 #main_workspace {
   flex: 1 1 auto !important;
   min-height: 0 !important;
   height: 100% !important;
-  max-height: calc(100vh - 36px) !important;
+  max-height: calc(100vh - 64px) !important;
   display: flex !important;
   flex-direction: row !important;
   flex-wrap: nowrap !important;
@@ -308,7 +308,7 @@ body.drawer-collapsed #drawer_host {
   white-space: pre-wrap !important;
 }
 
-/* Preview fills remaining viewport */
+/* Preview fills remaining viewport — image scales to the stage (object-fit: contain) */
 #preview_col {
   flex: 1 1 auto !important;
   min-width: 0 !important;
@@ -323,40 +323,102 @@ body.drawer-collapsed #drawer_host {
   z-index: 1 !important;
   position: relative !important;
 }
-/* Solid stage height — Gradio + flex min-height:0 was collapsing the print to blank */
+#db_wave_banner,
+#db_size_readout {
+  flex: 0 0 auto !important;
+}
 #preview_col > .block:has(#live_preview),
 #live_preview {
-  flex: 1 1 auto !important;
-  min-height: min(68vh, 640px) !important;
-  height: auto !important;
-  max-height: none !important;
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
 }
+#live_preview > .wrap,
+#live_preview .wrap,
 #live_preview .image-frame,
 #live_preview .image-container,
 #live_preview [data-testid="image"],
 #live_preview .image-container > div {
-  min-height: min(68vh, 640px) !important;
+  width: 100% !important;
   height: 100% !important;
-  max-height: none !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
   background: #0a0a0a !important;
+  box-sizing: border-box !important;
 }
 #live_preview img,
 #live_preview .image-container img,
 #live_preview .image-frame img {
-  max-height: min(68vh, 640px) !important;
   max-width: 100% !important;
+  max-height: 100% !important;
   width: auto !important;
   height: auto !important;
   object-fit: contain !important;
 }
+/* Hide Gradio chrome that steals stage height / covers the print */
+#live_preview .icon-wrap,
+#live_preview .download,
+#live_preview button.svelte-1w6vlo0,
+#live_preview .image-button-row,
+#live_preview .icon-button-wrapper,
+#live_preview .top-panel,
+#live_preview .icon-button-wrapper.top-panel {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  background: transparent !important;
+  overflow: hidden !important;
+}
+#live_preview .label-wrap {
+  position: absolute !important;
+  top: 4px !important;
+  left: 8px !important;
+  z-index: 2 !important;
+  opacity: 0.55 !important;
+  pointer-events: none !important;
+  font-size: 0.7rem !important;
+  background: transparent !important;
+}
 #seq_strip {
   flex: 0 0 auto !important;
   gap: 6px !important;
-  align-items: center !important;
-  min-height: 64px !important;
+  align-items: flex-end !important;
+  min-height: 96px !important;
+  max-height: none !important;
+  overflow: visible !important;
+  padding-bottom: 2px !important;
+}
+#seq_strip .block {
+  overflow: visible !important;
+}
+#seq_strip .image-container,
+#seq_strip .image-frame {
+  height: 56px !important;
+  min-height: 56px !important;
+  max-height: 56px !important;
+}
+#seq_strip .label-wrap {
+  font-size: 0.7rem !important;
+  margin: 0 !important;
+  line-height: 1.1 !important;
+}
+#seq_strip img { max-height: 52px !important; object-fit: contain !important; }
+#seq_strip button {
+  min-height: 28px !important;
+  font-size: 0.72rem !important;
+  padding: 2px 8px !important;
 }
 /* Floating toolbars live in #float_host — never steal preview flex space */
 #float_host {
@@ -378,17 +440,6 @@ body.drawer-collapsed #drawer_host {
 }
 #float_host .float-toolbar.is-open {
   pointer-events: auto !important;
-}
-#seq_strip .image-container,
-#seq_strip .image-frame {
-  height: 56px !important;
-  min-height: 56px !important;
-}
-#seq_strip img { max-height: 52px !important; object-fit: contain !important; }
-#seq_strip button {
-  min-height: 28px !important;
-  font-size: 0.72rem !important;
-  padding: 2px 8px !important;
 }
 #preview_tool, #active_drawer, #crop_rect, #db_pos {
   position: absolute !important;
@@ -1130,6 +1181,9 @@ UI_JS = """
   };
 
   const syncOverlay = () => {
+    if (window.__cropOverlaySyncing) return;
+    window.__cropOverlaySyncing = true;
+    try {
     const stage = document.querySelector('#live_preview');
     if (!stage || syncPreviewToolClasses() !== 'frame') {
       const overlay = document.getElementById('crop_overlay');
@@ -1188,6 +1242,9 @@ UI_JS = """
     setShade('bottom', { left: '0', top: ((b.y + b.h) * 100) + '%', width: '100%', height: ((1 - b.y - b.h) * 100) + '%' });
     setShade('left', { left: '0', top: (b.y * 100) + '%', width: (b.x * 100) + '%', height: (b.h * 100) + '%' });
     setShade('right', { left: ((b.x + b.w) * 100) + '%', top: (b.y * 100) + '%', width: ((1 - b.x - b.w) * 100) + '%', height: (b.h * 100) + '%' });
+    } finally {
+      window.__cropOverlaySyncing = false;
+    }
   };
 
   const readBoxFromInput = () => {
@@ -1329,7 +1386,22 @@ UI_JS = """
     stage.addEventListener('pointerup', end);
     stage.addEventListener('pointercancel', end);
 
-    new MutationObserver(() => {
+    new MutationObserver((mutations) => {
+      // Ignore our own crop overlay DOM so appendChild cannot re-enter forever.
+      let relevant = false;
+      for (const m of mutations) {
+        const t = m.target;
+        if (t && (t.id === 'crop_overlay' || (t.closest && t.closest('#crop_overlay')))) continue;
+        let fromOverlay = false;
+        for (const n of m.addedNodes || []) {
+          if (n && n.id === 'crop_overlay') { fromOverlay = true; break; }
+          if (n && n.querySelector && n.querySelector('#crop_overlay')) { fromOverlay = true; break; }
+        }
+        if (fromOverlay) continue;
+        relevant = true;
+        break;
+      }
+      if (!relevant) return;
       readBoxFromInput();
       syncOverlay();
     }).observe(stage, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'class'] });
@@ -1450,41 +1522,59 @@ UI_JS = """
     menu.addEventListener('click', (e) => {
       const btn = e.target.closest('button[data-act]');
       if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
       const act = btn.getAttribute('data-act');
       const x = parseFloat(menu.dataset.x || '80');
       const y = parseFloat(menu.dataset.y || '80');
       menu.classList.remove('is-open');
       if (act === 'zoom') {
-        setPreviewToolValue('inspect');
-        openFloat('float_zoom', x, y);
+        setTimeout(() => {
+          setPreviewToolValue('inspect');
+          openFloat('float_zoom', x, y);
+        }, 0);
       } else if (act === 'dodge' || act === 'burn') {
-        setPreviewToolValue('print');
-        // set db_mode radio
-        const root = document.querySelector('#float_easel');
-        if (root) {
-          const input = root.querySelector(`input[type="radio"][value="${act}"]`);
-          if (input) {
-            input.checked = true;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
+        setTimeout(() => {
+          setPreviewToolValue('print');
+          // set db_mode radio
+          const root = document.querySelector('#float_easel');
+          if (root) {
+            const input = root.querySelector(`input[type="radio"][value="${act}"]`);
+            if (input) {
+              input.checked = true;
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
           }
-        }
-        openFloat('float_easel', x, y);
+          openFloat('float_easel', x, y);
+        }, 0);
       } else if (act === 'crop') {
-        writeActiveDrawer('frame');
-        applyDrawer('frame', { fromServer: true });
-        setPreviewToolValue('frame');
-        openFloat('float_crop', x, y);
+        // Defer — building the crop overlay during the menu click freezes the tab.
+        const mx = x, my = y;
+        setTimeout(() => {
+          writeActiveDrawer('frame');
+          applyDrawer('frame', { fromServer: true });
+          setPreviewToolValue('frame');
+          openFloat('float_crop', mx, my);
+          setTimeout(() => syncOverlay(), 30);
+        }, 0);
       } else if (act === 'autocrop') {
-        writeActiveDrawer('frame');
-        applyDrawer('frame', { fromServer: true });
-        setPreviewToolValue('frame');
-        openFloat('float_crop', x, y);
-        // Click Auto crop if present
-        const autoBtn = Array.from(document.querySelectorAll('button')).find(
-          (b) => (b.textContent || '').trim() === 'Auto crop'
-        );
-        if (autoBtn) autoBtn.click();
+        // Never find buttons by label "Auto crop" — that matches this menu item
+        // and recurses until the tab freezes. Defer all work off the click stack.
+        const mx = x, my = y;
+        setTimeout(() => {
+          writeActiveDrawer('frame');
+          applyDrawer('frame', { fromServer: true });
+          setPreviewToolValue('frame');
+          openFloat('float_crop', mx, my);
+          setTimeout(() => {
+            syncOverlay();
+            const root = document.querySelector('#auto_crop_btn');
+            const autoBtn = root && (root.matches('button') ? root : root.querySelector('button'));
+            if (!autoBtn || autoBtn.disabled || autoBtn.dataset.act === 'autocrop') return;
+            autoBtn.click();
+          }, 80);
+        }, 0);
       }
     });
     return menu;
@@ -1539,6 +1629,113 @@ UI_JS = """
   };
   setInterval(syncDrawerFromBox, 400);
   applyDrawer(readActiveDrawer() || 'ingest', { fromServer: true });
+
+  // Fit the live print stage to remaining #preview_col space.
+  // Do NOT MutationObserver 'style' — writing heights would re-enter forever.
+  const setStyleIfChanged = (el, prop, value) => {
+    if (!el) return;
+    if (el.style[prop] !== value) el.style[prop] = value;
+  };
+  const fitLiveStage = () => {
+    if (window.__fitLiveBusy) return;
+    window.__fitLiveBusy = true;
+    try {
+      const col = document.querySelector('#preview_col');
+      const live = document.querySelector('#live_preview');
+      if (!col || !live) return;
+      const colRect = col.getBoundingClientRect();
+      if (colRect.height < 80) return;
+      let used = 12;
+      ['#db_wave_banner', '#db_size_readout', '#seq_strip'].forEach((sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return;
+        // Prefer scrollHeight so labeled thumbs aren't clipped out of the budget.
+        used += Math.max(el.getBoundingClientRect().height, el.scrollHeight || 0);
+      });
+      // Keep a little air above the Gradio footer.
+      used += 8;
+      const h = Math.max(200, Math.floor(colRect.height - used));
+      const hPx = h + 'px';
+      if (live.dataset.fitH === hPx) return;
+      live.dataset.fitH = hPx;
+      const block = live.closest('.block') || live;
+      [block, live].forEach((el) => {
+        setStyleIfChanged(el, 'flex', '1 1 0');
+        setStyleIfChanged(el, 'height', hPx);
+        setStyleIfChanged(el, 'minHeight', hPx);
+        setStyleIfChanged(el, 'maxHeight', hPx);
+        setStyleIfChanged(el, 'overflow', 'hidden');
+      });
+      live.querySelectorAll(
+        '.wrap, .image-container, .image-frame, [data-testid="image"], .image-container > div'
+      ).forEach((el) => {
+        if (el.id === 'crop_overlay' || (el.closest && el.closest('#crop_overlay'))) return;
+        setStyleIfChanged(el, 'height', hPx);
+        setStyleIfChanged(el, 'maxHeight', hPx);
+        setStyleIfChanged(el, 'minHeight', '0px');
+        setStyleIfChanged(el, 'width', '100%');
+        setStyleIfChanged(el, 'overflow', 'hidden');
+        setStyleIfChanged(el, 'display', 'flex');
+        setStyleIfChanged(el, 'alignItems', 'center');
+        setStyleIfChanged(el, 'justifyContent', 'center');
+        setStyleIfChanged(el, 'boxSizing', 'border-box');
+      });
+      const img = live.querySelector('img');
+      if (img) {
+        setStyleIfChanged(img, 'maxHeight', hPx);
+        setStyleIfChanged(img, 'maxWidth', '100%');
+        setStyleIfChanged(img, 'width', 'auto');
+        setStyleIfChanged(img, 'height', 'auto');
+        setStyleIfChanged(img, 'objectFit', 'contain');
+      }
+    } finally {
+      window.__fitLiveBusy = false;
+    }
+  };
+  let fitPending = false;
+  const scheduleFit = () => {
+    if (fitPending) return;
+    fitPending = true;
+    requestAnimationFrame(() => {
+      fitPending = false;
+      fitLiveStage();
+    });
+  };
+  window.addEventListener('resize', scheduleFit);
+  setInterval(scheduleFit, 1200);
+  scheduleFit();
+  const colEl = document.querySelector('#preview_col');
+  if (colEl && typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(scheduleFit).observe(colEl);
+  }
+  const liveEl = document.querySelector('#live_preview');
+  if (liveEl) {
+    new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === 'attributes' && m.attributeName === 'src') {
+          liveEl.dataset.fitH = '';
+          scheduleFit();
+          return;
+        }
+        if (m.type === 'childList') {
+          for (const n of m.addedNodes || []) {
+            if (n.nodeName === 'IMG' || (n.querySelector && n.querySelector('img'))) {
+              liveEl.dataset.fitH = '';
+              scheduleFit();
+              return;
+            }
+          }
+        }
+      }
+    }).observe(liveEl, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['src'],
+    });
+  }
 })();
 """
 
@@ -2307,6 +2504,19 @@ def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
     if src is None:
         raise gr.Error("No framing base to analyze.")
     img = np.asarray(src)
+    # Composition heuristics don't need full-res — keep the UI responsive.
+    h0, w0 = img.shape[:2]
+    max_side = 960
+    m = max(h0, w0)
+    if m > max_side:
+        if img.dtype == np.uint8 or (img.ndim == 3 and img.shape[2] >= 3):
+            img = _downscale_rgb(img, max_side)
+        else:
+            scale = max_side / float(m)
+            nh, nw = max(1, int(round(h0 * scale))), max(1, int(round(w0 * scale)))
+            yy = (np.linspace(0, h0 - 1, nh)).astype(np.int32)
+            xx = (np.linspace(0, w0 - 1, nw)).astype(np.int32)
+            img = img[yy][:, xx]
     if abs(deg) >= 1e-6:
         img = straighten_image(
             img.astype(np.float32) if img.dtype == np.uint8 else img,
@@ -3731,8 +3941,8 @@ def build_ui() -> gr.Blocks:
                     label=LIVE_PRINT_LABEL + " · easel",
                     type="numpy",
                     elem_id="live_preview",
-                    height=640,
-                    buttons=["fullscreen", "download"],
+                    height=720,
+                    buttons=[],
                 )
 
                 with gr.Row(elem_id="seq_strip"):
@@ -3841,7 +4051,12 @@ def build_ui() -> gr.Blocks:
                         scale=3,
                     )
                     auto_crop_btn = gr.Button(
-                        "Auto crop", interactive=False, variant="secondary", size="sm", scale=1
+                        "Auto crop",
+                        interactive=False,
+                        variant="secondary",
+                        size="sm",
+                        scale=1,
+                        elem_id="auto_crop_btn",
                     )
                 crop_rect = gr.Textbox(
                     value=DEFAULT_CROP_RECT,
