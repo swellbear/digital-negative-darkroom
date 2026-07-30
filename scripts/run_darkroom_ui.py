@@ -516,14 +516,18 @@ UI_JS = """
 
   const hideClockChrome = () => {
     document.querySelectorAll('.db_clock_hidden').forEach((el) => {
+      if (el.dataset.dbClockHidden === '1') return;
+      el.dataset.dbClockHidden = '1';
       el.style.cssText =
         'position:absolute;left:-9999px;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;';
       el.setAttribute('aria-hidden', 'true');
     });
     document.querySelectorAll('#db_actions, #controls_col').forEach((root) => {
       root.querySelectorAll('span, p, div').forEach((node) => {
+        if (node.dataset.dbDurHidden === '1') return;
         const t = (node.textContent || '').trim();
         if (/^\\d+(\\.\\d+)?s$/.test(t) && node.children.length === 0) {
+          node.dataset.dbDurHidden = '1';
           node.style.display = 'none';
         }
       });
@@ -714,22 +718,57 @@ UI_JS = """
     showToolAt(e.clientX, e.clientY, flag, false);
   };
 
+  let bootScheduled = false;
   const boot = () => {
-    enhance('#live_preview');
-    enhance('#inspect_preview');
-    hideClockChrome();
-    syncWave();
+    // Coalesce observer storms — never re-enter synchronously.
+    if (bootScheduled) return;
+    bootScheduled = true;
+    requestAnimationFrame(() => {
+      bootScheduled = false;
+      if (window.__dbBootLock) return;
+      window.__dbBootLock = true;
+      try {
+        enhance('#live_preview');
+        enhance('#inspect_preview');
+        hideClockChrome();
+        syncWave();
+      } finally {
+        window.__dbBootLock = false;
+      }
+    });
   };
   boot();
-  document.addEventListener('pointermove', onLivePointer, { passive: true });
-  document.addEventListener('pointerdown', onLivePointer, { passive: true });
-  // Narrow observer — body-wide observation re-entered on every tool move.
+  // Only track the print for tool cursor — never hijack control clicks (upload, etc.).
+  const liveRoot = () => document.querySelector('#live_preview');
+  document.addEventListener('pointermove', (e) => {
+    const live = liveRoot();
+    if (!live || !live.contains(e.target)) {
+      if (window.__dbHoveringPrint) {
+        window.__dbHoveringPrint = false;
+        const flag = readFlag();
+        if (flag && live && live.querySelector('img')) placeRestingCard(live, flag);
+      }
+      return;
+    }
+    onLivePointer(e);
+  }, { passive: true });
+  document.addEventListener('pointerdown', (e) => {
+    const live = liveRoot();
+    if (!live || !live.contains(e.target)) return;
+    onLivePointer(e);
+  }, { passive: true });
+  // Observe only flag + live preview. Do NOT watch #controls_col — style tweaks
+  // there used to re-enter MutationObserver and freeze Upload / Commit clicks.
   const observeRoots = () => {
-    ['#db_flag', '#live_preview', '#controls_col'].forEach((sel) => {
+    const specs = [
+      ['#db_flag', { childList: true, subtree: true, attributes: true, attributeFilter: ['data-exposing', 'data-shape', 'data-mode', 'data-stamp-fw', 'src'] }],
+      ['#live_preview', { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'class'] }],
+    ];
+    specs.forEach(([sel, opts]) => {
       const el = document.querySelector(sel);
       if (el && el.dataset.dbObs !== '1') {
         el.dataset.dbObs = '1';
-        new MutationObserver(boot).observe(el, { childList: true, subtree: true, attributes: true });
+        new MutationObserver(boot).observe(el, opts);
       }
     });
   };
@@ -2386,7 +2425,9 @@ def build_ui() -> gr.Blocks:
                             ".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp",
                             ".heic", ".heif", ".avif",
                         ],
-                        height=56,
+                        # Gradio 6 needs a real drop-zone height — 56px made "Click to upload" unreliable.
+                        height=120,
+                        elem_id="ingest_upload",
                     )
                     ingest_btn = gr.Button("Commit Ingest", variant="primary", size="sm")
 
