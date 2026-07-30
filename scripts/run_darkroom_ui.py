@@ -81,26 +81,30 @@ UI_CSS = """
   min-width: 0 !important;
 }
 #controls_col {
-  flex: 0 0 320px !important;
-  width: 320px !important;
-  max-width: 320px !important;
+  flex: 0 0 340px !important;
+  width: 340px !important;
+  max-width: 340px !important;
   position: sticky !important;
   top: 6px !important;
   max-height: calc(100vh - 16px) !important;
+  /* Scroll the column; keep x visible so open dropdowns are not clipped */
   overflow-y: auto !important;
-  overflow-x: hidden !important;
-  padding-right: 6px !important;
+  overflow-x: visible !important;
+  padding-right: 8px !important;
   align-self: flex-start !important;
+  z-index: 30 !important;
 }
 #preview_col {
   flex: 1 1 auto !important;
   min-width: 0 !important;
+  z-index: 1 !important;
 }
 /* Compact control density */
 #controls_col .block {
   margin-top: 2px !important;
   margin-bottom: 2px !important;
   padding: 0 !important;
+  overflow: visible !important;
 }
 #controls_col .label-wrap,
 #controls_col label,
@@ -110,17 +114,50 @@ UI_CSS = """
 }
 #controls_col .form {
   gap: 4px !important;
+  overflow: visible !important;
 }
 #controls_col button {
   min-height: 34px !important;
   font-size: 0.9rem !important;
 }
+/* Accordion: never clip body — show full Develop/Print/Inspect controls */
+#controls_col .accordion,
+#controls_col .accordion > .wrap,
+#controls_col .accordion > div,
+#preview_col .accordion,
+#preview_col .accordion > .wrap,
+#preview_col .accordion > div {
+  overflow: visible !important;
+  max-height: none !important;
+}
+#controls_col .accordion .wrap,
+#preview_col .accordion .wrap {
+  height: auto !important;
+}
 #controls_col .accordion {
-  margin-bottom: 4px !important;
+  margin-bottom: 6px !important;
 }
 #controls_col .accordion > .label-wrap {
   padding: 6px 8px !important;
   font-size: 0.9rem !important;
+}
+/* Open dropdown lists (film / developer / paper) must escape parents */
+#controls_col [role="listbox"],
+#controls_col ul.options,
+#controls_col .options,
+#controls_col .secondary-wrap {
+  z-index: 9999 !important;
+}
+#controls_col [role="listbox"],
+#controls_col ul.options {
+  max-height: min(55vh, 420px) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+/* Avoid clipping long chemistry names in the closed dropdown */
+#controls_col .wrap.fullscreen-allowed,
+#controls_col .container {
+  overflow: visible !important;
 }
 #app_header h1 {
   font-size: 1.35rem !important;
