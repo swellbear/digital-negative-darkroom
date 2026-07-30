@@ -111,7 +111,11 @@ def _read_raw_linear(path: Path) -> tuple[np.ndarray, dict[str, Any], dict[str, 
 
 def _read_image_linear(path: Path) -> tuple[np.ndarray, dict[str, Any], dict[str, Any]]:
     """Decode a rendered image by undoing sRGB TRC (pragmatic approximation)."""
+    from PIL import ImageOps
+
     with Image.open(path) as im:
+        # Honor embedded EXIF orientation so phone JPEGs aren't sideways
+        im = ImageOps.exif_transpose(im)
         im = im.convert("RGB")
         arr = np.asarray(im).astype(np.float32) / 255.0
     # Approximate inverse sRGB for a near-linear working space

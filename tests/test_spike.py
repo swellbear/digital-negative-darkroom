@@ -228,6 +228,15 @@ def test_original_photo_preview_synthetic_is_rgb():
     assert rgb.dtype == np.uint8
 
 
+def test_rotate_image_clockwise_swaps_axes():
+    from digital_negative.display import rotate_image
+
+    img = np.arange(24, dtype=np.float32).reshape(3, 4, 2)
+    rotated = rotate_image(img, 1)
+    assert rotated.shape == (4, 3, 2)
+    assert np.array_equal(rotated, np.rot90(img, k=-1))
+
+
 def test_resolve_input_prefers_upload_over_sample():
     sys.path.insert(0, str(ROOT / "scripts"))
     # Import after path setup — module lives as scripts/run_darkroom_ui.py
