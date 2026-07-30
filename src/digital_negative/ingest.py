@@ -1,4 +1,9 @@
-"""Ingest camera raws (or fallback images) into a Digital Negative."""
+"""Ingest camera raws (or fallback images) into a Digital Negative.
+
+Design goal (from product critique): the Digital Negative image payload should
+be as close to linear scene-referred data as practical. Creative tone mapping
+belongs in development / print — not at ingest.
+"""
 
 from __future__ import annotations
 
@@ -34,46 +39,84 @@ def _file_hash(path: Path, nbytes: int = 1024 * 1024) -> str:
     return h.hexdigest()[:16]
 
 
-def _read_raw_linear(path: Path) -> tuple[np.ndarray, dict[str, Any]]:
+def _read_raw_linear(path: Path) -> tuple[np.ndarray, dict[str, Any], dict[str, Any]]:
+    """Decode a camera raw to linear CIE XYZ (no display tone curve).
+
+    Returns (xyz_image, source_meta, ingest_meta).
+    """
     import rawpy
 
     with rawpy.imread(str(path)) as raw:
-        rgb = raw.postprocess(
+        # gamma=(1,1) → linear encoding (no sRGB TRC).
+        # ColorSpace.XYZ → scene-referred tristimulus after WB + camera matrix.
+        # This avoids baking a display-referred sRGB look into the Digital Negative.
+        xyz = raw.postprocess(
             output_bps=16,
             no_auto_bright=True,
             gamma=(1, 1),
             use_camera_wb=True,
-            output_color=rawpy.ColorSpace.sRGB,
+            output_color=rawpy.ColorSpace.XYZ,
+            highlight_mode=rawpy.HighlightMode.Clip,
         )
         make = ""
         model = ""
-        iso = 0
         try:
             make = (raw.color.camera_manufacturer or b"").decode("utf-8", errors="ignore")
             model = (raw.color.camera_model or b"").decode("utf-8", errors="ignore")
         except Exception:
             pass
-        meta = {
+        # Camera WB multipliers when available (documented, not re-applied)
+        wb = [1.0, 1.0, 1.0, 1.0]
+        try:
+            cam_wb = list(raw.camera_whitebalance)
+            if cam_wb and len(cam_wb) >= 3:
+                wb = [float(v) for v in cam_wb[:4]] if len(cam_wb) >= 4 else [
+                    float(cam_wb[0]),
+                    float(cam_wb[1]),
+                    float(cam_wb[2]),
+                    float(cam_wb[1]),
+                ]
+        except Exception:
+            pass
+
+        source = {
             "original_filename": path.name,
             "camera_make": make,
             "camera_model": model,
-            "iso": iso,
+            "iso": 0,
             "shutter_speed": "",
             "aperture": "",
             "datetime_original": "",
             "raw_hash": _file_hash(path),
         }
-    linear = rgb.astype(np.float32) / 65535.0
-    return linear, meta
+        ingest = {
+            "white_balance": {
+                "method": "as_shot",
+                "temperature": 0,
+                "tint": 0,
+                "camera_multipliers": wb,
+            },
+            "orientation": 1,
+            "encoding": "linear",
+            "working_space": "CIE_XYZ",
+            "luminance_channel": "Y",
+            "notes": (
+                "Scene-referred linear XYZ from rawpy demosaic + camera WB. "
+                "No display tone curve applied at ingest."
+            ),
+        }
+    linear = xyz.astype(np.float32) / 65535.0
+    return linear, source, ingest
 
 
-def _read_image_linear(path: Path) -> tuple[np.ndarray, dict[str, Any]]:
+def _read_image_linear(path: Path) -> tuple[np.ndarray, dict[str, Any], dict[str, Any]]:
+    """Decode a rendered image by undoing sRGB TRC (pragmatic approximation)."""
     with Image.open(path) as im:
         im = im.convert("RGB")
         arr = np.asarray(im).astype(np.float32) / 255.0
     # Approximate inverse sRGB for a near-linear working space
     linear = np.where(arr <= 0.04045, arr / 12.92, ((arr + 0.055) / 1.055) ** 2.4)
-    meta = {
+    source = {
         "original_filename": path.name,
         "camera_make": "",
         "camera_model": "",
@@ -83,7 +126,18 @@ def _read_image_linear(path: Path) -> tuple[np.ndarray, dict[str, Any]]:
         "datetime_original": "",
         "raw_hash": _file_hash(path),
     }
-    return linear.astype(np.float32), meta
+    ingest = {
+        "white_balance": {"method": "none", "temperature": 0, "tint": 0},
+        "orientation": 1,
+        "encoding": "linear_approx",
+        "working_space": "linear_sRGB_primaries",
+        "luminance_channel": "Rec709",
+        "notes": (
+            "Rendered file: inverse sRGB TRC applied. This is an approximation — "
+            "prefer camera raws for a true Digital Negative."
+        ),
+    }
+    return linear.astype(np.float32), source, ingest
 
 
 def create_synthetic_scene(width: int = 960, height: int = 640) -> np.ndarray:
@@ -108,12 +162,12 @@ def create_synthetic_scene(width: int = 960, height: int = 640) -> np.ndarray:
     base = ramp * vignette + subject
     base = np.where(step_band, 0.01 + steps * 1.2, base)
 
-    # Mild color for RGB path (still used as luminance for B&W)
-    r = base * 1.05
-    g = base * 1.00
-    b = base * 0.92
-    rgb = np.stack([r, g, b], axis=-1)
-    return np.clip(rgb, 0.0, None).astype(np.float32)
+    # Store as faux XYZ with Y=luma and slight X/Z imbalance (still linear)
+    y_ch = base
+    x_ch = base * 1.02
+    z_ch = base * 0.96
+    xyz = np.stack([x_ch, y_ch, z_ch], axis=-1)
+    return np.clip(xyz, 0.0, None).astype(np.float32)
 
 
 def ingest_path(path: str | Path | None = None) -> DigitalNegative:
@@ -131,7 +185,14 @@ def ingest_path(path: str | Path | None = None) -> DigitalNegative:
             "raw_hash": "synthetic",
         }
         meta = default_metadata(source=source)
-        meta["ingest"]["white_balance"]["method"] = "none"
+        meta["ingest"] = {
+            "white_balance": {"method": "none", "temperature": 0, "tint": 0},
+            "orientation": 1,
+            "encoding": "linear",
+            "working_space": "CIE_XYZ",
+            "luminance_channel": "Y",
+            "notes": "Synthetic linear XYZ test scene.",
+        }
         return DigitalNegative(image=image, metadata=meta)
 
     path = Path(path)
@@ -139,9 +200,10 @@ def ingest_path(path: str | Path | None = None) -> DigitalNegative:
         raise FileNotFoundError(path)
 
     if path.suffix.lower() in RAW_SUFFIXES:
-        image, source = _read_raw_linear(path)
+        image, source, ingest = _read_raw_linear(path)
     else:
-        image, source = _read_image_linear(path)
+        image, source, ingest = _read_image_linear(path)
 
     meta = default_metadata(source=source)
+    meta["ingest"] = ingest
     return DigitalNegative(image=image, metadata=meta)

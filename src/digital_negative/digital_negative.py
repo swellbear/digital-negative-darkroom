@@ -102,7 +102,12 @@ class DigitalNegative:
     def to_luminance(self) -> np.ndarray:
         if self.image.ndim == 2:
             return self.image
-        # Rec. 709 luma coefficients on linear light
+        ingest = self.metadata.get("ingest", {})
+        space = str(ingest.get("working_space", ""))
+        # CIE XYZ payload: channel order is X, Y, Z — Y is luminance
+        if space == "CIE_XYZ" or ingest.get("luminance_channel") == "Y":
+            return self.image[..., 1].astype(np.float32)
+        # Linear RGB (e.g. inverse-sRGB JPEGs): Rec. 709 luma on linear light
         rgb = self.image
         return (0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]).astype(
             np.float32

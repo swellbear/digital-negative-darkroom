@@ -29,6 +29,7 @@ def main() -> int:
         help="Directory for TIFF/JSON/previews (default: ./output)",
     )
     parser.add_argument("--film", default="hp5-plus-v1", help="Film profile id")
+    parser.add_argument("--paper", default="mg-standard", help="Paper profile id")
     parser.add_argument(
         "--developer",
         default="standard",
@@ -47,6 +48,7 @@ def main() -> int:
         input_path=args.input,
         output_dir=args.output_dir,
         film_id=args.film,
+        paper_id=args.paper,
         developer_id=args.developer,
         relative_time=args.relative_time,
         contrast_modifier=args.contrast,

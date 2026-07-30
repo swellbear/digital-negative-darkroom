@@ -1,0 +1,23 @@
+{
+  "id": "mg-warmtone",
+  "name": "Multigrade Warmtone",
+  "version": "1.0",
+  "type": "bw_multigrade",
+  "source": {
+    "notes": "Parametric Level-3 warmtone RC response: slightly longer toe, gentler shoulder, a touch less Dmax than the standard MG paper. Tuned for enlarger feel, not datasheet digitization.",
+    "created": "2026-07-30"
+  },
+  "dmax": 1.95,
+  "dmin": 0.05,
+  "grades": {
+    "00": {"gamma": 0.50, "toe": 0.26, "shoulder": 0.32},
+    "0": {"gamma": 0.65, "toe": 0.22, "shoulder": 0.28},
+    "1": {"gamma": 0.82, "toe": 0.18, "shoulder": 0.24},
+    "2": {"gamma": 1.00, "toe": 0.14, "shoulder": 0.20},
+    "2.5": {"gamma": 1.15, "toe": 0.12, "shoulder": 0.18},
+    "3": {"gamma": 1.35, "toe": 0.11, "shoulder": 0.15},
+    "4": {"gamma": 1.70, "toe": 0.09, "shoulder": 0.12},
+    "5": {"gamma": 2.05, "toe": 0.07, "shoulder": 0.10}
+  },
+  "default_grade": 2.5
+}

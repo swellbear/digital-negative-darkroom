@@ -39,11 +39,26 @@ def list_film_profiles() -> list[Path]:
     return sorted(default_profiles_dir().glob("*-v1.json"))
 
 
+def list_paper_profiles() -> list[Path]:
+    return sorted(default_papers_dir().glob("*-v1.json"))
+
+
+def _resolve_profile(directory: Path, profile_id: str) -> Path:
+    direct = directory / f"{profile_id}.json"
+    if direct.exists():
+        return direct
+    matches = list(directory.glob(f"{profile_id}*.json"))
+    if not matches:
+        raise FileNotFoundError(f"No profile for id={profile_id} in {directory}")
+    return matches[0]
+
+
 def run_darkroom_pipeline(
     *,
     input_path: str | Path | None = None,
     output_dir: str | Path = "output",
     film_id: str = "hp5-plus-v1",
+    paper_id: str = "mg-standard",
     profile_path: str | Path | None = None,
     paper_path: str | Path | None = None,
     relative_time: float = 1.0,
@@ -60,17 +75,11 @@ def run_darkroom_pipeline(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if profile_path is None:
-        profile_path = default_profiles_dir() / f"{film_id}.json"
-        if not Path(profile_path).exists():
-            # allow bare ids without -v1
-            matches = list(default_profiles_dir().glob(f"{film_id}*.json"))
-            if not matches:
-                raise FileNotFoundError(f"No film profile for id={film_id}")
-            profile_path = matches[0]
+        profile_path = _resolve_profile(default_profiles_dir(), film_id)
     profile = load_film_profile(profile_path)
 
     if paper_path is None:
-        paper_path = default_papers_dir() / "mg-standard-v1.json"
+        paper_path = _resolve_profile(default_papers_dir(), paper_id)
     paper = load_paper_profile(paper_path)
 
     dn = ingest_path(input_path)

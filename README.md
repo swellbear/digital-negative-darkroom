@@ -4,11 +4,13 @@ Desktop darkroom workflow for digital capture: ingest a camera raw as a **Digita
 
 ## What’s working now
 
-1. Ingest raw/image (or synthetic test scene) → Digital Negative
-2. Film stocks: **HP5 Plus**, **FP4 Plus**
+1. Ingest raw/image → **linear scene-referred Digital Negative** (CIE XYZ for raws)
+2. Film stocks: **HP5 Plus**, **FP4 Plus**, **Delta 100**
 3. Development: relative time, contrast, grain, developer style
-4. Print: exposure (stops), multigrade grade, paper response
-5. CLI + sequential Gradio UI
+4. Print: exposure (stops), multigrade grade, paper response  
+   Papers: **Multigrade Standard**, **Multigrade Warmtone**
+5. Sequential Gradio UI: **Commit Ingest → Commit Develop → Commit Print**
+6. CLI
 
 ## Quick start
 
@@ -17,52 +19,44 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# CLI (synthetic scene if no file given)
-python scripts/run_spike.py
-python scripts/run_spike.py /path/to/file.NEF --film fp4-plus-v1 --print-grade 3
+# Optional: public sample raws
+bash samples/fetch_raws.sh
 
-# Interactive UI
+# CLI
+python scripts/run_spike.py
+python scripts/run_spike.py samples/raws/nikon_d40_DSC_1842.NEF --film delta-100-v1 --paper mg-warmtone
+
+# Sequential UI
 python scripts/run_darkroom_ui.py
 # open http://127.0.0.1:7860
 ```
 
-Outputs land in `output/`:
+## Ingest design
 
-- `negatives/<uuid>.tiff` + `.json` — Digital Negative
-- `*_developed.png` / `*_print.png` / `*_comparison.png`
+Camera raws are demosaiced to **linear CIE XYZ** with camera white balance and **no display tone curve** (`gamma=(1,1)`). The Digital Negative stores that payload; luminance for B&W development is the **Y** channel.
+
+Rendered JPEGs/PNGs use an inverse-sRGB approximation and are marked as such in metadata — prefer raws for a true latent-image path.
+
+Color development (per-channel vs luma + color-difference) is deferred; the B&W foundation stays luminance-based.
 
 ## Project layout
 
 ```
-profiles/films/          Characteristic curves (HP5, FP4)
-profiles/papers/         Multigrade paper response
+profiles/films/          HP5, FP4, Delta 100
+profiles/papers/         MG Standard, MG Warmtone
 src/digital_negative/
-  ingest.py              Raw/image → Digital Negative
+  ingest.py              Raw/image → linear Digital Negative
   development.py         Log-E → density (+ grain)
   print_engine.py        Enlarger / paper stage
   pipeline.py            Orchestration
-scripts/run_spike.py     CLI
+scripts/run_spike.py
 scripts/run_darkroom_ui.py
-docs/                    Product starter document
+docs/                    Starter + critique notes
 ```
-
-## Controls (photographer language)
-
-| Stage | Control | Meaning |
-|-------|---------|---------|
-| Develop | Film stock | Characteristic curve + grain baseline |
-| Develop | Relative development | 1.0 normal; >1 push; <1 pull |
-| Develop | Contrast | Straight-line slope |
-| Develop | Grain strength | Seeded micro-variation |
-| Develop | Developer style | Standard / High Definition / High Energy |
-| Print | Exposure | Stops of enlarger light |
-| Print | Multigrade filtration | Grade 0–5 |
-| Print | Print contrast | Fine nudge around selected grade |
 
 ## Tests
 
 ```bash
-source .venv/bin/activate
 pytest -q
 ```
 

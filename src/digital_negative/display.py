@@ -26,6 +26,22 @@ def to_pil_gray(image: np.ndarray, *, assume_linear: bool = False) -> Image.Imag
     return Image.fromarray(to_u8_gray(view), mode="L")
 
 
+def negative_lightbox_preview(transmittance: np.ndarray) -> np.ndarray:
+    """View a developed negative as if on a light table.
+
+    Thin shadow areas transmit more light (bright); dense highlights hold
+    light back (dark) — the classic inverted film-negative look.
+    """
+    t = np.clip(transmittance, 0.0, None)
+    # Normalize to a readable lightbox range without crushing the toe
+    lo = float(np.percentile(t, 1))
+    hi = float(np.percentile(t, 99))
+    span = max(hi - lo, 1e-6)
+    view = np.clip((t - lo) / span, 0.0, 1.0)
+    # Mild gamma so mid densities read clearly on screen
+    return np.power(view, 0.85).astype(np.float32)
+
+
 def save_gray_preview(path: str | Path, image: np.ndarray, *, assume_linear: bool = False) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

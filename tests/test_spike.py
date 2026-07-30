@@ -34,6 +34,12 @@ def test_fp4_is_finer_grain_than_hp5():
     assert fp4["iso"] < hp5["iso"]
 
 
+def test_delta_finer_than_fp4():
+    fp4 = json.loads((ROOT / "profiles" / "films" / "fp4-plus-v1.json").read_text())
+    delta = json.loads((ROOT / "profiles" / "films" / "delta-100-v1.json").read_text())
+    assert delta["grain_scale"] < fp4["grain_scale"]
+
+
 def test_push_increases_midtone_density():
     profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
     normal = modify_curve(profile, relative_time=1.0)
@@ -57,6 +63,14 @@ def test_high_energy_raises_contrast_vs_standard():
     assert energy_span > std_span
 
 
+def test_ingest_is_linear_xyz():
+    dn = ingest_path(None)
+    assert dn.metadata["ingest"]["encoding"] == "linear"
+    assert dn.metadata["ingest"]["working_space"] == "CIE_XYZ"
+    # Y channel is luminance for XYZ payloads
+    assert np.allclose(dn.to_luminance(), dn.image[..., 1])
+
+
 def test_ingest_synthetic_and_develop():
     dn = ingest_path(None)
     assert dn.image.ndim == 3
@@ -68,7 +82,7 @@ def test_ingest_synthetic_and_develop():
 
 def test_log_exposure_mapping_places_midtones():
     scene = create_synthetic_scene(128, 96)
-    luma = 0.2126 * scene[..., 0] + 0.7152 * scene[..., 1] + 0.0722 * scene[..., 2]
+    luma = scene[..., 1]  # CIE Y
     log_e = linear_to_relative_log_exposure(luma, mid_log_e=2.2)
     med = float(np.median(log_e))
     assert 1.8 < med < 2.6
@@ -84,10 +98,29 @@ def test_print_stage_darkens_with_more_exposure():
     assert float(hard.preview.mean()) < float(soft.preview.mean())
 
 
+def test_hard_grade_increases_contrast_vs_soft():
+    dn = ingest_path(None)
+    profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
+    paper = load_paper_profile(ROOT / "profiles" / "papers" / "mg-standard-v1.json")
+    developed = develop(dn, profile, grain_strength=0.0)
+    soft = print_negative(developed.transmittance, dn, paper, overall_exposure=0.0, grade=0.0)
+    hard = print_negative(developed.transmittance, dn, paper, overall_exposure=0.0, grade=5.0)
+    soft_span = float(np.percentile(soft.preview, 95) - np.percentile(soft.preview, 5))
+    hard_span = float(np.percentile(hard.preview, 95) - np.percentile(hard.preview, 5))
+    assert hard_span > soft_span
+
+
+def test_warmtone_paper_loads():
+    paper = load_paper_profile(ROOT / "profiles" / "papers" / "mg-warmtone-v1.json")
+    assert paper.id == "mg-warmtone"
+    assert paper.dmax < 2.05
+
+
 def test_full_pipeline_writes_print_artifacts(tmp_path: Path):
     artifacts = run_darkroom_pipeline(
         output_dir=tmp_path,
-        film_id="fp4-plus-v1",
+        film_id="delta-100-v1",
+        paper_id="mg-warmtone",
         print_grade=3.0,
         grain_strength=0.8,
     )
@@ -95,8 +128,9 @@ def test_full_pipeline_writes_print_artifacts(tmp_path: Path):
     assert artifacts.print_preview is not None and artifacts.print_preview.exists()
     with artifacts.dn_json.open() as f:
         meta = json.load(f)
-    assert meta["film_profile"]["id"] == "fp4-plus-v1"
-    assert meta["print"]["enabled"] is True
+    assert meta["film_profile"]["id"] == "delta-100-v1"
+    assert meta["ingest"]["working_space"] == "CIE_XYZ"
+    assert meta["print"]["paper_id"] == "mg-warmtone"
     ops = {h.get("op") for h in meta["history"]}
     assert {"develop", "print"} <= ops
 
