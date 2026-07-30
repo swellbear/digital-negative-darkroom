@@ -336,22 +336,81 @@ footer, .gradio-container footer {
 }
 #icon_rail .rail-spacer { flex: 1 1 auto !important; min-height: 8px !important; }
 
-/* Drawer host — one panel visible; compressed */
+/* Drawer host — one panel visible; compressed.
+   Keep every nested block inside the rail width — Gradio slider min/max
+   rows and wide number boxes were forcing horizontal scrollbars. */
 #drawer_host {
-  flex: 0 0 176px !important;
-  width: 176px !important;
-  max-width: 176px !important;
+  flex: 0 0 188px !important;
+  width: 188px !important;
+  max-width: 188px !important;
   min-width: 0 !important;
   height: 100% !important;
   flex-wrap: nowrap !important;
   overflow-x: hidden !important;
   overflow-y: auto !important;
-  padding: 4px 7px 6px !important;
+  padding: 4px 6px 6px !important;
   box-sizing: border-box !important;
   border-right: 1px solid var(--dr-border) !important;
   background: var(--dr-bg-panel) !important;
   z-index: 35 !important;
   transition: flex-basis 0.18s ease, width 0.18s ease, max-width 0.18s ease, padding 0.18s ease, opacity 0.15s ease !important;
+}
+#drawer_host,
+#drawer_host .drawer-panel,
+#drawer_host .gr-accordion,
+#drawer_host .block,
+#drawer_host .form,
+#drawer_host .wrap,
+#drawer_host .container,
+#drawer_host .styler,
+#drawer_host > div {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+#drawer_host .block,
+#drawer_host .form,
+#drawer_host .wrap,
+#drawer_host .container,
+#drawer_host .head,
+#drawer_host [data-testid="slider"],
+#drawer_host .slider-container {
+  overflow-x: hidden !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+/* Hide the min/max captions under drawer sliders — in a ~180px rail they
+   overflow ("25 … 6400", "0.001 … 120") and Gradio paints a horizontal bar. */
+#drawer_host .min_value,
+#drawer_host .max_value,
+#drawer_host .min-val,
+#drawer_host .max-val,
+#drawer_host span.min,
+#drawer_host span.max {
+  display: none !important;
+}
+#drawer_host input[type="range"] {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+#drawer_host .head {
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  width: 100% !important;
+}
+#drawer_host .head input[type="number"] {
+  width: 40px !important;
+  min-width: 0 !important;
+  max-width: 44px !important;
+  flex: 0 0 40px !important;
+  box-sizing: border-box !important;
+}
+/* Kill any leftover horizontal scrollbar chrome inside the drawer. */
+#drawer_host *::-webkit-scrollbar:horizontal {
+  height: 0 !important;
+  display: none !important;
 }
 body.drawer-collapsed #drawer_host {
   flex-basis: 0 !important;
@@ -373,6 +432,8 @@ body.drawer-collapsed #drawer_host {
    sends open=False as stages lock, so pin drawer content open regardless. */
 .drawer-panel [data-testid="accordion-content"] {
   display: block !important;
+  overflow-x: hidden !important;
+  max-width: 100% !important;
 }
 .drawer-panel .gr-accordion {
   margin: 0 !important;
@@ -480,8 +541,6 @@ body.drawer-collapsed #drawer_host {
 /* Slider track + its number box */
 #drawer_host input[type="range"] { height: 12px !important; margin: 0 !important; }
 #drawer_host .head { font-size: var(--dr-fs-control) !important; margin: 0 !important; }
-#drawer_host .head input[type="number"] { width: 44px !important; }
-#drawer_host .min_value, #drawer_host .max_value { font-size: var(--dr-fs-note) !important; }
 #drawer_host .container > .wrap,
 #drawer_host .block > .wrap { padding: 0 !important; }
 #drawer_host .icon-button-wrapper,
@@ -5476,7 +5535,7 @@ def build_ui() -> gr.Blocks:
                             label="Contrast filter",
                         )
                         scene_exposure = gr.Slider(
-                            0.001, 120.0, value=0.01, step=0.001,
+                            0.01, 60.0, value=0.01, step=0.01,
                             label="Scene shutter (s)",
                         )
                         halation = gr.Slider(0.0, 1.5, value=0.0, step=0.05, label="Halation")
