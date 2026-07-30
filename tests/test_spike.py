@@ -40,6 +40,20 @@ def test_delta_finer_than_fp4():
     assert delta["grain_scale"] < fp4["grain_scale"]
 
 
+def test_tri_x_profile_loads_and_is_iso_400():
+    path = ROOT / "profiles" / "films" / "tri-x-400-v1.json"
+    data = json.loads(path.read_text())
+    assert data["id"] == "tri-x-400-v1"
+    assert data["iso"] == 400
+    assert "F-4017" in data["source"]["document"]
+    profile = load_film_profile(path)
+    dens = profile.density_from_log_exposure(np.array([1.5, 2.5, 3.5], dtype=np.float32))
+    assert dens[0] < dens[1] < dens[2]
+    assert dens[0] > profile.base_plus_fog
+    hp5 = json.loads((ROOT / "profiles" / "films" / "hp5-plus-v1.json").read_text())
+    assert data["grain_scale"] >= hp5["grain_scale"]
+
+
 def test_push_increases_midtone_density():
     profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
     normal = modify_curve(profile, relative_time=1.0)

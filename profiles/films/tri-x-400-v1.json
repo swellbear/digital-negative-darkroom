@@ -1,0 +1,52 @@
+{
+  "id": "tri-x-400-v1",
+  "name": "Tri-X 400",
+  "type": "bw",
+  "version": "1.0",
+  "iso": 400,
+  "manufacturer": "Kodak Alaris / Kodak Professional",
+  "grain_scale": 1.12,
+  "source": {
+    "document": "KODAK PROFESSIONAL TRI-X 320 and 400 Films — Technical Data F-4017 (February 2016)",
+    "reference_url": "https://business.kodakmoments.com/sites/default/files/files/resources/f4017_TriX.pdf",
+    "process": "KODAK PROFESSIONAL D-76, large tank, ~8 minutes at 20°C, agitation at 1-minute intervals (near the published CI 0.56 starting recommendation; small-tank D-76 stock is 6¾ min at 20°C)",
+    "digitization_date": "2026-07-30",
+    "digitization_notes": "Approximate digitization of the published 400TX / 35 mm D–logE characteristic curve for D-76 large-tank ~8 min (F-4017 p.8). Absolute log exposure (lux-seconds, bar notation) remapped onto the project's relative log-exposure axis (rel ≈ kodak_logE + 4.0). Longer softer toe than HP5, mid-curve average gradient ~0.56–0.60 matching the datasheet CI target, open highlight scale into ~2.2 D. Diffuse rms granularity listed as 17 (fine); grain_scale set slightly above HP5 for classic Tri-X texture. Re-digitize from a high-res plot for production calibration."
+  },
+  "curve": {
+    "x_label": "relative_log_exposure",
+    "y_label": "density",
+    "base_plus_fog": 0.24,
+    "points": [
+      [0.50, 0.24],
+      [0.70, 0.245],
+      [0.90, 0.27],
+      [1.10, 0.32],
+      [1.30, 0.40],
+      [1.50, 0.50],
+      [1.70, 0.60],
+      [1.90, 0.70],
+      [2.10, 0.81],
+      [2.30, 0.92],
+      [2.50, 1.03],
+      [2.70, 1.14],
+      [2.90, 1.25],
+      [3.10, 1.36],
+      [3.30, 1.47],
+      [3.50, 1.58],
+      [3.70, 1.68],
+      [3.90, 1.78],
+      [4.10, 1.88],
+      [4.30, 1.97],
+      [4.50, 2.05],
+      [4.70, 2.12],
+      [4.90, 2.17]
+    ]
+  },
+  "defaults": {
+    "developer_id": "standard",
+    "relative_time": 1.0,
+    "contrast_modifier": 0.0,
+    "grain_strength": 1.05
+  }
+}

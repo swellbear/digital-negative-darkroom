@@ -42,7 +42,7 @@ Color development (per-channel vs luma + color-difference) is deferred; the B&W 
 ## Project layout
 
 ```
-profiles/films/          HP5, FP4, Delta 100
+profiles/films/          HP5, FP4, Delta 100, Tri-X 400
 profiles/papers/         MG Standard, MG Warmtone
 src/digital_negative/
   ingest.py              Raw/image → linear Digital Negative
@@ -62,4 +62,4 @@ pytest -q
 
 ## Notes
 
-Film curves are approximate digitizations of public Ilford datasheets; source URLs live inside each profile JSON. Do **not** copy curves/code from GPLv3 / CC BY-SA research projects.
+Film curves are approximate digitizations of public manufacturer datasheets (Ilford / Kodak F-4017); source URLs live inside each profile JSON. Do **not** copy curves/code from GPLv3 / CC BY-SA research projects.
