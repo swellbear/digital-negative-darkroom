@@ -522,6 +522,48 @@ footer, .gradio-container footer {
   color: var(--dr-text-dim) !important;
 }
 
+/* Save-before-switch prompt — fixed overlay above the darkroom. */
+#roll_save_modal {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2000 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgba(0, 0, 0, 0.58) !important;
+  padding: 16px !important;
+  box-sizing: border-box !important;
+}
+#roll_save_modal.hidden,
+#roll_save_modal[style*="display: none"],
+#roll_save_modal:not(.show) {
+  /* Gradio toggles visibility; keep our flex when shown. */
+}
+#roll_save_dialog {
+  width: min(380px, 92vw) !important;
+  margin: 0 !important;
+  padding: 16px 16px 12px !important;
+  border: 1px solid var(--dr-border) !important;
+  border-radius: 10px !important;
+  background: #161618 !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45) !important;
+}
+#roll_save_dialog .prose,
+#roll_save_dialog .prose * {
+  color: var(--dr-text) !important;
+  font-size: 0.88rem !important;
+  line-height: 1.35 !important;
+}
+#roll_save_actions {
+  gap: 8px !important;
+  margin-top: 12px !important;
+}
+#roll_save_actions button {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  font-size: 0.78rem !important;
+}
+
 /* Kill any leftover horizontal scrollbar chrome inside the drawer. */
 #drawer_host *::-webkit-scrollbar:horizontal {
   height: 0 !important;
@@ -2875,20 +2917,24 @@ UI_JS = """
   applyDrawer(readActiveDrawer() || 'ingest', { fromServer: true });
 
   // Camera roll: inject a hover ✕ on each thumb that removes that frame.
-  const writeRollRemoveIndex = (index) => {
-    const root = document.querySelector('#roll_remove_index');
+  const writeHiddenBox = (rootId, value) => {
+    const root = document.querySelector(rootId);
     const box = root && (root.querySelector('textarea') || root.querySelector('input'));
     if (!box) return false;
-    box.value = String(index);
+    box.value = String(value);
     box.dispatchEvent(new Event('input', { bubbles: true }));
     box.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
   };
-  const clickRollRemove = () => {
-    const root = document.querySelector('#roll_remove');
+  const clickHiddenBtn = (rootId) => {
+    const root = document.querySelector(rootId);
     const btn = root && (root.querySelector('button') || root);
     if (btn && typeof btn.click === 'function') btn.click();
   };
+  const writeRollRemoveIndex = (index) => writeHiddenBox('#roll_remove_index', index);
+  const clickRollRemove = () => clickHiddenBtn('#roll_remove');
+  const writeRollSwitchIndex = (index) => writeHiddenBox('#roll_switch_index', index);
+  const clickRollSwitch = () => clickHiddenBtn('#roll_switch');
   const rollThumbNodes = (root) => {
     if (!root) return [];
     const nodes = root.querySelectorAll(
@@ -2901,6 +2947,16 @@ UI_JS = """
     if (!root) return;
     const thumbs = rollThumbNodes(root);
     thumbs.forEach((thumb, index) => {
+      if (!thumb.dataset.rollSwitchBound) {
+        thumb.dataset.rollSwitchBound = '1';
+        thumb.addEventListener('click', (e) => {
+          if (e.target && e.target.closest && e.target.closest('.roll-x')) return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (!writeRollSwitchIndex(index)) return;
+          setTimeout(clickRollSwitch, 0);
+        }, true);
+      }
       if (thumb.querySelector(':scope > .roll-x, .roll-x')) return;
       const cs = getComputedStyle(thumb);
       if (cs.position === 'static') thumb.style.position = 'relative';
@@ -3411,21 +3467,139 @@ def _sync_active_into_roll(state) -> dict:
     roll = list(state.get("roll") or [])
     idx = int(state.get("roll_index", -1))
     if state.get("dn") is not None and 0 <= idx < len(roll):
-        roll[idx] = _frame_payload(state)
-        return {**state, "roll": roll}
+        payload = _frame_payload(state)
+        payload["dirty"] = False
+        roll[idx] = payload
+        return {**state, "roll": roll, "dirty": False}
     return state
 
 
-def _activate_roll_index(state, index: int) -> dict:
-    state = _sync_active_into_roll(state)
+def _activate_roll_index(state, index: int, *, save_current: bool = True) -> dict:
+    """Make roll[index] the working frame.
+
+    save_current=True writes the active frame into the roll first (Save).
+    save_current=False leaves the roll slot untouched (Discard).
+    """
+    if save_current:
+        state = _sync_active_into_roll(state)
+    else:
+        state = _ensure_roll(state)
     roll = list(state.get("roll") or [])
     if not roll:
-        return {"roll": [], "roll_index": -1}
+        return {"roll": [], "roll_index": -1, "dirty": False}
     index = max(0, min(int(index), len(roll) - 1))
     activated = dict(roll[index])
     activated["roll"] = roll
     activated["roll_index"] = index
+    activated["dirty"] = False
     return activated
+
+
+def _capture_controls(
+    film_id,
+    developer_id,
+    development_minutes,
+    contrast,
+    grain,
+    exposure_index,
+    contrast_filter,
+    scene_exposure,
+    halation,
+    paper_id,
+    print_exposure,
+    print_grade,
+    print_contrast,
+    split_on,
+    soft_grade,
+    hard_grade,
+    soft_seconds,
+    hard_seconds,
+    test_strips_on,
+    test_bands,
+    test_stops,
+    flash_stops,
+    dry_down,
+    tone,
+    border_frac,
+) -> dict:
+    """Snapshot Develop/Print UI controls so each roll frame keeps its recipe."""
+    return {
+        "film_id": film_id,
+        "developer_id": developer_id,
+        "development_minutes": float(development_minutes),
+        "contrast": float(contrast),
+        "grain": float(grain),
+        "exposure_index": float(exposure_index),
+        "contrast_filter": str(contrast_filter),
+        "scene_exposure": float(scene_exposure),
+        "halation": float(halation),
+        "paper_id": paper_id,
+        "print_exposure": float(print_exposure),
+        "print_grade": float(print_grade),
+        "print_contrast": float(print_contrast),
+        "split_grade": bool(split_on),
+        "soft_grade": float(soft_grade),
+        "hard_grade": float(hard_grade),
+        "soft_seconds": float(soft_seconds),
+        "hard_seconds": float(hard_seconds),
+        "test_strips": bool(test_strips_on),
+        "test_bands": int(test_bands),
+        "test_stops": float(test_stops),
+        "flash_stops": float(flash_stops),
+        "dry_down": float(dry_down),
+        "tone": tone,
+        "border_frac": float(border_frac),
+    }
+
+
+_CONTROL_COUNT = 25
+
+
+def _control_updates(state):
+    """gr.update values to restore a frame's saved Develop/Print controls."""
+    c = (state or {}).get("controls") or {}
+    if not c:
+        return tuple(gr.skip() for _ in range(_CONTROL_COUNT))
+    return (
+        c.get("film_id", gr.skip()),
+        c.get("developer_id", gr.skip()),
+        c.get("development_minutes", gr.skip()),
+        c.get("contrast", gr.skip()),
+        c.get("grain", gr.skip()),
+        c.get("exposure_index", gr.skip()),
+        c.get("contrast_filter", gr.skip()),
+        c.get("scene_exposure", gr.skip()),
+        c.get("halation", gr.skip()),
+        c.get("paper_id", gr.skip()),
+        c.get("print_exposure", gr.skip()),
+        c.get("print_grade", gr.skip()),
+        c.get("print_contrast", gr.skip()),
+        c.get("split_grade", gr.skip()),
+        c.get("soft_grade", gr.skip()),
+        c.get("hard_grade", gr.skip()),
+        c.get("soft_seconds", gr.skip()),
+        c.get("hard_seconds", gr.skip()),
+        c.get("test_strips", gr.skip()),
+        c.get("test_bands", gr.skip()),
+        c.get("test_stops", gr.skip()),
+        c.get("flash_stops", gr.skip()),
+        c.get("dry_down", gr.skip()),
+        c.get("tone", gr.skip()),
+        c.get("border_frac", gr.skip()),
+    )
+
+
+def _is_dirty(state) -> bool:
+    return bool(state and state.get("dirty"))
+
+
+def _mark_dirty(state, controls: dict | None = None):
+    if not state:
+        return state
+    updates = {"dirty": True}
+    if controls is not None:
+        updates["controls"] = controls
+    return {**state, **updates}
 
 
 def _roll_gallery_update(state):
@@ -3463,7 +3637,8 @@ def _roll_meta_md(state) -> str:
     label = f"**{idx}/{len(roll)}**"
     if name:
         label += f" · `{name}`"
-    return f"{label}  \n_Tap a frame to work it · hover ✕ to remove._"
+    dirty = " · unsaved" if _is_dirty(state) else ""
+    return f"{label}{dirty}  \n_Tap a frame to switch · hover ✕ to remove._"
 
 
 def _drawer_for_frame(state) -> str:
@@ -3533,6 +3708,8 @@ def _build_ingest_frame(path: str | None) -> dict:
         "stage": "development",
         "summary_cache": summary,
         "source_path": path,
+        "controls": {},
+        "dirty": False,
     }
 
 
@@ -3856,7 +4033,7 @@ def _inspect_frame(state, live=None):
     return gr.update(value=img, label=label)
 
 
-def _pack_preview(live, original, latent, neg, summary, state):
+def _pack_preview(live, original, latent, neg, summary, state, *, mark_dirty=False, controls=None):
     status, hist = _split_summary(summary or "")
     if state is not None:
         if live is not None:
@@ -3873,6 +4050,8 @@ def _pack_preview(live, original, latent, neg, summary, state):
             if state.get("neg_inspect") is None:
                 updates["neg_inspect"] = neg
             state = {**state, **updates}
+        if mark_dirty or controls is not None:
+            state = _mark_dirty(state, controls)
     shown = _viewer_frame(state, live=live, original=original, latent=latent, neg=neg)
     slot_a, slot_b, slot_c = _strip_updates(
         state, live=live, original=original, latent=latent, neg=neg
@@ -4082,6 +4261,7 @@ def rotate_working(turns_cw: int, state):
         f"{_history_md(dn)}"
     )
     state["summary_cache"] = summary
+    state["dirty"] = True
     return (
         _viewer_frame(state, live=state.get("live_rgb")),
         state.get("original_ref"),
@@ -4196,6 +4376,7 @@ def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
         f"{_history_md(dn)}"
     )
     state["summary_cache"] = summary
+    state["dirty"] = True
     rect_echo = str(crop_rect or DEFAULT_CROP_RECT)
     return (
         _viewer_frame(state, live=state.get("live_rgb")),
@@ -4523,15 +4704,93 @@ def commit_ingest(sample_path, file_obj, state):
     return _roll_session_outputs(state, drawer="roll")
 
 
-def select_roll_frame(state, evt: SelectData | None = None):
-    """Switch the working session to a camera-roll thumbnail."""
+def _roll_switch_bundle(state, *, drawer="roll", modal_visible=False, pending=-1, restore_controls=True):
+    """Session UI + control restore + save-prompt modal for frame switches."""
+    base = _roll_session_outputs(state, drawer=drawer)
+    ctrls = _control_updates(state) if restore_controls else tuple(gr.skip() for _ in range(_CONTROL_COUNT))
+    return (
+        *base,
+        *ctrls,
+        gr.update(visible=bool(modal_visible)),
+        int(pending),
+    )
+
+
+def begin_roll_switch(index_raw, state):
+    """Start a frame switch — prompt when the current frame has unsaved work."""
     if not state or not state.get("roll"):
-        return _roll_session_outputs(state, drawer="roll")
-    index = evt.index if evt is not None else state.get("roll_index", 0)
+        return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
+    try:
+        target = int(str(index_raw).strip())
+    except (TypeError, ValueError):
+        return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
+    current = int(state.get("roll_index", -1))
+    if target < 0 or target >= len(state.get("roll") or []):
+        return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
+    if target == current:
+        return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1, restore_controls=False)
+
+    if _is_dirty(state):
+        # Keep working on the current frame until the user chooses Save / Discard.
+        return _roll_switch_bundle(
+            state,
+            drawer="roll",
+            modal_visible=True,
+            pending=target,
+            restore_controls=False,
+        )
+
+    state = _activate_roll_index(state, target, save_current=True)
+    return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
+
+
+def select_roll_frame(state, evt: SelectData | None = None):
+    """Gallery select → same save-aware switch path as an explicit thumb click."""
+    index = evt.index if evt is not None else (state or {}).get("roll_index", 0)
     if isinstance(index, (list, tuple)):
         index = index[0]
-    state = _activate_roll_index(state, int(index))
-    return _roll_session_outputs(state, drawer="roll")
+    return begin_roll_switch(index, state)
+
+
+def save_and_switch_roll(pending, state, *control_args):
+    """Save the active frame into the roll, then activate the pending frame."""
+    if not state or not state.get("roll"):
+        return _roll_switch_bundle(None, modal_visible=False, pending=-1)
+    try:
+        target = int(pending)
+    except (TypeError, ValueError):
+        return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
+    if len(control_args) >= _CONTROL_COUNT:
+        state = {
+            **state,
+            "controls": _capture_controls(*control_args[:_CONTROL_COUNT]),
+            "dirty": True,
+        }
+    state = _activate_roll_index(state, target, save_current=True)
+    return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
+
+
+def discard_and_switch_roll(pending, state):
+    """Abandon unsaved work on the active frame and activate the pending frame."""
+    if not state or not state.get("roll"):
+        return _roll_switch_bundle(None, modal_visible=False, pending=-1)
+    try:
+        target = int(pending)
+    except (TypeError, ValueError):
+        return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
+    state = _activate_roll_index(state, target, save_current=False)
+    return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
+
+
+def cancel_roll_switch(state):
+    """Dismiss the save prompt and stay on the current frame."""
+    return _roll_switch_bundle(
+        state,
+        drawer="roll",
+        modal_visible=False,
+        pending=-1,
+        restore_controls=False,
+    )
 
 
 def remove_from_roll(index_raw, state):
@@ -4715,13 +4974,42 @@ def live_preview(
     border_frac,
     state,
     quality: str = "high",
+    mark_dirty: bool = False,
 ):
     """Unified live viewer: develop+print while developing; print-only after Develop lock.
 
     quality='drag' uses a faster lower-res proxy while sliders move;
     quality='high' (release / change) uses commit-accurate resolution.
+    mark_dirty=True when the user edited controls (not after a roll switch restore).
     """
     max_side = DRAG_MAX_SIDE if quality == "drag" else LIVE_MAX_SIDE
+    controls = _capture_controls(
+        film_id,
+        developer_id,
+        development_minutes,
+        contrast,
+        grain,
+        exposure_index,
+        contrast_filter,
+        scene_exposure,
+        halation,
+        paper_id,
+        print_exposure,
+        print_grade,
+        print_contrast,
+        split_on,
+        soft_grade,
+        hard_grade,
+        soft_seconds,
+        hard_seconds,
+        test_strips_on,
+        test_bands,
+        test_stops,
+        flash_stops,
+        dry_down,
+        tone,
+        border_frac,
+    )
 
     if not state or state.get("dn") is None:
         return _pack_preview(None, None, None, None, "*Commit Ingest first.*", state)
@@ -4734,6 +5022,8 @@ def live_preview(
             state.get("neg_ref"),
             state.get("summary_cache", ""),
             state,
+            mark_dirty=mark_dirty,
+            controls=controls if mark_dirty else None,
         )
 
     if _locked(state, "development"):
@@ -4754,6 +5044,8 @@ def live_preview(
                     state.get("neg_ref"),
                     state.get("summary_cache", ""),
                     state,
+                    mark_dirty=mark_dirty,
+                    controls=controls if mark_dirty else None,
                 )
             if max(t.shape) > max_side:
                 step = max(1, int(np.ceil(max(t.shape) / max_side)))
@@ -4802,6 +5094,8 @@ def live_preview(
             state.get("neg_ref"),
             summary,
             state,
+            mark_dirty=mark_dirty,
+            controls=controls if mark_dirty else None,
         )
 
     # Develop unlocked: show print through the working negative
@@ -4835,7 +5129,14 @@ def live_preview(
         max_side=max_side,
     )
     return _pack_preview(
-        live_rgb, state.get("original_ref"), state.get("latent_ref"), neg_ref, summary, state
+        live_rgb,
+        state.get("original_ref"),
+        state.get("latent_ref"),
+        neg_ref,
+        summary,
+        state,
+        mark_dirty=mark_dirty,
+        controls=controls if mark_dirty else None,
     )
 
 
@@ -4895,6 +5196,7 @@ def live_preview_drag(
         border_frac,
         state,
         quality="drag",
+        mark_dirty=True,
     )
 
 
@@ -4926,6 +5228,7 @@ def live_preview_high(
     border_frac,
     state,
 ):
+    """Refresh preview after a roll switch / commit — does not mark the frame dirty."""
     return live_preview(
         film_id,
         developer_id,
@@ -4954,6 +5257,68 @@ def live_preview_high(
         border_frac,
         state,
         quality="high",
+        mark_dirty=False,
+    )
+
+
+def live_preview_edit(
+    film_id,
+    developer_id,
+    development_minutes,
+    contrast,
+    grain,
+    exposure_index,
+    contrast_filter,
+    scene_exposure,
+    halation,
+    paper_id,
+    print_exposure,
+    print_grade,
+    print_contrast,
+    split_on,
+    soft_grade,
+    hard_grade,
+    soft_seconds,
+    hard_seconds,
+    test_strips_on,
+    test_bands,
+    test_stops,
+    flash_stops,
+    dry_down,
+    tone,
+    border_frac,
+    state,
+):
+    """User-driven preview refresh — marks the active roll frame dirty."""
+    return live_preview(
+        film_id,
+        developer_id,
+        development_minutes,
+        contrast,
+        grain,
+        exposure_index,
+        contrast_filter,
+        scene_exposure,
+        halation,
+        paper_id,
+        print_exposure,
+        print_grade,
+        print_contrast,
+        split_on,
+        soft_grade,
+        hard_grade,
+        soft_seconds,
+        hard_seconds,
+        test_strips_on,
+        test_bands,
+        test_stops,
+        flash_stops,
+        dry_down,
+        tone,
+        border_frac,
+        state,
+        quality="high",
+        mark_dirty=True,
     )
 
 
@@ -6102,7 +6467,7 @@ def build_ui() -> gr.Blocks:
                             show_label=False,
                             elem_id="camera_roll",
                         )
-                        # Hidden trigger for per-thumb ✕ (written by the UI script).
+                        # Hidden triggers for per-thumb ✕ / click-to-switch (UI script).
                         roll_remove_index = gr.Textbox(
                             value="-1",
                             visible=False,
@@ -6113,6 +6478,21 @@ def build_ui() -> gr.Blocks:
                             visible=False,
                             interactive=False,
                             elem_id="roll_remove",
+                        )
+                        roll_switch_index = gr.Textbox(
+                            value="-1",
+                            visible=False,
+                            elem_id="roll_switch_index",
+                        )
+                        roll_switch_btn = gr.Button(
+                            "Switch",
+                            visible=False,
+                            elem_id="roll_switch",
+                        )
+                        roll_pending_index = gr.Number(
+                            value=-1,
+                            visible=False,
+                            elem_id="roll_pending_index",
                         )
 
                 with gr.Group(elem_id="drawer_develop", elem_classes=["drawer-panel"]):
@@ -6482,6 +6862,18 @@ def build_ui() -> gr.Blocks:
         # Compatibility aliases used by older handlers expecting frame_tools group
         frame_tools = frame_acc
 
+        with gr.Group(visible=False, elem_id="roll_save_modal") as roll_save_modal:
+            with gr.Column(elem_id="roll_save_dialog"):
+                gr.Markdown(
+                    "**Save changes to this frame?**\n\n"
+                    "Develop and print adjustments on the current photo can be "
+                    "kept before you switch, or discarded."
+                )
+                with gr.Row(elem_id="roll_save_actions"):
+                    roll_save_btn = gr.Button("Save & switch", variant="primary", size="sm")
+                    roll_discard_btn = gr.Button("Discard", size="sm")
+                    roll_cancel_btn = gr.Button("Cancel", size="sm")
+
         # Always pass develop + print controls so the large viewer can show a
         # theoretical print through the working negative while developing.
         preview_inputs = [
@@ -6527,6 +6919,37 @@ def build_ui() -> gr.Blocks:
             inspect_out, state, active_drawer,
             roll_meta, roll_gallery, remove_roll_btn,
         ]
+        control_outputs = [
+            film,
+            developer,
+            development_minutes,
+            contrast,
+            grain,
+            exposure_index,
+            contrast_filter,
+            scene_exposure,
+            halation,
+            paper,
+            print_exposure,
+            print_grade,
+            print_contrast,
+            split_grade,
+            soft_grade,
+            hard_grade,
+            soft_seconds,
+            hard_seconds,
+            test_strips,
+            test_bands,
+            test_stops,
+            flash_stops,
+            dry_down,
+            tone,
+            border_frac,
+        ]
+        roll_switch_outputs = ingest_outputs + control_outputs + [
+            roll_save_modal,
+            roll_pending_index,
+        ]
 
         ingest_btn.click(
             fn=commit_ingest,
@@ -6552,11 +6975,47 @@ def build_ui() -> gr.Blocks:
         roll_gallery.select(
             fn=select_roll_frame,
             inputs=[state],
-            outputs=ingest_outputs,
+            outputs=roll_switch_outputs,
         ).then(
             fn=live_preview_high,
             inputs=preview_inputs,
             outputs=preview_outputs,
+        )
+
+        roll_switch_btn.click(
+            fn=begin_roll_switch,
+            inputs=[roll_switch_index, state],
+            outputs=roll_switch_outputs,
+        ).then(
+            fn=live_preview_high,
+            inputs=preview_inputs,
+            outputs=preview_outputs,
+        )
+
+        roll_save_btn.click(
+            fn=save_and_switch_roll,
+            inputs=[roll_pending_index, state] + control_outputs,
+            outputs=roll_switch_outputs,
+        ).then(
+            fn=live_preview_high,
+            inputs=preview_inputs,
+            outputs=preview_outputs,
+        )
+
+        roll_discard_btn.click(
+            fn=discard_and_switch_roll,
+            inputs=[roll_pending_index, state],
+            outputs=roll_switch_outputs,
+        ).then(
+            fn=live_preview_high,
+            inputs=preview_inputs,
+            outputs=preview_outputs,
+        )
+
+        roll_cancel_btn.click(
+            fn=cancel_roll_switch,
+            inputs=[state],
+            outputs=roll_switch_outputs,
         )
 
         remove_roll_btn.click(
@@ -6595,7 +7054,7 @@ def build_ui() -> gr.Blocks:
         ):
             # Drag = fast lower-res; release/change = commit-quality preview
             ctrl.input(fn=live_preview_drag, inputs=preview_inputs, outputs=preview_outputs)
-            ctrl.change(fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs)
+            ctrl.change(fn=live_preview_edit, inputs=preview_inputs, outputs=preview_outputs)
 
         def _sync_db_pass_timer(base_seconds, mode, current_pass):
             base = max(2.0, float(base_seconds))
@@ -6655,7 +7114,7 @@ def build_ui() -> gr.Blocks:
             inputs=[film],
             outputs=[developer, development_minutes, exposure_index],
         ).then(
-            fn=live_preview_high,
+            fn=live_preview_edit,
             inputs=preview_inputs,
             outputs=preview_outputs,
         )
@@ -6664,7 +7123,7 @@ def build_ui() -> gr.Blocks:
             inputs=[film, developer],
             outputs=[development_minutes],
         ).then(
-            fn=live_preview_high,
+            fn=live_preview_edit,
             inputs=preview_inputs,
             outputs=preview_outputs,
         )
