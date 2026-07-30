@@ -217,3 +217,12 @@ def test_preview_print_does_not_commit_history():
     before = len(dn.metadata.get("history", []))
     print_negative(developed.transmittance, dn, paper, commit=False)
     assert len(dn.metadata.get("history", [])) == before
+
+
+def test_original_photo_preview_synthetic_is_rgb():
+    from digital_negative.display import original_photo_preview
+
+    dn = ingest_path(None)
+    rgb = original_photo_preview(None, dn_image=dn.image)
+    assert rgb.ndim == 3 and rgb.shape[-1] == 3
+    assert rgb.dtype == np.uint8
