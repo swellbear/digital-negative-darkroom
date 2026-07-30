@@ -106,10 +106,12 @@ UI_CSS = """
   /* No max-height / internal scroll — that was clipping accordion bodies
      and developer dropdown lists so options/controls never fully appeared. */
   max-height: none !important;
-  overflow: visible !important;
+  overflow-x: hidden !important;
+  overflow-y: visible !important;
   padding-right: 8px !important;
   align-self: flex-start !important;
   z-index: 30 !important;
+  box-sizing: border-box !important;
 }
 #preview_col {
   flex: 1 1 auto !important;
@@ -191,18 +193,55 @@ UI_CSS = """
   border-left: 3px solid #c45c26;
   background: linear-gradient(90deg, rgba(196,92,38,0.12), transparent);
   font-size: 0.82rem !important;
-  line-height: 1.3 !important;
-  max-height: 7.5rem;
-  overflow-y: auto;
+  line-height: 1.35 !important;
+  max-height: 9rem;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+#ritual_status *,
+#history_box *,
+#controls_col .prose,
+#controls_col .prose * {
+  max-width: 100% !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+#ritual_status code,
+#history_box code,
+#controls_col .prose code {
+  white-space: pre-wrap !important;
+  word-break: break-all !important;
+  overflow-wrap: anywhere !important;
+  font-size: 0.78em !important;
 }
 #history_box {
   margin-top: 4px !important;
-  padding: 6px 8px !important;
+  padding: 8px 10px !important;
   border: 1px solid rgba(128,128,128,0.25);
   background: rgba(0,0,0,0.08);
   font-size: 0.8rem !important;
-  max-height: 140px;
-  overflow-y: auto;
+  line-height: 1.4 !important;
+  max-height: 220px;
+  max-width: 100% !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+#history_box ol,
+#history_box ul {
+  padding-left: 1.15rem !important;
+  margin: 0.25rem 0 !important;
+}
+#history_box p,
+#history_box li {
+  margin: 0.2rem 0 !important;
 }
 #live_preview {
   min-height: 0 !important;
@@ -952,24 +991,40 @@ def _locked(state, stage: str) -> bool:
     return stage in state["dn"].metadata.get("ui_state", {}).get("locked_stages", [])
 
 
+def _short_name(text: str | None, *, keep: int = 36) -> str:
+    """Readable truncation for long upload filenames in the narrow sidebar."""
+    s = str(text or "").strip() or "?"
+    if len(s) <= keep:
+        return s
+    head = max(10, keep // 2 - 1)
+    tail = max(10, keep - head - 1)
+    return f"{s[:head]}…{s[-tail:]}"
+
+
 def _history_md(dn) -> str:
     hist = dn.metadata.get("history", [])
-    lines = ["### Decision log", "_Locked decisions only — exploring does not write here._", ""]
+    # Marker split by _split_summary; accordion already titled "Decision log".
+    lines = [
+        "---DECISION-LOG---",
+        "_Locked decisions only — exploring does not write here._",
+        "",
+    ]
     if not hist:
         lines.append("_No locked decisions yet. Commit a stage to record it._")
     for i, h in enumerate(hist, 1):
         op = h.get("op", "?")
         if op == "ingest":
-            lines.append(f"{i}. **Ingest** — `{h.get('source')}`")
+            lines.append(f"{i}. **Ingest** — `{_short_name(h.get('source'), keep=42)}`")
         elif op == "develop":
             chem = h.get("developer_name") or h.get("developer_id")
             if h.get("development_minutes") is not None:
                 time_bit = f"{float(h['development_minutes']):g} min"
             else:
                 time_bit = f"rel={h.get('relative_time')}"
+            film = _short_name(h.get("film_profile_id"), keep=28)
             lines.append(
-                f"{i}. **Develop** — `{h.get('film_profile_id')}` · {chem} · "
-                f"{time_bit} · N±={h.get('contrast_modifier')} · "
+                f"{i}. **Develop** — `{film}`  \n"
+                f"   {chem} · {time_bit} · N±={h.get('contrast_modifier')} · "
                 f"grain={h.get('grain_strength')}"
             )
         elif op == "print":
@@ -980,9 +1035,10 @@ def _history_md(dn) -> str:
                 exp_bit = f"{float(h['base_exposure_seconds']):g}s (≈ {stops:+.2f} stops)"
             else:
                 exp_bit = f"{h.get('overall_exposure'):+g} stops"
+            paper = _short_name(h.get("paper_id"), keep=28)
             lines.append(
-                f"{i}. **Print** — `{h.get('paper_id')}` · grade {h.get('grade')} · "
-                f"exp {exp_bit}"
+                f"{i}. **Print** — `{paper}`  \n"
+                f"   grade {h.get('grade')} · exp {exp_bit}"
                 + (f" · nudge={h.get('contrast')}" if h.get("contrast") not in (None, 0, 0.0) else "")
                 + db_bit
             )
@@ -1003,10 +1059,10 @@ def _history_md(dn) -> str:
         if s in locks:
             lock_labels.append({"ingest": "Ingest", "development": "Develop", "print": "Print"}[s])
     lines.append("")
+    lines.append(f"**Currently locked:** {', '.join(lock_labels) or '—'}")
     lines.append(
-        f"**Currently locked:** {', '.join(lock_labels) or '—'}  \n"
-        f"**Process seed:** `{dn.metadata.get('process_seed')}` "
-        f"_(mild tank variation; same seed = repeatable)_"
+        f"**Process seed:** `{dn.metadata.get('process_seed')}`  \n"
+        f"_Mild tank variation; same seed = repeatable._"
     )
     return "\n".join(lines)
 
@@ -1040,12 +1096,10 @@ def _locks(state) -> list:
 
 def _split_summary(full: str) -> tuple[str, str]:
     """Split status blurb from decision log for separate UI panels."""
-    if "### Decision log" in full:
-        status, hist = full.split("### Decision log", 1)
-        return status.strip(), "### Decision log" + hist
-    if "### Decision history" in full:
-        status, hist = full.split("### Decision history", 1)
-        return status.strip(), "### Decision log" + hist
+    for marker in ("---DECISION-LOG---", "### Decision log", "### Decision history"):
+        if marker in full:
+            status, hist = full.split(marker, 1)
+            return status.strip(), hist.strip()
     return full, ""
 
 
@@ -2648,7 +2702,7 @@ def build_ui() -> gr.Blocks:
                         unlock_print_btn = gr.Button("Unlock", interactive=False, size="sm")
 
                 reset_btn = gr.Button("New negative", size="sm")
-                with gr.Accordion("Decision log", open=False):
+                with gr.Accordion("Decision log", open=True):
                     history = gr.Markdown(
                         "_Locked decisions only — exploring does not write here._",
                         elem_id="history_box",
