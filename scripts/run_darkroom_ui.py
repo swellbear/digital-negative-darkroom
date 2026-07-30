@@ -915,6 +915,16 @@ body.drawer-collapsed #drawer_host {
   padding: 1px 6px !important;
   border-radius: 5px !important;
 }
+/* The real download buttons are clicked by the popup, never shown. */
+#dl_pkg_print, #dl_pkg_both, #dl_pkg_negative, #download_modes {
+  position: absolute !important;
+  left: -9999px !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
 #preview_tool, #active_drawer, #crop_rect, #db_pos {
   position: absolute !important;
   left: -9999px !important;
@@ -1097,7 +1107,7 @@ body.module-collapsed #module_panel {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-#ctx_menu {
+#ctx_menu, #dl_menu {
   position: fixed;
   z-index: 100060;
   display: none;
@@ -1108,8 +1118,8 @@ body.module-collapsed #module_panel {
   background: var(--dr-bg-elevated);
   box-shadow: 0 12px 32px rgba(0,0,0,0.55);
 }
-#ctx_menu.is-open { display: block; }
-#ctx_menu button {
+#ctx_menu.is-open, #dl_menu.is-open { display: block; }
+#ctx_menu button, #dl_menu button {
   display: block;
   width: 100%;
   text-align: left;
@@ -1121,7 +1131,7 @@ body.module-collapsed #module_panel {
   font-size: 0.82rem;
   cursor: pointer;
 }
-#ctx_menu button:hover { background: var(--dr-accent-soft); color: var(--dr-text); }
+#ctx_menu button:hover, #dl_menu button:hover { background: var(--dr-accent-soft); color: var(--dr-text); }
 
 /* Compact leftovers from older layout ids */
 #controls_col { display: contents !important; }
@@ -2402,6 +2412,72 @@ UI_JS = """
     });
     return menu;
   };
+
+  // ——— Download popup: one trigger, a menu when there's more than one package ———
+  const DOWNLOAD_LABELS = {
+    print: 'Print only',
+    both: 'Print + negative',
+    negative: 'Negative only',
+  };
+  const clickPackage = (mode) => {
+    const host = document.getElementById('dl_pkg_' + mode);
+    if (!host) return;
+    const btn = host.matches('button') ? host : host.querySelector('button');
+    if (btn) btn.click();
+  };
+  const readDownloadModes = () => {
+    const root = document.querySelector('#download_modes');
+    const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+    return ((box && box.value) || '').split(',').map((m) => m.trim()).filter(Boolean);
+  };
+  const ensureDownloadMenu = () => {
+    let menu = document.getElementById('dl_menu');
+    if (menu) return menu;
+    menu = document.createElement('div');
+    menu.id = 'dl_menu';
+    menu.className = 'ctx-menu';
+    document.body.appendChild(menu);
+    menu.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-mode]');
+      if (!b) return;
+      e.preventDefault();
+      e.stopPropagation();
+      menu.classList.remove('is-open');
+      clickPackage(b.getAttribute('data-mode'));
+    });
+    return menu;
+  };
+  document.addEventListener('click', (e) => {
+    const trigger = e.target && e.target.closest && e.target.closest('#download_trigger');
+    if (!trigger) {
+      const open = document.getElementById('dl_menu');
+      if (open && !e.target.closest('#dl_menu')) open.classList.remove('is-open');
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    const modes = readDownloadModes();
+    if (modes.length <= 1) {
+      clickPackage(modes[0] || 'negative');
+      return;
+    }
+    const menu = ensureDownloadMenu();
+    menu.innerHTML = modes
+      .map((m) => `<button type="button" data-mode="${m}">${DOWNLOAD_LABELS[m] || m}</button>`)
+      .join('');
+    menu.classList.add('is-open');
+    const r = trigger.getBoundingClientRect();
+    const pad = 8;
+    menu.style.left = Math.min(r.left, window.innerWidth - 190) + 'px';
+    // Prefer opening below the button, flip above when there's no room.
+    requestAnimationFrame(() => {
+      const h = menu.getBoundingClientRect().height;
+      const below = r.bottom + 4;
+      menu.style.top = (below + h > window.innerHeight - pad
+        ? Math.max(pad, r.top - h - 4)
+        : below) + 'px';
+    });
+  });
 
   document.addEventListener('contextmenu', (e) => {
     const live = document.querySelector('#live_preview');
@@ -3845,13 +3921,11 @@ def commit_develop(film_id, developer_id, development_minutes, contrast, grain, 
     neg_download = _write_negative_package(neg_full, dn)
     state["dl_negative"] = neg_download
     return (
-        # Only the negative exists at this point, and the button already says
-        # so — a one-option menu would just be noise. It appears once Commit
-        # Print gives it something to actually choose between.
-        gr.update(
-            choices=[("Negative", "negative")], value="negative", visible=False
-        ),
-        gr.update(value=neg_download, label="⇣ Download negative", visible=True),
+        # Only the negative exists yet, so the trigger downloads it directly
+        # rather than opening a menu with one entry.
+        gr.update(value="⇣ Download negative", visible=True),
+        "negative",
+        gr.update(value=neg_download),
         _viewer_frame(state, live=live_view, neg=neg_view),
         state.get("original_ref"),
         state.get("latent_ref"),
@@ -4002,16 +4076,10 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         gr.update(interactive=False),
         gr.update(interactive=False),
         gr.update(interactive=True),
-        gr.update(value=print_only, label="⇣ Download print", visible=True),
-        gr.update(
-            choices=[
-                ("Print only", "print"),
-                ("Print + negative", "both"),
-                ("Negative only", "negative"),
-            ],
-            value="print",
-            visible=True,
-        ),
+        gr.update(value="⇣ Download…", visible=True),
+        "print,both,negative",
+        gr.update(value=print_only),
+        gr.update(value=print_plus_neg),
         state,
     )
 
@@ -4492,7 +4560,7 @@ def unlock_develop(state):
         gr.update(open=True),
         # download affordances no longer match the working state
         gr.update(visible=False),
-        gr.update(visible=False),
+        "",
         state,
         "develop",
     )
@@ -4731,7 +4799,7 @@ def unlock_print(state):
         off,
         gr.update(open=True),
         gr.update(visible=False),
-        gr.update(visible=False),
+        "",
         state,
     )
 
@@ -4777,7 +4845,7 @@ def reset_session():
         DEFAULT_CROP_RECT,
         "free",
         gr.update(visible=False),
-        gr.update(visible=False),
+        "",
         None,
         "ingest",
     )
@@ -4878,18 +4946,27 @@ def build_ui() -> gr.Blocks:
                                 "Commit Print", interactive=False, variant="primary", size="sm"
                             )
                             unlock_print_btn = gr.Button("Unlock", interactive=False, size="sm")
-                        download_scope = gr.Radio(
-                            choices=[("Negative", "negative")],
-                            value="negative",
-                            label="Download",
-                            visible=False,
-                            elem_id="download_scope",
-                        )
-                        download_print_btn = gr.DownloadButton(
-                            "⇣ Download negative",
+                        # One visible trigger. With a single package it
+                        # downloads straight away; with several it opens a
+                        # popup listing them. The real DownloadButtons sit
+                        # off-screen and are clicked by the menu.
+                        download_trigger = gr.Button(
+                            "⇣ Download",
                             visible=False,
                             size="sm",
-                            elem_id="download_print",
+                            elem_id="download_trigger",
+                        )
+                        download_modes = gr.Textbox(
+                            value="", elem_id="download_modes", show_label=False
+                        )
+                        dl_pkg_print = gr.DownloadButton(
+                            "print", size="sm", elem_id="dl_pkg_print"
+                        )
+                        dl_pkg_both = gr.DownloadButton(
+                            "both", size="sm", elem_id="dl_pkg_both"
+                        )
+                        dl_pkg_negative = gr.DownloadButton(
+                            "negative", size="sm", elem_id="dl_pkg_negative"
                         )
                         gr.Markdown(
                             "_Dodge / burn: **right-click the print** → Dodge or Burn._",
@@ -5213,7 +5290,7 @@ def build_ui() -> gr.Blocks:
             fn=commit_develop,
             inputs=[film, developer, development_minutes, contrast, grain, state],
             outputs=[
-                download_scope, download_print_btn,
+                download_trigger, download_modes, dl_pkg_negative,
                 live_out, original_out, latent_out, neg_out, status, history,
                 film, developer, development_minutes, contrast, grain,
                 develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
@@ -5297,7 +5374,7 @@ def build_ui() -> gr.Blocks:
                 develop_btn, unlock_develop_btn, print_btn,
                 paper, print_exposure, print_grade, print_contrast, unlock_print_btn,
                 develop_acc, print_acc,
-                download_print_btn, download_scope,
+                download_trigger, download_modes,
                 state, active_drawer,
             ],
         ).then(
@@ -5312,23 +5389,9 @@ def build_ui() -> gr.Blocks:
             outputs=[
                 live_out, original_out, latent_out, neg_out, status, history,
                 paper, print_exposure, print_grade, print_contrast,
-                print_btn, unlock_print_btn, download_print_btn, download_scope, state,
+                print_btn, unlock_print_btn,
+                download_trigger, download_modes, dl_pkg_print, dl_pkg_both, state,
             ],
-        )
-
-        # Both packages are written at commit time, so switching scope just
-        # repoints the button at the file the user asked for.
-        def _pick_download(scope, state):
-            key, label = {
-                "both": ("dl_print_negative", "⇣ Download print + negative"),
-                "negative": ("dl_negative", "⇣ Download negative"),
-            }.get(scope, ("dl_print_only", "⇣ Download print"))
-            return gr.update(value=(state or {}).get(key), label=label)
-
-        download_scope.change(
-            fn=_pick_download,
-            inputs=[download_scope, state],
-            outputs=[download_print_btn],
         )
 
         unlock_print_btn.click(
@@ -5337,8 +5400,8 @@ def build_ui() -> gr.Blocks:
             outputs=[
                 live_out, status, history,
                 paper, print_exposure, print_grade, print_contrast,
-                print_btn, unlock_print_btn, print_acc, download_print_btn,
-                download_scope, state,
+                print_btn, unlock_print_btn, print_acc,
+                download_trigger, download_modes, state,
             ],
         ).then(
             fn=live_preview_high,
@@ -5360,7 +5423,7 @@ def build_ui() -> gr.Blocks:
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
                 apply_framing_btn, reset_framing_btn, auto_crop_btn,
                 straighten_deg, crop_rect, crop_ratio,
-                download_print_btn, download_scope,
+                download_trigger, download_modes,
                 state, active_drawer,
             ],
         )
