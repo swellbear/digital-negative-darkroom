@@ -32,6 +32,7 @@ from digital_negative.analysis import (
     render_print_histogram,
     spot_at,
     spot_markdown,
+    suggest_tone_fit,
 )
 from digital_negative.recipes import build_recipe, load_recipe, save_recipe
 from digital_negative.chemistry import (
@@ -2928,9 +2929,46 @@ def refresh_inspect_tools(clip_hi, clip_lo, state):
         hist = gr.update()
     tip = (
         "_Histogram of print reflectance with Zone ticks. "
-        "Clipping paints blown paper-white (red) and crushed Dmax (blue)._"
+        "Clipping paints blown paper-white (red) and crushed Dmax (blue). "
+        "**Fit to paper** auto-sets the timer (and softens grade if needed)._"
     )
     return hist, tip, _viewer_frame(state, live=live), state
+
+
+def auto_fit_print_tones(print_exposure, print_grade, state):
+    """One-click: pull blown / crushed tones back onto the paper."""
+    if not state or state.get("print_draft") is None:
+        raise gr.Error("Run a print preview first (Commit Develop, then adjust Print).")
+    refl, _ = _print_maps(state)
+    fit = suggest_tone_fit(
+        refl,
+        base_seconds=float(print_exposure),
+        grade=float(print_grade),
+    )
+    if not fit.get("ok"):
+        raise gr.Error(fit.get("message") or "Could not fit tones.")
+
+    # Leave the warning overlays on so the result is immediately readable.
+    hist = _history_md(state["dn"]) if state.get("dn") is not None else ""
+    summary = (
+        f"{_stage_banner(state.get('stage', 'print'), _locks(state))}\n\n"
+        f"{fit['message']}\n\n{hist}"
+    )
+    state = {
+        **state,
+        "clip_hi": True,
+        "clip_lo": True,
+        "summary_cache": summary,
+    }
+    tip = fit["message"]
+    return (
+        gr.update(value=float(fit["base_seconds"])),
+        gr.update(value=float(fit["grade"])),
+        gr.update(value=True),  # clip_hi
+        gr.update(value=True),  # clip_lo
+        tip,
+        state,
+    )
 
 
 def pin_ab_print(state):
@@ -5755,6 +5793,12 @@ def build_ui() -> gr.Blocks:
                     with gr.Row():
                         clip_hi = gr.Checkbox(label="Blown (Z VII+)", value=False)
                         clip_lo = gr.Checkbox(label="Crushed (Z I−)", value=False)
+                        fit_tones_btn = gr.Button(
+                            "Fit to paper",
+                            size="sm",
+                            variant="secondary",
+                            elem_id="fit_tones_btn",
+                        )
                     with gr.Row():
                         pin_ab_btn = gr.Button("Pin A", size="sm")
                         toggle_ab_btn = gr.Button("Show A", size="sm", interactive=False)
@@ -6302,6 +6346,17 @@ def build_ui() -> gr.Blocks:
             ctrl.change(fn=refresh_inspect_tools, inputs=inspect_inputs, outputs=inspect_outputs)
         inspect_open.change(
             fn=refresh_inspect_tools, inputs=inspect_inputs, outputs=inspect_outputs
+        )
+        fit_tones_btn.click(
+            fn=auto_fit_print_tones,
+            inputs=[print_exposure, print_grade, state],
+            outputs=[print_exposure, print_grade, clip_hi, clip_lo, inspect_tip, state],
+        ).then(
+            fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
+        ).then(
+            fn=refresh_inspect_tools,
+            inputs=[clip_hi, clip_lo, state],
+            outputs=[hist_plot, inspect_tip, live_out, state],
         )
         pin_ab_btn.click(
             fn=pin_ab_print, inputs=[state], outputs=[state, inspect_tip, toggle_ab_btn]

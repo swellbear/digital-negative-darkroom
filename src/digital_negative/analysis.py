@@ -473,6 +473,119 @@ def render_print_histogram(
     return buf
 
 
+def suggest_tone_fit(
+    reflectance: np.ndarray | None,
+    *,
+    base_seconds: float,
+    grade: float,
+    hi_zone: float = 7.2,
+    lo_zone: float = 1.2,
+    target_lo: float = 2.0,
+    target_mid: float = 5.0,
+    target_hi: float = 7.0,
+    min_seconds: float = 2.0,
+    max_seconds: float = 64.0,
+) -> dict[str, Any]:
+    """Suggest exposure / grade so the print sits on paper instead of clipping.
+
+    First-order darkroom intuition: +1 enlarger stop ≈ 1 Zone darker. When the
+    scene is too contrasty for one grade, soften filtration a little, then park
+    the midtone near Zone V (or bias toward the worse end if only one side is
+    clipping).
+    """
+    if reflectance is None or np.asarray(reflectance).size == 0:
+        return {
+            "ok": 0,
+            "base_seconds": float(base_seconds),
+            "grade": float(grade),
+            "message": "No print yet — Commit Develop first.",
+        }
+
+    zones = np.asarray(reflectance_to_zone(reflectance), dtype=np.float64).reshape(-1)
+    zones = zones[np.isfinite(zones)]
+    if zones.size < 16:
+        return {
+            "ok": 0,
+            "base_seconds": float(base_seconds),
+            "grade": float(grade),
+            "message": "Not enough print samples to fit.",
+        }
+
+    p5, p50, p95 = (float(x) for x in np.percentile(zones, (5, 50, 95)))
+    blown = p95 >= hi_zone
+    crushed = p5 <= lo_zone
+    span = p95 - p5
+
+    new_grade = float(np.clip(grade, 0.0, 5.0))
+    grade_note = ""
+    # Too much scene contrast for this filtration — open the scale a notch.
+    if span > 6.2 and (blown or crushed):
+        soften = float(np.clip(0.5 + 0.35 * (span - 6.2), 0.5, 1.5))
+        softened = max(0.0, new_grade - soften)
+        if softened < new_grade - 0.05:
+            grade_note = f" · grade {new_grade:.1f}→{softened:.1f}"
+            new_grade = softened
+
+    # d(zone)/d(exposure_stops) ≈ −1 on the print.
+    if blown and not crushed:
+        delta_stops = p95 - target_hi  # darken hot highlights
+        intent = "protect highlights"
+    elif crushed and not blown:
+        delta_stops = p5 - target_lo  # lighten crushed shadows
+        intent = "lift shadows"
+    else:
+        delta_stops = p50 - target_mid
+        intent = "balance midtones" if not (blown or crushed) else "compromise both ends"
+
+    # Tiny moves aren't worth a timer click.
+    if abs(delta_stops) < 0.08 and not grade_note:
+        return {
+            "ok": 1,
+            "base_seconds": float(base_seconds),
+            "grade": new_grade,
+            "delta_stops": 0.0,
+            "blown": blown,
+            "crushed": crushed,
+            "p5": p5,
+            "p50": p50,
+            "p95": p95,
+            "changed": False,
+            "message": (
+                f"Already on paper — shadows Z{_roman(round(p5))}, "
+                f"mid Z{_roman(round(p50))}, highlights Z{_roman(round(p95))}."
+            ),
+        }
+
+    new_seconds = float(base_seconds) * (2.0 ** float(delta_stops))
+    new_seconds = float(np.clip(new_seconds, min_seconds, max_seconds))
+    # Snap to the UI slider step (0.5s).
+    new_seconds = float(round(new_seconds * 2.0) / 2.0)
+    changed = abs(new_seconds - float(base_seconds)) >= 0.25 or bool(grade_note)
+
+    direction = "longer" if new_seconds > float(base_seconds) + 0.05 else (
+        "shorter" if new_seconds < float(base_seconds) - 0.05 else "same"
+    )
+    message = (
+        f"**Fit to paper** — {intent}: timer {float(base_seconds):g}s→{new_seconds:g}s"
+        f" ({direction}){grade_note}.  \n"
+        f"Was Z{_roman(round(p5))}–{_roman(round(p95))} "
+        f"(mid {_roman(round(p50))}). Overlay stays on so you can judge."
+    )
+    return {
+        "ok": 1,
+        "base_seconds": new_seconds,
+        "grade": new_grade,
+        "delta_stops": float(delta_stops),
+        "blown": blown,
+        "crushed": crushed,
+        "p5": p5,
+        "p50": p50,
+        "p95": p95,
+        "changed": changed,
+        "message": message,
+    }
+
+
 def apply_clipping_overlay(
     preview_rgb: np.ndarray,
     reflectance: np.ndarray | None,
