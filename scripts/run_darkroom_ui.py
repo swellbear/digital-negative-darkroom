@@ -319,9 +319,9 @@ footer, .gradio-container footer {
 
 /* Drawer host — one panel visible; compressed */
 #drawer_host {
-  flex: 0 0 208px !important;
-  width: 208px !important;
-  max-width: 208px !important;
+  flex: 0 0 176px !important;
+  width: 176px !important;
+  max-width: 176px !important;
   min-width: 0 !important;
   height: 100% !important;
   flex-wrap: nowrap !important;
@@ -356,34 +356,69 @@ body.drawer-collapsed #drawer_host {
   background: transparent !important;
 }
 #drawer_host .block {
-  margin-top: 1px !important;
-  margin-bottom: 1px !important;
+  margin: 0 !important;
   padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
 }
+/* Slider/number rows: label above, control below, both tight. */
 #drawer_host .label-wrap,
-#drawer_host label {
-  margin-bottom: 0 !important;
-  font-size: 0.68rem !important;
-  line-height: 1.15 !important;
+#drawer_host label,
+#drawer_host [data-testid="block-label"] {
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 0.6rem !important;
+  line-height: 1.1 !important;
+  color: var(--dr-text-dim) !important;
 }
-#drawer_host .form { gap: 2px !important; }
-#drawer_host button { min-height: 24px !important; font-size: 0.7rem !important; padding: 2px 6px !important; }
-#drawer_host input, #drawer_host select, #drawer_host .wrap-inner {
-  font-size: 0.7rem !important;
-  min-height: 24px !important;
+#drawer_host .form {
+  gap: 0 !important;
+  border: none !important;
+  background: transparent !important;
 }
-#drawer_host .head, #drawer_host .tab-nav { font-size: 0.7rem !important; }
-#ingest_upload,
+#drawer_host button {
+  min-height: 21px !important;
+  height: 21px !important;
+  font-size: 0.63rem !important;
+  padding: 1px 5px !important;
+  border-radius: 5px !important;
+}
+#drawer_host input,
+#drawer_host select,
+#drawer_host .wrap-inner,
+#drawer_host .secondary-wrap input {
+  font-size: 0.62rem !important;
+  min-height: 19px !important;
+  height: 19px !important;
+  padding: 0 4px !important;
+}
+/* Slider track + its number box */
+#drawer_host input[type="range"] { height: 12px !important; margin: 0 !important; }
+#drawer_host .head { font-size: 0.62rem !important; margin: 0 !important; }
+#drawer_host .head input[type="number"] { width: 44px !important; }
+#drawer_host .min_value, #drawer_host .max_value { font-size: 0.52rem !important; }
+#drawer_host .container > .wrap,
+#drawer_host .block > .wrap { padding: 0 !important; }
+#drawer_host .icon-button-wrapper,
+#drawer_host .reset-button { transform: scale(0.8) !important; }
+/* Keep the dropzone strictly inside its own box — with overflow visible it
+   spilled past its bounds and swallowed clicks meant for Commit Ingest. */
+#ingest_upload {
+  overflow: hidden !important;
+  min-height: 74px !important;
+  max-height: 74px !important;
+  contain: layout paint !important;
+}
 #ingest_upload .wrap,
 #ingest_upload .upload-container,
 #ingest_upload .center,
 #ingest_upload [data-testid="file"] {
-  overflow: visible !important;
-  min-height: 74px !important;
+  overflow: hidden !important;
+  min-height: 0 !important;
+  max-height: 72px !important;
 }
 #ingest_upload .wrap {
   height: auto !important;
-  min-height: 74px !important;
 }
 #ingest_upload .upload-container,
 #ingest_upload .center {
@@ -391,10 +426,11 @@ body.drawer-collapsed #drawer_host {
   flex-direction: column !important;
   justify-content: center !important;
   align-items: center !important;
-  padding: 6px 6px !important;
-  min-height: 68px !important;
+  padding: 4px !important;
+  min-height: 0 !important;
   box-sizing: border-box !important;
-  font-size: 0.68rem !important;
+  font-size: 0.6rem !important;
+  line-height: 1.15 !important;
 }
 #ingest_upload button,
 #ingest_upload .or,
@@ -594,9 +630,8 @@ body.drawer-collapsed #drawer_host {
   box-sizing: border-box !important;
 }
 #seq_strip .image-container > button { border: none !important; }
-/* Strip the Gradio label bar and hover buttons off the thumbs — they were
-   eating the whole 44px, leaving the actual frame as a sliver. */
-#seq_strip [data-testid="block-label"],
+/* Hover buttons off the thumbs — they were eating the whole 44px, leaving
+   the actual frame as a sliver. */
 #seq_strip .label-wrap,
 #seq_strip .icon-button-wrapper,
 #seq_strip .icon-button,
@@ -611,6 +646,32 @@ body.drawer-collapsed #drawer_host {
   opacity: 0 !important;
   pointer-events: none !important;
 }
+/* The stage name rides on the thumb and only shows on hover. */
+#seq_strip [data-testid="block-label"] {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  top: auto !important;
+  z-index: 4 !important;
+  margin: 0 !important;
+  padding: 2px 0 !important;
+  border: none !important;
+  border-radius: 0 0 5px 5px !important;
+  background: rgba(12, 12, 14, 0.86) !important;
+  color: var(--dr-text) !important;
+  font-size: 0.6rem !important;
+  line-height: 1.1 !important;
+  text-align: center !important;
+  opacity: 0 !important;
+  transition: opacity 0.12s ease !important;
+  pointer-events: none !important;
+  white-space: nowrap !important;
+}
+#seq_strip [data-testid="block-label"] svg { display: none !important; }
+#seq_strip .block:hover [data-testid="block-label"] { opacity: 1 !important; }
+#seq_strip .block { cursor: pointer !important; position: relative !important; }
+#seq_strip .block:hover .image-container { border-color: var(--dr-accent) !important; }
 #seq_strip img {
   max-height: 42px !important;
   width: 100% !important;
@@ -644,9 +705,9 @@ body.drawer-collapsed #drawer_host {
 
 /* ——— Persistent module panel (darktable-style, right side) ——— */
 #module_panel {
-  flex: 0 0 226px !important;
-  width: 226px !important;
-  max-width: 226px !important;
+  flex: 0 0 190px !important;
+  width: 190px !important;
+  max-width: 190px !important;
   min-width: 0 !important;
   height: 100% !important;
   /* Gradio's own Column class defaults to flex-wrap: wrap — once open modules'
@@ -715,46 +776,72 @@ body.module-collapsed #module_panel {
   stroke: var(--dr-accent-strong) !important;
 }
 #module_panel .gr-accordion .form {
-  padding: 2px 7px 6px !important;
-  gap: 3px !important;
+  padding: 1px 5px 4px !important;
+  gap: 1px !important;
+  border: none !important;
+  background: transparent !important;
 }
 #module_panel .block {
-  margin: 1px 0 !important;
+  margin: 0 !important;
   padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
 }
 #module_panel label,
 #module_panel .label-wrap span,
+#module_panel [data-testid="block-label"],
 #module_panel .head {
-  font-size: 0.64rem !important;
-  line-height: 1.15 !important;
-  margin-bottom: 0 !important;
+  font-size: 0.58rem !important;
+  line-height: 1.1 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: var(--dr-text-dim) !important;
 }
 #module_panel button {
-  min-height: 22px !important;
-  font-size: 0.65rem !important;
-  padding: 2px 6px !important;
+  min-height: 20px !important;
+  height: 20px !important;
+  font-size: 0.6rem !important;
+  padding: 1px 5px !important;
+  border-radius: 5px !important;
 }
 #module_panel .prose,
 #module_panel .prose p,
 #module_panel .md {
-  font-size: 0.63rem !important;
-  line-height: 1.25 !important;
+  font-size: 0.57rem !important;
+  line-height: 1.2 !important;
   margin: 1px 0 !important;
 }
-#module_panel input, #module_panel select { font-size: 0.65rem !important; }
+#module_panel input, #module_panel select {
+  font-size: 0.58rem !important;
+  min-height: 18px !important;
+  height: 18px !important;
+  padding: 0 4px !important;
+}
+#module_panel input[type="range"] { height: 12px !important; }
+#module_panel .head input[type="number"] { width: 40px !important; }
+#module_panel .min_value, #module_panel .max_value { font-size: 0.5rem !important; }
+#module_panel .icon-button-wrapper,
+#module_panel .reset-button { transform: scale(0.75) !important; }
 /* Radio pills wrap two-up instead of one tall column per option. */
-#module_panel .wrap:has(> label input[type="radio"]),
-#module_panel fieldset .wrap {
+#module_panel fieldset .wrap,
+#module_panel fieldset > div {
   display: flex !important;
   flex-wrap: wrap !important;
-  gap: 3px !important;
+  gap: 2px !important;
 }
 #module_panel fieldset label {
-  padding: 2px 6px !important;
-  font-size: 0.62rem !important;
+  padding: 1px 5px !important;
+  font-size: 0.56rem !important;
   line-height: 1.15 !important;
   min-height: 0 !important;
   flex: 0 1 auto !important;
+  border-radius: 4px !important;
+}
+#module_panel fieldset label input[type="radio"] {
+  width: 9px !important;
+  height: 9px !important;
+  min-height: 0 !important;
+  margin-right: 3px !important;
 }
 .mod-icon {
   display: inline-flex;
@@ -2444,10 +2531,57 @@ def _split_summary(full: str) -> tuple[str, str]:
 
 _VIEWER_LABELS = {
     "live": "Commit preview (live) — theoretical print",
-    "original": "Original photo (enlarged) — click Live print to return",
-    "latent": "Latent DN (enlarged) — click Live print to return",
-    "negative": "Developed negative (enlarged) — click Live print to return",
+    "original": "Original photo — click Live print below to swap back",
+    "latent": "Latent DN — click Live print below to swap back",
+    "negative": "Developed negative — click Live print below to swap back",
 }
+
+# The filmstrip holds whichever three stages are *not* in the large preview.
+# Clicking a slot swaps it with the preview, so the strip is a stable set of
+# three slots whose occupants change.
+STRIP_DEFAULT_SLOTS = ("original", "latent", "negative")
+STRIP_SHORT_LABELS = {
+    "live": "Live print",
+    "original": "Original",
+    "latent": "Latent DN",
+    "negative": "Negative",
+}
+
+
+def _strip_slots(state) -> list[str]:
+    slots = (state or {}).get("strip_slots")
+    if not slots or len(slots) != 3:
+        return list(STRIP_DEFAULT_SLOTS)
+    return list(slots)
+
+
+def _mode_thumb(state, mode, *, live=None, original=None, latent=None, neg=None):
+    """Small reference frame for one filmstrip slot."""
+    s = state or {}
+    if mode == "original":
+        return original if original is not None else s.get("original_ref")
+    if mode == "latent":
+        return latent if latent is not None else s.get("latent_ref")
+    if mode == "negative":
+        return neg if neg is not None else s.get("neg_ref")
+    img = live if live is not None else s.get("live_rgb")
+    if img is None:
+        return None
+    # Only reached while the preview is showing something other than the print.
+    return _downscale_rgb(img, REF_MAX_SIDE)
+
+
+def _strip_updates(state, *, live=None, original=None, latent=None, neg=None):
+    """gr.update for each of the three filmstrip slots, in slot order."""
+    return [
+        gr.update(
+            value=_mode_thumb(
+                state, mode, live=live, original=original, latent=latent, neg=neg
+            ),
+            label=STRIP_SHORT_LABELS.get(mode, mode),
+        )
+        for mode in _strip_slots(state)
+    ]
 
 
 def _viewer_frame(state, live=None, original=None, latent=None, neg=None):
@@ -2515,42 +2649,51 @@ def _pack_preview(live, original, latent, neg, summary, state):
                 else neg,
             }
     shown = _viewer_frame(state, live=live, original=original, latent=latent, neg=neg)
-    return shown, original, latent, neg, status, hist, _inspect_frame(state, live=live), state
+    slot_a, slot_b, slot_c = _strip_updates(
+        state, live=live, original=original, latent=latent, neg=neg
+    )
+    return (
+        shown,
+        slot_a,
+        slot_b,
+        slot_c,
+        status,
+        hist,
+        _inspect_frame(state, live=live),
+        state,
+    )
 
 
-def focus_viewer(mode: str):
-    """Return a handler that puts a reference (or live print) in the large preview."""
+def swap_strip_slot(index: int):
+    """Click a filmstrip slot: it goes to the large preview, and whatever was
+    in the preview drops into the slot it came from, so you can toggle back."""
 
     def _fn(state, evt: SelectData | None = None):
         if not state or state.get("dn") is None:
             empty = gr.update()
-            return empty, empty, "*Commit Ingest first.*", state
-        if evt is not None and getattr(evt, "selected", True) is False:
-            mode_use = "live"
-        else:
-            mode_use = mode
-        state = {**state, "viewer_mode": mode_use}
+            return empty, empty, empty, empty, empty, "*Commit Ingest first.*", state
+        slots = _strip_slots(state)
+        clicked = slots[index]
+        slots[index] = state.get("viewer_mode", "live")
+        state = {**state, "viewer_mode": clicked, "strip_slots": slots}
         tip = {
             "live": "_Live theoretical print. Use **Frame** to crop/straighten, **Inspect** to zoom._",
-            "original": "_Original in the live preview. Use **Inspect** to zoom · **Frame** to crop._",
-            "latent": "_Latent DN in the live preview. Use **Inspect** to zoom · **Frame** to crop._",
-            "negative": "_Developed negative in the live preview. Use **Inspect** to zoom · **Frame** to crop._",
-        }.get(mode_use, "")
+            "original": "_Original in the preview — click it in the strip to swap back._",
+            "latent": "_Latent DN in the preview — click it in the strip to swap back._",
+            "negative": "_Developed negative in the preview — click it in the strip to swap back._",
+        }.get(clicked, "")
         banner = _stage_banner(state.get("stage", "development"), _locks(state))
         status = f"{banner}\n\n{tip}"
+        slot_a, slot_b, slot_c = _strip_updates(state)
         return (
             _viewer_frame(state),
+            slot_a,
+            slot_b,
+            slot_c,
             _inspect_frame(state),
             status,
             state,
         )
-
-    return _fn
-
-
-def focus_viewer_button(mode: str):
-    def _fn(state):
-        return focus_viewer(mode)(state, None)
 
     return _fn
 
@@ -2693,6 +2836,7 @@ def rotate_working(turns_cw: int, state):
             **state,
             "dn": dn,
             "viewer_mode": "live",
+            "strip_slots": list(STRIP_DEFAULT_SLOTS),
             "stage": "development",
             "original_view": state.get("original_view"),
             "original_ref": state.get("original_ref"),
@@ -2806,6 +2950,7 @@ def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
             **state,
             "dn": dn,
             "viewer_mode": "live",
+            "strip_slots": list(STRIP_DEFAULT_SLOTS),
             "stage": "development",
             "original_view": state.get("original_view"),
             "original_ref": state.get("original_ref"),
@@ -2869,6 +3014,7 @@ def reset_crop_straighten(state):
             **state,
             "dn": dn,
             "viewer_mode": "live",
+            "strip_slots": list(STRIP_DEFAULT_SLOTS),
             "stage": "development",
             "original_view": state.get("original_view"),
             "original_ref": state.get("original_ref"),
@@ -3017,6 +3163,7 @@ def commit_ingest(sample_path, file_obj, state):
         "live_rgb": latent_view,
         "live_inspect": latent_inspect,
         "viewer_mode": "live",
+        "strip_slots": list(STRIP_DEFAULT_SLOTS),
         "development": None,
         "development_full": None,
         "stage": "development",
@@ -3744,6 +3891,7 @@ def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, sta
         "live_rgb": live_rgb,
         "summary_cache": summary,
         "viewer_mode": "live",
+        "strip_slots": list(STRIP_DEFAULT_SLOTS),
     }
     state = _remember_print_seconds(state, print_exposure)
     st, hi = _split_summary(summary)
@@ -4357,20 +4505,21 @@ def build_ui() -> gr.Blocks:
                     buttons=[],
                 )
 
+                # Filmstrip: three slots holding whatever isn't in the preview.
+                # Clicking one swaps it with the preview; the label shows on hover.
                 with gr.Row(elem_id="seq_strip"):
                     original_out = gr.Image(
-                        label="Original", type="numpy", height=56, buttons=["fullscreen"]
+                        label="Original", type="numpy", height=44, buttons=[],
+                        elem_classes=["seq-thumb"],
                     )
                     latent_out = gr.Image(
-                        label="Latent DN", type="numpy", height=56, buttons=["fullscreen"]
+                        label="Latent DN", type="numpy", height=44, buttons=[],
+                        elem_classes=["seq-thumb"],
                     )
                     neg_out = gr.Image(
-                        label="Negative", type="numpy", height=56, buttons=["fullscreen"]
+                        label="Negative", type="numpy", height=44, buttons=[],
+                        elem_classes=["seq-thumb"],
                     )
-                    view_orig_btn = gr.Button("Original", size="sm")
-                    view_lat_btn = gr.Button("Latent", size="sm")
-                    view_neg_btn = gr.Button("Neg", size="sm")
-                    view_live_btn = gr.Button("Live", size="sm", variant="primary")
 
                 inspect_out = gr.Image(
                     label="Inspect",
@@ -4788,14 +4937,13 @@ def build_ui() -> gr.Blocks:
         )
 
         # Thumbnail / button → enlarge in main preview
-        focus_outputs = [live_out, inspect_out, status, state]
-        original_out.select(fn=focus_viewer("original"), inputs=[state], outputs=focus_outputs)
-        latent_out.select(fn=focus_viewer("latent"), inputs=[state], outputs=focus_outputs)
-        neg_out.select(fn=focus_viewer("negative"), inputs=[state], outputs=focus_outputs)
-        view_orig_btn.click(fn=focus_viewer_button("original"), inputs=[state], outputs=focus_outputs)
-        view_lat_btn.click(fn=focus_viewer_button("latent"), inputs=[state], outputs=focus_outputs)
-        view_neg_btn.click(fn=focus_viewer_button("negative"), inputs=[state], outputs=focus_outputs)
-        view_live_btn.click(fn=focus_viewer_button("live"), inputs=[state], outputs=focus_outputs)
+        swap_outputs = [
+            live_out, original_out, latent_out, neg_out, inspect_out, status, state
+        ]
+        for slot_index, thumb in enumerate((original_out, latent_out, neg_out)):
+            thumb.select(
+                fn=swap_strip_slot(slot_index), inputs=[state], outputs=swap_outputs
+            )
     return demo
 
 
