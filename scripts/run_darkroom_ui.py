@@ -338,7 +338,10 @@ body.db-exposing #preview_col {
   box-shadow: 0 0 0 8px rgba(255, 184, 77, 0.18), 0 0 28px rgba(255, 170, 40, 0.35) !important;
   animation: db-wave-ring 1.2s ease-in-out infinite;
 }
+body.db-exposing #live_preview,
+body.db-exposing #live_preview *,
 #live_preview.db-waving,
+#live_preview.db-waving *,
 #live_preview.db-waving img {
   cursor: none !important;
 }
@@ -347,20 +350,36 @@ body.db-exposing #preview_col {
   color: #ffb84d !important;
   font-weight: 700 !important;
 }
-#db_card_cursor {
+#db_tool_cursor {
   position: fixed;
   pointer-events: none;
-  z-index: 9999;
+  z-index: 100000;
   transform: translate(-50%, -50%);
-  opacity: 0.78;
-  mix-blend-mode: screen;
-  image-rendering: auto;
-  filter: drop-shadow(0 0 6px rgba(255, 180, 60, 0.65));
+  width: 120px;
+  height: 120px;
+  display: none;
 }
-#db_card_cursor.db-card-resting {
-  opacity: 0.42;
+#db_tool_cursor .db-tool-fill {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0.35;
+  filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));
+}
+#db_tool_cursor .db-tool-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 0 3px rgba(0,0,0,0.9));
+}
+#db_tool_cursor.db-card-resting {
   animation: db-card-breathe 1.4s ease-in-out infinite;
 }
+#db_stamp_asset { display: none !important; }
 @keyframes db-wave-pulse {
   0%, 100% { filter: brightness(1); }
   50% { filter: brightness(1.08); }
@@ -419,8 +438,9 @@ UI_JS = """
       img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
       img.style.maxWidth = scale > 1.02 ? 'none' : '';
       img.style.maxHeight = scale > 1.02 ? 'none' : '';
-      if (root.classList.contains('db-waving')) {
+      if (root.classList.contains('db-waving') || document.body.classList.contains('db-exposing')) {
         img.style.cursor = 'none';
+        root.style.cursor = 'none';
         return;
       }
       img.style.cursor = scale > 1.02 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in';
@@ -502,113 +522,150 @@ UI_JS = """
     return [Math.min(1, Math.max(0, nx)), Math.min(1, Math.max(0, ny))];
   };
 
-  const ensureCursor = () => {
-    let el = document.getElementById('db_card_cursor');
+  const forceNoCursor = (live) => {
+    if (!live) return;
+    live.style.cursor = 'none';
+    live.querySelectorAll('*').forEach((el) => { el.style.cursor = 'none'; });
+  };
+
+  const shapePaths = (kind, stroke) => {
+    const fill = stroke + '44';
+    const common = `fill="${fill}" stroke="${stroke}" stroke-width="3.5" stroke-linejoin="round"`;
+    const k = (kind || 'soft_oval').toLowerCase();
+    if (k === 'circle' || k === 'round') {
+      return `<ellipse cx="50" cy="50" rx="40" ry="40" ${common} />`;
+    }
+    if (k === 'finger' || k === 'wand') {
+      return `<ellipse cx="50" cy="50" rx="20" ry="42" ${common} />`;
+    }
+    if (k === 'card' || k === 'rect' || k === 'rectangle') {
+      return `<rect x="14" y="20" width="72" height="60" rx="3" ${common} />`;
+    }
+    if (k === 'custom') {
+      return `<ellipse cx="50" cy="50" rx="42" ry="34" ${common} stroke-dasharray="5 4" />`;
+    }
+    // soft oval default card
+    return `<ellipse cx="50" cy="50" rx="44" ry="30" ${common} />`;
+  };
+
+  const ensureToolCursor = () => {
+    let el = document.getElementById('db_tool_cursor');
     if (!el) {
-      el = document.createElement('img');
-      el.id = 'db_card_cursor';
-      el.alt = 'dodge/burn card';
+      el = document.createElement('div');
+      el.id = 'db_tool_cursor';
+      el.innerHTML = '<img class="db-tool-fill" alt="" /><svg class="db-tool-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"></svg>';
       document.body.appendChild(el);
     }
     return el;
   };
 
-  const placeRestingCard = (live, stamp, frac) => {
+  const readFlag = () => {
+    const flagRoot = document.querySelector('#db_flag');
+    if (!flagRoot) return null;
+    const node = flagRoot.getAttribute('data-exposing') != null
+      ? flagRoot
+      : flagRoot.querySelector('[data-exposing]');
+    if (!node) return null;
+    const asset = flagRoot.querySelector('#db_stamp_asset, img');
+    return {
+      exposing: node.getAttribute('data-exposing') === '1',
+      shape: node.getAttribute('data-shape') || 'soft_oval',
+      mode: node.getAttribute('data-mode') || 'burn',
+      frac: parseFloat(node.getAttribute('data-stamp-fw') || '0.28'),
+      stamp: asset && asset.getAttribute('src') ? asset.getAttribute('src') : '',
+      node,
+    };
+  };
+
+  const showToolAt = (clientX, clientY, flag, resting) => {
+    const live = document.querySelector('#live_preview');
     const img = live && live.querySelector('img');
-    const cursor = ensureCursor();
-    if (!img || !stamp) {
-      cursor.style.display = 'none';
+    const tool = ensureToolCursor();
+    if (!flag || !flag.exposing || !img) {
+      tool.style.display = 'none';
       return;
     }
     const r = img.getBoundingClientRect();
-    if (r.width < 8 || r.height < 8) {
-      cursor.style.display = 'none';
+    const frac = Math.min(0.55, Math.max(0.12, flag.frac || 0.28));
+    const size = Math.max(48, frac * Math.min(r.width, r.height) * 1.15);
+    const stroke = (flag.mode || '').toLowerCase().startsWith('dodge') ? '#66ccff' : '#ffcc66';
+    const svg = tool.querySelector('.db-tool-svg');
+    const fillImg = tool.querySelector('.db-tool-fill');
+    if (svg) svg.innerHTML = shapePaths(flag.shape, stroke);
+    if (fillImg) {
+      if (flag.stamp) {
+        if (fillImg.getAttribute('src') !== flag.stamp) fillImg.setAttribute('src', flag.stamp);
+        fillImg.style.display = 'block';
+      } else {
+        fillImg.style.display = 'none';
+      }
+    }
+    tool.style.width = size + 'px';
+    tool.style.height = size + 'px';
+    tool.style.left = clientX + 'px';
+    tool.style.top = clientY + 'px';
+    tool.classList.toggle('db-card-resting', !!resting);
+    tool.style.display = 'block';
+    forceNoCursor(live);
+  };
+
+  const placeRestingCard = (live, flag) => {
+    const img = live && live.querySelector('img');
+    if (!img || !flag) {
+      const tool = document.getElementById('db_tool_cursor');
+      if (tool) tool.style.display = 'none';
       return;
     }
-    if (cursor.getAttribute('src') !== stamp) cursor.setAttribute('src', stamp);
-    cursor.style.width = Math.max(28, (frac || 0.25) * r.width) + 'px';
-    cursor.style.height = 'auto';
-    cursor.style.left = (r.left + r.width / 2) + 'px';
-    cursor.style.top = (r.top + r.height / 2) + 'px';
-    cursor.classList.add('db-card-resting');
-    cursor.style.display = 'block';
-    // Resting card still counts — expose under the card until the user moves it.
+    const r = img.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) return;
+    showToolAt(r.left + r.width / 2, r.top + r.height / 2, flag, true);
     if (!window.__dbPos) writePosBox('0.5000,0.5000');
   };
 
   const syncWave = () => {
-    const flagRoot = document.querySelector('#db_flag');
-    const node = flagRoot
-      ? (flagRoot.getAttribute('data-exposing') != null
-          ? flagRoot
-          : flagRoot.querySelector('[data-exposing]'))
-      : null;
-    const exposing = node && node.getAttribute('data-exposing') === '1';
-    const stamp = node ? (node.getAttribute('data-stamp') || '') : '';
-    const frac = node ? parseFloat(node.getAttribute('data-stamp-fw') || '0.25') : 0.25;
+    const flag = readFlag();
     const live = document.querySelector('#live_preview');
-    const cursor = ensureCursor();
-    document.body.classList.toggle('db-exposing', !!exposing);
+    const tool = ensureToolCursor();
+    const exposing = !!(flag && flag.exposing);
+    document.body.classList.toggle('db-exposing', exposing);
     if (!exposing) {
       writePosBox('');
       window.__dbScrolled = false;
       if (live) live.classList.remove('db-waving');
-      cursor.classList.remove('db-card-resting');
-      cursor.style.display = 'none';
+      tool.classList.remove('db-card-resting');
+      tool.style.display = 'none';
       return;
     }
     if (live) {
       live.classList.add('db-waving');
+      forceNoCursor(live);
       if (!window.__dbScrolled) {
         live.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
         window.__dbScrolled = true;
       }
     }
-    if (stamp && cursor.getAttribute('src') !== stamp) cursor.setAttribute('src', stamp);
-    if (!window.__dbPos) {
-      placeRestingCard(live, stamp, frac);
-    }
+    if (!window.__dbPos) placeRestingCard(live, flag);
   };
 
   const onLivePointer = (e) => {
-    const flagRoot = document.querySelector('#db_flag');
-    const flag = flagRoot
-      ? (flagRoot.getAttribute('data-exposing') === '1'
-          ? flagRoot
-          : flagRoot.querySelector('[data-exposing="1"]'))
-      : null;
-    if (!flag) {
+    const flag = readFlag();
+    if (!flag || !flag.exposing) {
       writePosBox('');
-      const c = document.getElementById('db_card_cursor');
-      if (c) {
-        c.classList.remove('db-card-resting');
-        c.style.display = 'none';
-      }
+      const tool = document.getElementById('db_tool_cursor');
+      if (tool) tool.style.display = 'none';
       return;
     }
     const live = document.querySelector('#live_preview');
     const img = live && live.querySelector('img');
     if (!img) return;
+    forceNoCursor(live);
     const n = normOverImg(img, e.clientX, e.clientY);
-    const cursor = ensureCursor();
     if (!n) {
-      // Keep last position so a held card still exposes after leaving briefly.
-      const stamp = flag.getAttribute('data-stamp') || '';
-      const frac = parseFloat(flag.getAttribute('data-stamp-fw') || '0.25');
-      if (!window.__dbPos) placeRestingCard(live, stamp, frac);
+      if (!window.__dbPos) placeRestingCard(live, flag);
       return;
     }
     writePosBox(n[0].toFixed(4) + ',' + n[1].toFixed(4));
-    const stamp = flag.getAttribute('data-stamp') || '';
-    const frac = parseFloat(flag.getAttribute('data-stamp-fw') || '0.25');
-    if (stamp && cursor.getAttribute('src') !== stamp) cursor.setAttribute('src', stamp);
-    const iw = img.getBoundingClientRect().width;
-    cursor.classList.remove('db-card-resting');
-    cursor.style.width = Math.max(24, frac * iw) + 'px';
-    cursor.style.height = 'auto';
-    cursor.style.left = e.clientX + 'px';
-    cursor.style.top = e.clientY + 'px';
-    cursor.style.display = 'block';
+    showToolAt(e.clientX, e.clientY, flag, false);
   };
 
   const boot = () => {
@@ -1625,14 +1682,22 @@ def _editor_from_print(rgb: np.ndarray | None) -> dict:
 def _db_flag_html(state) -> str:
     exposing = "1" if state and state.get("db_exposing") else "0"
     stamp = ""
-    frac = "0.2"
+    frac = "0.28"
+    shape = "soft_oval"
+    mode = ""
     if state and state.get("db_stamp_url"):
         stamp = str(state["db_stamp_url"])
     if state and state.get("db_stamp_frac"):
         frac = f"{float(state['db_stamp_frac']):.4f}"
+    if state and state.get("db_shape"):
+        shape = str(state["db_shape"])
+    if state and state.get("db_mode"):
+        mode = str(state["db_mode"])
+    # Put stamp in an <img> (not a huge data-* attribute) so Gradio keeps it intact.
+    img = f'<img id="db_stamp_asset" src="{stamp}" alt="" />' if stamp else ""
     return (
-        f'<div data-exposing="{exposing}" data-stamp="{stamp}" data-stamp-fw="{frac}" '
-        f'data-mode="{state.get("db_mode", "") if state else ""}"></div>'
+        f'<div data-exposing="{exposing}" data-shape="{shape}" data-stamp-fw="{frac}" '
+        f'data-mode="{mode}">{img}</div>'
     )
 
 
