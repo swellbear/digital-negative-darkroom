@@ -361,6 +361,40 @@ def test_rotate_image_clockwise_swaps_axes():
     assert np.array_equal(rotated, np.rot90(img, k=-1))
 
 
+def test_straighten_and_crop_framing():
+    pytest.importorskip("scipy")
+    from digital_negative.display import apply_framing, crop_normalized, straighten_image
+
+    img = np.zeros((100, 120), dtype=np.float32)
+    img[40:60, 50:70] = 1.0
+
+    same = straighten_image(img, 0.0)
+    assert same.shape == img.shape
+    assert np.allclose(same, img)
+
+    tilted = straighten_image(img, 5.0)
+    assert tilted.shape == img.shape
+    # Corners fill black; center mass should still be bright somewhere.
+    assert float(tilted.max()) > 0.5
+
+    cropped = crop_normalized(img, left=0.1, top=0.1, right=0.1, bottom=0.1)
+    assert cropped.shape == (80, 96)
+    assert float(cropped.mean()) > float(img.mean())
+
+    framed = apply_framing(
+        img,
+        straighten_degrees_cw=2.0,
+        crop_left=0.05,
+        crop_top=0.05,
+        crop_right=0.05,
+        crop_bottom=0.05,
+    )
+    assert framed.ndim == 2
+    assert framed.shape[0] < img.shape[0]
+    assert framed.shape[1] < img.shape[1]
+    assert framed.shape[0] >= 32 and framed.shape[1] >= 32
+
+
 def test_resolve_input_prefers_upload_over_sample():
     sys.path.insert(0, str(ROOT / "scripts"))
     # Import after path setup — module lives as scripts/run_darkroom_ui.py

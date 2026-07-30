@@ -25,6 +25,7 @@ from digital_negative.curves import load_film_profile
 from digital_negative.development import develop
 from digital_negative.digital_negative import DigitalNegative
 from digital_negative.display import (
+    apply_framing,
     linear_to_srgb,
     negative_lightbox_preview,
     original_photo_preview,
@@ -1051,6 +1052,17 @@ def _history_md(dn) -> str:
                 f"{i}. **Rotate** — {h.get('degrees_cw'):+g}° "
                 f"(total {h.get('total_degrees')}° CW)"
             )
+        elif op == "frame":
+            lines.append(
+                f"{i}. **Crop & straighten** — "
+                f"straighten {float(h.get('straighten_degrees', 0)):+.2f}° · "
+                f"trim L{float(h.get('crop_left', 0))*100:.0f}% "
+                f"T{float(h.get('crop_top', 0))*100:.0f}% "
+                f"R{float(h.get('crop_right', 0))*100:.0f}% "
+                f"B{float(h.get('crop_bottom', 0))*100:.0f}%"
+            )
+        elif op == "frame_reset":
+            lines.append(f"{i}. **Reset framing** — back to post-ingest / last 90° orientation")
         else:
             lines.append(f"{i}. **{op}**")
     locks = dn.metadata.get("ui_state", {}).get("locked_stages", [])
@@ -1243,30 +1255,7 @@ def _rebuild_views_from_dn(state: dict) -> dict:
     }
 
 
-def rotate_working(turns_cw: int, state):
-    """Rotate the Digital Negative and reference previews; clears Develop/Print locks."""
-    if not state or state.get("dn") is None:
-        raise gr.Error("Commit Ingest first.")
-
-    dn = state["dn"]
-    dn.image = rotate_image(dn.image, turns_cw)
-    ingest = dn.metadata.setdefault("ingest", {})
-    degrees = int(ingest.get("rotation_degrees", 0)) + (90 * int(turns_cw))
-    ingest["rotation_degrees"] = degrees % 360
-
-    for key in (
-        "original_view",
-        "original_ref",
-        "original_inspect",
-        "latent_view",
-        "latent_ref",
-        "latent_inspect",
-        "live_rgb",
-        "live_inspect",
-    ):
-        if state.get(key) is not None:
-            state[key] = rotate_image(state[key], turns_cw)
-
+def _unlock_develop_print(dn) -> None:
     ui = dn.metadata.setdefault("ui_state", {})
     locks = ui.setdefault("locked_stages", [])
     committed = ui.setdefault("committed_stages", [])
@@ -1275,6 +1264,70 @@ def rotate_working(turns_cw: int, state):
             locks.remove(stage)
         if stage in committed:
             committed.remove(stage)
+
+
+def _ensure_geometry_bases(state: dict) -> dict:
+    """Keep full-res bases for crop/straighten reset (and 90° rotates)."""
+    dn = state.get("dn")
+    if dn is None:
+        return state
+    if state.get("geometry_base") is None:
+        state = {**state, "geometry_base": np.asarray(dn.image).copy()}
+    if state.get("original_base") is None:
+        # Prefer the largest original we still have (inspect > live > ref).
+        src = (
+            state.get("original_inspect")
+            or state.get("original_view")
+            or state.get("original_ref")
+        )
+        if src is not None:
+            state = {**state, "original_base": np.asarray(src).copy()}
+    return state
+
+
+def _set_original_previews_from_base(state: dict) -> dict:
+    """Rebuild original_* preview sizes from original_base (uint8 RGB)."""
+    orig_base = state.get("original_base")
+    if orig_base is None:
+        return state
+    orig_u8 = np.asarray(orig_base)
+    if orig_u8.dtype != np.uint8:
+        orig_u8 = np.clip(orig_u8, 0, 255).astype(np.uint8)
+    state["original_view"] = _downscale_rgb(orig_u8, LIVE_MAX_SIDE)
+    state["original_inspect"] = _downscale_rgb(orig_u8, INSPECT_MAX_SIDE)
+    state["original_ref"] = _downscale_rgb(orig_u8, REF_MAX_SIDE)
+    return state
+
+
+def rotate_working(turns_cw: int, state):
+    """Rotate the Digital Negative and reference previews; clears Develop/Print locks."""
+    if not state or state.get("dn") is None:
+        raise gr.Error("Commit Ingest first.")
+
+    state = _ensure_geometry_bases(state)
+    dn = state["dn"]
+    # 90° redefines the framing base — rotate bases, drop fine straighten/crop.
+    if state.get("geometry_base") is not None:
+        state["geometry_base"] = rotate_image(state["geometry_base"], turns_cw)
+        dn.image = np.asarray(state["geometry_base"]).copy()
+    else:
+        dn.image = rotate_image(dn.image, turns_cw)
+
+    if state.get("original_base") is not None:
+        state["original_base"] = rotate_image(state["original_base"], turns_cw)
+        state = _set_original_previews_from_base(state)
+    else:
+        for key in ("original_view", "original_ref", "original_inspect"):
+            if state.get(key) is not None:
+                state[key] = rotate_image(state[key], turns_cw)
+
+    ingest = dn.metadata.setdefault("ingest", {})
+    degrees = int(ingest.get("rotation_degrees", 0)) + (90 * int(turns_cw))
+    ingest["rotation_degrees"] = degrees % 360
+    ingest["straighten_degrees"] = 0.0
+    ingest["crop"] = {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+
+    _unlock_develop_print(dn)
     dn.metadata.setdefault("history", []).append(
         {
             "op": "rotate",
@@ -1292,6 +1345,9 @@ def rotate_working(turns_cw: int, state):
             "stage": "development",
             "original_view": state.get("original_view"),
             "original_ref": state.get("original_ref"),
+            "original_inspect": state.get("original_inspect"),
+            "geometry_base": state.get("geometry_base"),
+            "original_base": state.get("original_base"),
         }
     )
     deg = ingest["rotation_degrees"]
@@ -1315,6 +1371,188 @@ def rotate_working(turns_cw: int, state):
         gr.update(open=True),
         gr.update(open=True),
         state,
+        # Clear fine-framing sliders after a coarse rotate
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
+
+
+def apply_crop_straighten(straighten_deg, crop_left, crop_top, crop_right, crop_bottom, state):
+    """Apply fine straighten + edge crop from the geometry base."""
+    if not state or state.get("dn") is None:
+        raise gr.Error("Commit Ingest first.")
+    state = _ensure_geometry_bases(state)
+    base = state.get("geometry_base")
+    if base is None:
+        raise gr.Error("No framing base — Commit Ingest again.")
+
+    left = float(crop_left) / 100.0
+    top = float(crop_top) / 100.0
+    right = float(crop_right) / 100.0
+    bottom = float(crop_bottom) / 100.0
+    deg = float(straighten_deg)
+    if left + right >= 0.92 or top + bottom >= 0.92:
+        raise gr.Error("Crop is too aggressive — leave more of the frame.")
+
+    framed = apply_framing(
+        base,
+        straighten_degrees_cw=deg,
+        crop_left=left,
+        crop_top=top,
+        crop_right=right,
+        crop_bottom=bottom,
+        fill=0.0,
+    )
+    if framed.shape[0] < 32 or framed.shape[1] < 32:
+        raise gr.Error("Cropped image is too small.")
+
+    dn = state["dn"]
+    dn.image = framed
+    ingest = dn.metadata.setdefault("ingest", {})
+    ingest["straighten_degrees"] = deg
+    ingest["crop"] = {
+        "left": left,
+        "top": top,
+        "right": right,
+        "bottom": bottom,
+    }
+
+    orig_base = state.get("original_base")
+    if orig_base is not None:
+        orig_framed = apply_framing(
+            orig_base.astype(np.float32),
+            straighten_degrees_cw=deg,
+            crop_left=left,
+            crop_top=top,
+            crop_right=right,
+            crop_bottom=bottom,
+            fill=0.0,
+        )
+        orig_u8 = np.clip(orig_framed, 0, 255).astype(np.uint8)
+        state["original_view"] = _downscale_rgb(orig_u8, LIVE_MAX_SIDE)
+        state["original_inspect"] = _downscale_rgb(orig_u8, INSPECT_MAX_SIDE)
+        state["original_ref"] = _downscale_rgb(orig_u8, REF_MAX_SIDE)
+
+    _unlock_develop_print(dn)
+    dn.metadata.setdefault("history", []).append(
+        {
+            "op": "frame",
+            "straighten_degrees": round(deg, 3),
+            "crop_left": left,
+            "crop_top": top,
+            "crop_right": right,
+            "crop_bottom": bottom,
+        }
+    )
+    dn.touch()
+
+    state = _rebuild_views_from_dn(
+        {
+            **state,
+            "dn": dn,
+            "viewer_mode": "live",
+            "stage": "development",
+            "original_view": state.get("original_view"),
+            "original_ref": state.get("original_ref"),
+            "original_inspect": state.get("original_inspect"),
+            "geometry_base": state.get("geometry_base"),
+            "original_base": state.get("original_base"),
+        }
+    )
+    summary = (
+        f"{_stage_banner('development', _locks(state))}\n\n"
+        f"**Framed** — straighten {deg:+.2f}° · "
+        f"trim L{left*100:.0f}% T{top*100:.0f}% R{right*100:.0f}% B{bottom*100:.0f}%.  \n"
+        f"_Develop/Print unlocked — Commit Develop when the crop looks right._\n\n"
+        f"{_history_md(dn)}"
+    )
+    state["summary_cache"] = summary
+    return (
+        _viewer_frame(state, live=state.get("live_rgb")),
+        state.get("original_ref"),
+        state.get("latent_ref"),
+        None,
+        *_split_summary(summary),
+        gr.update(interactive=True),
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        gr.update(open=True),
+        gr.update(open=True),
+        state,
+        # Echo sliders (unchanged)
+        deg,
+        float(crop_left),
+        float(crop_top),
+        float(crop_right),
+        float(crop_bottom),
+    )
+
+
+def reset_crop_straighten(state):
+    """Restore DN / original previews to the geometry base (post-ingest or last 90°)."""
+    if not state or state.get("dn") is None:
+        raise gr.Error("Commit Ingest first.")
+    state = _ensure_geometry_bases(state)
+    base = state.get("geometry_base")
+    if base is None:
+        raise gr.Error("No framing base to restore.")
+
+    dn = state["dn"]
+    dn.image = np.asarray(base).copy()
+    ingest = dn.metadata.setdefault("ingest", {})
+    ingest["straighten_degrees"] = 0.0
+    ingest["crop"] = {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+
+    orig_base = state.get("original_base")
+    if orig_base is not None:
+        state = _set_original_previews_from_base(state)
+
+    _unlock_develop_print(dn)
+    dn.metadata.setdefault("history", []).append({"op": "frame_reset"})
+    dn.touch()
+
+    state = _rebuild_views_from_dn(
+        {
+            **state,
+            "dn": dn,
+            "viewer_mode": "live",
+            "stage": "development",
+            "original_view": state.get("original_view"),
+            "original_ref": state.get("original_ref"),
+            "original_inspect": state.get("original_inspect"),
+            "geometry_base": state.get("geometry_base"),
+            "original_base": state.get("original_base"),
+        }
+    )
+    summary = (
+        f"{_stage_banner('development', _locks(state))}\n\n"
+        f"**Framing reset** — back to the last 90° orientation (no fine straighten/crop).  \n"
+        f"_Develop/Print unlocked._\n\n"
+        f"{_history_md(dn)}"
+    )
+    state["summary_cache"] = summary
+    return (
+        _viewer_frame(state, live=state.get("live_rgb")),
+        state.get("original_ref"),
+        state.get("latent_ref"),
+        None,
+        *_split_summary(summary),
+        gr.update(interactive=True),
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        gr.update(open=True),
+        gr.update(open=True),
+        state,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
     )
 
 
@@ -1370,6 +1608,8 @@ def commit_ingest(sample_path, file_obj, state):
         "original_ref": original_ref,
         "original_view": original_view,
         "original_inspect": original_inspect,
+        "geometry_base": dn.image.copy(),
+        "original_base": original_full.copy(),
         "latent_ref": latent_ref,
         "latent_view": latent_view,
         "latent_inspect": latent_inspect,
@@ -1402,6 +1642,13 @@ def commit_ingest(sample_path, file_obj, state):
         gr.update(interactive=True),
         gr.update(interactive=True),
         gr.update(interactive=True),
+        gr.update(interactive=True),  # apply framing
+        gr.update(interactive=True),  # reset framing
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
         _inspect_frame(state, live=latent_inspect),
         gr.update(open=True),
         state,
@@ -2337,6 +2584,13 @@ def guided_first_print(
             rot_ccw,
             rot_180,
             rot_cw,
+            apply_frame_u,
+            reset_frame_u,
+            straighten_u,
+            crop_left_u,
+            crop_top_u,
+            crop_right_u,
+            crop_bottom_u,
             inspect_out,
             inspect_acc_u,
             state,
@@ -2358,6 +2612,13 @@ def guided_first_print(
         rot_ccw = gr.update(interactive=True)
         rot_180 = gr.update(interactive=True)
         rot_cw = gr.update(interactive=True)
+        apply_frame_u = gr.update(interactive=True)
+        reset_frame_u = gr.update(interactive=True)
+        straighten_u = gr.skip()
+        crop_left_u = gr.skip()
+        crop_top_u = gr.skip()
+        crop_right_u = gr.skip()
+        crop_bottom_u = gr.skip()
         inspect_out = state.get("live_inspect") or live_rgb
         inspect_acc_u = gr.update(open=True)
 
@@ -2455,6 +2716,13 @@ def guided_first_print(
         rot_ccw,
         rot_180,
         rot_cw,
+        apply_frame_u,
+        reset_frame_u,
+        straighten_u,
+        crop_left_u,
+        crop_top_u,
+        crop_right_u,
+        crop_bottom_u,
         inspect_out,
         inspect_acc_u,
         state,
@@ -2533,6 +2801,13 @@ def reset_session():
         off,
         off,
         off,
+        off,
+        off,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
         None,
     )
 
@@ -2725,6 +3000,29 @@ def build_ui() -> gr.Blocks:
                     rotate_ccw_btn = gr.Button("Rotate ⟲ 90°", size="sm", interactive=False)
                     rotate_180_btn = gr.Button("Rotate 180°", size="sm", interactive=False)
                     rotate_cw_btn = gr.Button("Rotate 90° ⟳", size="sm", interactive=False)
+                with gr.Accordion("Crop & straighten", open=True):
+                    gr.Markdown(
+                        "Fine straighten and edge crop from the last ingest / 90° base "
+                        "(not cumulative). Apply when the frame looks right."
+                    )
+                    straighten_deg = gr.Slider(
+                        -15.0,
+                        15.0,
+                        value=0.0,
+                        step=0.1,
+                        label="Straighten (° CW)",
+                    )
+                    with gr.Row():
+                        crop_left = gr.Slider(0.0, 40.0, value=0.0, step=0.5, label="Crop left %")
+                        crop_right = gr.Slider(0.0, 40.0, value=0.0, step=0.5, label="Crop right %")
+                    with gr.Row():
+                        crop_top = gr.Slider(0.0, 40.0, value=0.0, step=0.5, label="Crop top %")
+                        crop_bottom = gr.Slider(0.0, 40.0, value=0.0, step=0.5, label="Crop bottom %")
+                    with gr.Row():
+                        apply_framing_btn = gr.Button(
+                            "Apply framing", interactive=False, variant="secondary", size="sm"
+                        )
+                        reset_framing_btn = gr.Button("Reset framing", interactive=False, size="sm")
                 with gr.Row(elem_id="ref_row"):
                     original_out = gr.Image(
                         label="Original (click to enlarge)",
@@ -2789,6 +3087,8 @@ def build_ui() -> gr.Blocks:
                 sample, file_in, ingest_btn, develop_btn, print_btn,
                 ingest_acc, develop_acc, print_acc,
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
+                apply_framing_btn, reset_framing_btn,
+                straighten_deg, crop_left, crop_top, crop_right, crop_bottom,
                 inspect_out, inspect_acc, state,
             ],
         ).then(
@@ -3000,6 +3300,13 @@ def build_ui() -> gr.Blocks:
                 rotate_ccw_btn,
                 rotate_180_btn,
                 rotate_cw_btn,
+                apply_framing_btn,
+                reset_framing_btn,
+                straighten_deg,
+                crop_left,
+                crop_top,
+                crop_right,
+                crop_bottom,
                 inspect_out,
                 inspect_acc,
                 state,
@@ -3063,7 +3370,10 @@ def build_ui() -> gr.Blocks:
                 paper, print_exposure, print_grade, print_contrast,
                 print_btn, unlock_print_btn,
                 ingest_acc, develop_acc, print_acc,
-                rotate_ccw_btn, rotate_180_btn, rotate_cw_btn, state,
+                rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
+                apply_framing_btn, reset_framing_btn,
+                straighten_deg, crop_left, crop_top, crop_right, crop_bottom,
+                state,
             ],
         )
 
@@ -3071,6 +3381,7 @@ def build_ui() -> gr.Blocks:
             live_out, original_out, latent_out, neg_out, status, history,
             develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
             develop_acc, print_acc, state,
+            straighten_deg, crop_left, crop_top, crop_right, crop_bottom,
         ]
         rotate_ccw_btn.click(fn=rotate_ccw, inputs=[state], outputs=rotate_outputs).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
@@ -3079,6 +3390,27 @@ def build_ui() -> gr.Blocks:
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
         )
         rotate_180_btn.click(fn=rotate_180, inputs=[state], outputs=rotate_outputs).then(
+            fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
+        )
+
+        frame_outputs = [
+            live_out, original_out, latent_out, neg_out, status, history,
+            develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
+            develop_acc, print_acc, state,
+            straighten_deg, crop_left, crop_top, crop_right, crop_bottom,
+        ]
+        apply_framing_btn.click(
+            fn=apply_crop_straighten,
+            inputs=[straighten_deg, crop_left, crop_top, crop_right, crop_bottom, state],
+            outputs=frame_outputs,
+        ).then(
+            fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
+        )
+        reset_framing_btn.click(
+            fn=reset_crop_straighten,
+            inputs=[state],
+            outputs=frame_outputs,
+        ).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
         )
 

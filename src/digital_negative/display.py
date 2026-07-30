@@ -32,6 +32,75 @@ def rotate_image(image: np.ndarray, turns_cw: int) -> np.ndarray:
     return np.ascontiguousarray(np.rot90(image, k=-turns))
 
 
+def straighten_image(
+    image: np.ndarray,
+    degrees_cw: float,
+    *,
+    fill: float = 0.0,
+) -> np.ndarray:
+    """Fine rotate for horizon straighten. Canvas size stays the same (corners fill)."""
+    if image is None:
+        return image
+    deg = float(degrees_cw)
+    if abs(deg) < 1e-6:
+        return np.ascontiguousarray(image)
+    from scipy.ndimage import rotate as nd_rotate
+
+    # scipy rotates CCW for positive angles.
+    return np.ascontiguousarray(
+        nd_rotate(
+            image,
+            angle=-deg,
+            reshape=False,
+            order=1,
+            mode="constant",
+            cval=fill,
+            prefilter=True,
+        )
+    )
+
+
+def crop_normalized(
+    image: np.ndarray,
+    left: float = 0.0,
+    top: float = 0.0,
+    right: float = 0.0,
+    bottom: float = 0.0,
+) -> np.ndarray:
+    """Trim fractions of width/height from each edge (0–0.45)."""
+    if image is None:
+        return image
+    h, w = image.shape[:2]
+    left = float(np.clip(left, 0.0, 0.45))
+    top = float(np.clip(top, 0.0, 0.45))
+    right = float(np.clip(right, 0.0, 0.45))
+    bottom = float(np.clip(bottom, 0.0, 0.45))
+    x0 = int(round(left * w))
+    y0 = int(round(top * h))
+    x1 = int(round(w * (1.0 - right)))
+    y1 = int(round(h * (1.0 - bottom)))
+    x0 = int(np.clip(x0, 0, max(w - 2, 0)))
+    y0 = int(np.clip(y0, 0, max(h - 2, 0)))
+    x1 = int(np.clip(x1, x0 + 2, w))
+    y1 = int(np.clip(y1, y0 + 2, h))
+    return np.ascontiguousarray(image[y0:y1, x0:x1, ...])
+
+
+def apply_framing(
+    image: np.ndarray,
+    *,
+    straighten_degrees_cw: float = 0.0,
+    crop_left: float = 0.0,
+    crop_top: float = 0.0,
+    crop_right: float = 0.0,
+    crop_bottom: float = 0.0,
+    fill: float = 0.0,
+) -> np.ndarray:
+    """Straighten then crop — darkroom easel framing from a geometry base image."""
+    out = straighten_image(image, straighten_degrees_cw, fill=fill)
+    return crop_normalized(out, crop_left, crop_top, crop_right, crop_bottom)
+
+
 def to_pil_gray(image: np.ndarray, *, assume_linear: bool = False) -> Image.Image:
     view = linear_to_srgb(image) if assume_linear else image
     return Image.fromarray(to_u8_gray(view), mode="L")
