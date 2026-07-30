@@ -141,6 +141,8 @@ def _history_md(dn) -> str:
                 f"{i}. **Print** — {h.get('paper_id')} · grade {h.get('grade')} · "
                 f"exp {h.get('overall_exposure'):+g} stops"
             )
+        elif op == "unlock":
+            lines.append(f"{i}. **Unlock** — {h.get('stage')} (re-opened for changes)")
         else:
             lines.append(f"{i}. **{op}**")
     locks = dn.metadata.get("ui_state", {}).get("locked_stages", [])
@@ -320,13 +322,15 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
         state.get("latent_ref"),
         neg_ref,
         summary,
+        gr.update(interactive=False),  # film
         gr.update(interactive=False),
         gr.update(interactive=False),
         gr.update(interactive=False),
         gr.update(interactive=False),
-        gr.update(interactive=False),
-        gr.update(interactive=False),
-        gr.update(interactive=True),
+        gr.update(interactive=False),  # develop commit
+        gr.update(interactive=True),  # unlock develop
+        gr.update(interactive=True),  # print commit
+        gr.update(interactive=False),  # unlock print
         state,
     )
 
@@ -405,11 +409,108 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         state.get("latent_ref"),
         state.get("neg_ref"),
         summary,
+        gr.update(interactive=False),  # paper
         gr.update(interactive=False),
         gr.update(interactive=False),
         gr.update(interactive=False),
-        gr.update(interactive=False),
-        gr.update(interactive=False),
+        gr.update(interactive=False),  # print commit
+        gr.update(interactive=True),  # unlock print
+        state,
+    )
+
+
+def _unlock_stage(dn, stage: str) -> None:
+    ui = dn.metadata.setdefault("ui_state", {})
+    locks = ui.setdefault("locked_stages", [])
+    committed = ui.setdefault("committed_stages", [])
+    if stage in locks:
+        locks.remove(stage)
+    if stage in committed and stage != "ingest":
+        # Keep ingest committed; develop/print can be re-committed
+        committed.remove(stage)
+    dn.metadata.setdefault("history", []).append({"op": "unlock", "stage": stage})
+    dn.touch()
+
+
+def unlock_develop(state):
+    """Re-open Develop (also unlocks Print, since the negative changed)."""
+    if not state or state.get("dn") is None:
+        raise gr.Error("Nothing to unlock — Commit Ingest first.")
+    if not _locked(state, "development"):
+        raise gr.Error("Develop is not locked.")
+
+    dn = state["dn"]
+    if _locked(state, "print"):
+        _unlock_stage(dn, "print")
+    _unlock_stage(dn, "development")
+
+    # Clear full-res print dependency; keep last develop preview for editing
+    state = {
+        **state,
+        "development_full": None,
+        "transmittance_proxy": None,
+        "print": None,
+        "print_draft": None,
+        "stage": "development",
+    }
+    summary = (
+        f"{_stage_banner('development')}\n\n"
+        f"**Develop unlocked.** Change settings — the large image updates live again.  \n"
+        f"_Commit Develop when ready (this also cleared the Print lock)._  \n\n"
+        f"{_history_md(dn)}"
+    )
+    state["summary_cache"] = summary
+    on, off = gr.update(interactive=True), gr.update(interactive=False)
+    return (
+        state.get("live_rgb"),
+        state.get("latent_ref"),
+        state.get("neg_ref"),
+        summary,
+        on,  # film
+        on,
+        on,
+        on,
+        on,  # grain
+        on,  # develop commit
+        off,  # unlock develop (hidden until locked again)
+        off,  # print commit
+        on,  # print controls stay visible but print requires develop lock for live
+        on,
+        on,
+        on,
+        off,  # unlock print
+        state,
+    )
+
+
+def unlock_print(state):
+    """Re-open Print only — Develop stays locked."""
+    if not state or state.get("dn") is None:
+        raise gr.Error("Nothing to unlock.")
+    if not _locked(state, "print"):
+        raise gr.Error("Print is not locked.")
+    if not _locked(state, "development"):
+        raise gr.Error("Develop must stay committed to revise Print.")
+
+    dn = state["dn"]
+    _unlock_stage(dn, "print")
+    state = {**state, "print": None, "stage": "print"}
+    summary = (
+        f"{_stage_banner('print')}\n\n"
+        f"**Print unlocked.** Adjust exposure/grade — large image updates live.  \n"
+        f"_Commit Print when ready._  \n\n{_history_md(dn)}"
+    )
+    state["summary_cache"] = summary
+    on, off = gr.update(interactive=True), gr.update(interactive=False)
+    return (
+        state.get("live_rgb"),
+        summary,
+        on,  # paper
+        on,
+        on,
+        on,
+        on,  # print commit
+        off,  # unlock print until locked again
         state,
     )
 
@@ -424,18 +525,20 @@ def reset_session():
         summary,
         on,
         on,
+        on,  # ingest
         on,
         on,
         on,
         on,
         on,
-        on,
-        off,
-        on,
-        on,
+        off,  # develop commit
+        off,  # unlock develop
         on,
         on,
-        off,
+        on,
+        on,
+        off,  # print commit
+        off,  # unlock print
         None,
     )
 
@@ -447,8 +550,8 @@ def build_ui() -> gr.Blocks:
         gr.Markdown(
             """
             # Digital Negative Darkroom
-            **Large viewer = working image** (high-res proof / print). References below are secondary.
-            Sliders update the large image live; **Commit** locks the stage.
+            **Large viewer = working image.** Sliders update it live.  
+            **Commit** locks a stage; **Unlock** re-opens it so you can revise.
             """
         )
 
@@ -488,7 +591,9 @@ def build_ui() -> gr.Blocks:
                     relative_time = gr.Slider(0.5, 2.0, value=1.0, step=0.05, label="Relative development")
                     contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Contrast (N− / N+)")
                     grain = gr.Slider(0.0, 2.5, value=1.0, step=0.05, label="Grain strength")
-                    develop_btn = gr.Button("Commit Develop", interactive=False)
+                    with gr.Row():
+                        develop_btn = gr.Button("Commit Develop", interactive=False, variant="primary")
+                        unlock_develop_btn = gr.Button("Unlock Develop", interactive=False)
 
                 with gr.Accordion("3 · Print", open=True):
                     paper = gr.Dropdown(
@@ -499,12 +604,16 @@ def build_ui() -> gr.Blocks:
                     print_exposure = gr.Slider(-2.0, 2.0, value=0.0, step=0.05, label="Exposure (stops)")
                     print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="Multigrade filtration")
                     print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Between-filter nudge")
-                    print_btn = gr.Button("Commit Print", interactive=False)
+                    with gr.Row():
+                        print_btn = gr.Button("Commit Print", interactive=False, variant="primary")
+                        unlock_print_btn = gr.Button("Unlock Print", interactive=False)
 
                 reset_btn = gr.Button("New negative")
 
             with gr.Column(scale=1):
-                summary = gr.Markdown("*Commit Ingest to load a large working image.*")
+                summary = gr.Markdown(
+                    "*Commit Ingest → edit live → Commit to lock → Unlock anytime to revise.*"
+                )
 
         develop_inputs = [film, developer, relative_time, contrast, grain, state]
         print_inputs = [paper, print_exposure, print_grade, print_contrast, state]
@@ -556,13 +665,44 @@ def build_ui() -> gr.Blocks:
                 contrast,
                 grain,
                 develop_btn,
+                unlock_develop_btn,
                 print_btn,
+                unlock_print_btn,
                 state,
             ],
         ).then(
             fn=live_print,
             inputs=print_inputs,
             outputs=[live_out, summary, state],
+        )
+
+        unlock_develop_btn.click(
+            fn=unlock_develop,
+            inputs=[state],
+            outputs=[
+                live_out,
+                latent_out,
+                neg_out,
+                summary,
+                film,
+                developer,
+                relative_time,
+                contrast,
+                grain,
+                develop_btn,
+                unlock_develop_btn,
+                print_btn,
+                paper,
+                print_exposure,
+                print_grade,
+                print_contrast,
+                unlock_print_btn,
+                state,
+            ],
+        ).then(
+            fn=live_develop,
+            inputs=develop_inputs,
+            outputs=[live_out, latent_out, neg_out, summary, state],
         )
 
         for ctrl in (paper, print_exposure, print_grade, print_contrast):
@@ -590,8 +730,29 @@ def build_ui() -> gr.Blocks:
                 print_grade,
                 print_contrast,
                 print_btn,
+                unlock_print_btn,
                 state,
             ],
+        )
+
+        unlock_print_btn.click(
+            fn=unlock_print,
+            inputs=[state],
+            outputs=[
+                live_out,
+                summary,
+                paper,
+                print_exposure,
+                print_grade,
+                print_contrast,
+                print_btn,
+                unlock_print_btn,
+                state,
+            ],
+        ).then(
+            fn=live_print,
+            inputs=print_inputs,
+            outputs=[live_out, summary, state],
         )
 
         reset_btn.click(
@@ -611,11 +772,13 @@ def build_ui() -> gr.Blocks:
                 contrast,
                 grain,
                 develop_btn,
+                unlock_develop_btn,
                 paper,
                 print_exposure,
                 print_grade,
                 print_contrast,
                 print_btn,
+                unlock_print_btn,
                 state,
             ],
         )
