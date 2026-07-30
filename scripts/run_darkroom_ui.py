@@ -495,15 +495,38 @@ body.drawer-collapsed #drawer_host {
   padding: 4px !important;
   min-height: 0 !important;
   box-sizing: border-box !important;
-  font-size: 0.6rem !important;
+  font-size: var(--dr-fs-note) !important;
   line-height: 1.15 !important;
+}
+/* Gradio's dropzone renders its caption at 16px above a 27px upload icon.
+   Squeezed into the compact drawer the icon was laid out above the box
+   (clipped) and the caption collided with the floating "Upload" label.
+   Drop the icon and put the caption on the panel type scale. */
+#ingest_upload .icon-wrap { display: none !important; }
+#ingest_upload button.center {
+  height: 100% !important;
+  min-height: 0 !important;
+  /* clear the floating "Upload" label sitting at the top of the box */
+  padding: 13px 4px 3px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0 !important;
+  box-sizing: border-box !important;
+}
+#ingest_upload button.center,
+#ingest_upload button.center *,
+#ingest_upload .or {
+  font-size: var(--dr-fs-note) !important;
+  line-height: 1.2 !important;
+  margin: 0 !important;
 }
 #ingest_upload button,
 #ingest_upload .or,
 #ingest_upload span,
 #ingest_upload p {
   white-space: normal !important;
-  line-height: 1.25 !important;
   overflow: visible !important;
   text-overflow: unset !important;
   max-height: none !important;
