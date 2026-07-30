@@ -56,16 +56,28 @@ def test_camera_roll_add_switch_remove():
     assert state["roll_index"] == 0
     assert state["dn"] is state["roll"][0]["dn"]
 
-    outs = mod.remove_from_roll(state)
+    # Remove a non-active middle/first frame by index (hover ✕ path).
+    outs = mod.remove_from_roll(0, state)
     state = _state_from(outs)
     assert len(state["roll"]) == 2
     assert state["roll_index"] == 0
 
     while state.get("dn") is not None:
-        outs = mod.remove_from_roll(state)
+        outs = mod.remove_from_roll(state["roll_index"], state)
         state = _state_from(outs)
     assert state["roll"] == []
     assert state["roll_index"] == -1
+
+
+def test_remove_non_active_frame_keeps_selection():
+    mod = _load_ui()
+    path = str(FIXTURE)
+    state = _state_from(mod.commit_ingest(None, [path, path, path], None))
+    assert state["roll_index"] == 2
+    # Delete frame 0 while working on frame 2 → active becomes 1.
+    state = _state_from(mod.remove_from_roll(0, state))
+    assert len(state["roll"]) == 2
+    assert state["roll_index"] == 1
 
 
 def test_develop_preserves_camera_roll():

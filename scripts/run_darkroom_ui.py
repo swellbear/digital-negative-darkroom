@@ -444,6 +444,39 @@ footer, .gradio-container footer {
   cursor: pointer !important;
   position: relative !important;
 }
+/* Hover ✕ to remove a frame — injected by the UI script. */
+#drawer_roll #camera_roll .roll-x {
+  position: absolute !important;
+  top: 5px !important;
+  right: 5px !important;
+  z-index: 6 !important;
+  width: 22px !important;
+  height: 22px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border-radius: 5px !important;
+  background: rgba(12, 12, 14, 0.82) !important;
+  color: var(--dr-text) !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  line-height: 20px !important;
+  text-align: center !important;
+  cursor: pointer !important;
+  opacity: 0 !important;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease !important;
+  pointer-events: auto !important;
+}
+#drawer_roll #camera_roll .thumbnail-item:hover .roll-x,
+#drawer_roll #camera_roll .gallery-item:hover .roll-x,
+#drawer_roll #camera_roll li:hover .roll-x {
+  opacity: 1 !important;
+}
+#drawer_roll #camera_roll .roll-x:hover {
+  background: rgba(160, 48, 36, 0.92) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+}
 #drawer_roll #camera_roll .thumbnail-item.selected,
 #drawer_roll #camera_roll .gallery-item.selected,
 #drawer_roll #camera_roll li.selected,
@@ -2841,6 +2874,72 @@ UI_JS = """
   setInterval(syncDrawerFromBox, 400);
   applyDrawer(readActiveDrawer() || 'ingest', { fromServer: true });
 
+  // Camera roll: inject a hover ✕ on each thumb that removes that frame.
+  const writeRollRemoveIndex = (index) => {
+    const root = document.querySelector('#roll_remove_index');
+    const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+    if (!box) return false;
+    box.value = String(index);
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  };
+  const clickRollRemove = () => {
+    const root = document.querySelector('#roll_remove');
+    const btn = root && (root.querySelector('button') || root);
+    if (btn && typeof btn.click === 'function') btn.click();
+  };
+  const rollThumbNodes = (root) => {
+    if (!root) return [];
+    const nodes = root.querySelectorAll(
+      '.thumbnail-item, .gallery-item, li.gallery-item, .grid-wrap > button, .grid-container > button, .grid-wrap > div, .grid-container > div'
+    );
+    return Array.from(nodes).filter((el) => el.querySelector && el.querySelector('img'));
+  };
+  const decorateRollThumbs = () => {
+    const root = document.querySelector('#camera_roll');
+    if (!root) return;
+    const thumbs = rollThumbNodes(root);
+    thumbs.forEach((thumb, index) => {
+      if (thumb.querySelector(':scope > .roll-x, .roll-x')) return;
+      const cs = getComputedStyle(thumb);
+      if (cs.position === 'static') thumb.style.position = 'relative';
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'roll-x';
+      x.setAttribute('aria-label', 'Remove frame ' + (index + 1));
+      x.title = 'Remove';
+      x.textContent = '×';
+      x.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      x.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!writeRollRemoveIndex(index)) return;
+        // Let Gradio pick up the textbox value before the click.
+        setTimeout(clickRollRemove, 0);
+      });
+      thumb.appendChild(x);
+    });
+  };
+  const ensureRollObserver = () => {
+    const root = document.querySelector('#camera_roll');
+    if (!root || root.dataset.rollObs === '1' || !window.MutationObserver) return;
+    root.dataset.rollObs = '1';
+    new MutationObserver(() => decorateRollThumbs()).observe(root, {
+      childList: true,
+      subtree: true,
+    });
+  };
+  decorateRollThumbs();
+  ensureRollObserver();
+  setInterval(() => {
+    decorateRollThumbs();
+    ensureRollObserver();
+  }, 800);
+
   // Fit the live print stage to remaining #preview_col space.
   // Do NOT MutationObserver 'style' — writing heights would re-enter forever.
   const setStyleIfChanged = (el, prop, value) => {
@@ -3364,7 +3463,7 @@ def _roll_meta_md(state) -> str:
     label = f"**{idx}/{len(roll)}**"
     if name:
         label += f" · `{name}`"
-    return f"{label}  \n_Tap a frame to work it · Remove drops the active one._"
+    return f"{label}  \n_Tap a frame to work it · hover ✕ to remove._"
 
 
 def _drawer_for_frame(state) -> str:
@@ -4435,17 +4534,31 @@ def select_roll_frame(state, evt: SelectData | None = None):
     return _roll_session_outputs(state, drawer="roll")
 
 
-def remove_from_roll(state):
-    """Drop the active frame from the camera roll."""
+def remove_from_roll(index_raw, state):
+    """Drop a frame from the camera roll (hover ✕ passes the index)."""
     state = _ensure_roll(state or {})
+    if state.get("dn") is not None and state.get("roll"):
+        state = _sync_active_into_roll(state)
     roll = list(state.get("roll") or [])
-    idx = int(state.get("roll_index", -1))
-    if not roll or idx < 0:
-        return _roll_session_outputs(None)
+    try:
+        idx = int(str(index_raw).strip())
+    except (TypeError, ValueError):
+        idx = int(state.get("roll_index", -1))
+    if not roll or idx < 0 or idx >= len(roll):
+        if not roll or state.get("dn") is None:
+            return _roll_session_outputs(None)
+        return _roll_session_outputs(state, drawer="roll")
+
+    active = int(state.get("roll_index", 0))
     roll.pop(idx)
     if not roll:
         return _roll_session_outputs(None)
-    new_idx = min(idx, len(roll) - 1)
+    if active == idx:
+        new_idx = min(idx, len(roll) - 1)
+    elif active > idx:
+        new_idx = active - 1
+    else:
+        new_idx = active
     state = {**roll[new_idx], "roll": roll, "roll_index": new_idx}
     n = len(roll)
     summary = (
@@ -5982,16 +6095,22 @@ def build_ui() -> gr.Blocks:
                         roll_gallery = gr.Gallery(
                             label="Frames",
                             columns=1,
-                            height=380,
+                            height=420,
                             object_fit="cover",
                             preview=False,
                             allow_preview=False,
                             show_label=False,
                             elem_id="camera_roll",
                         )
+                        # Hidden trigger for per-thumb ✕ (written by the UI script).
+                        roll_remove_index = gr.Textbox(
+                            value="-1",
+                            visible=False,
+                            elem_id="roll_remove_index",
+                        )
                         remove_roll_btn = gr.Button(
-                            "Remove frame",
-                            size="sm",
+                            "Remove",
+                            visible=False,
                             interactive=False,
                             elem_id="roll_remove",
                         )
@@ -6442,7 +6561,7 @@ def build_ui() -> gr.Blocks:
 
         remove_roll_btn.click(
             fn=remove_from_roll,
-            inputs=[state],
+            inputs=[roll_remove_index, state],
             outputs=ingest_outputs,
         ).then(
             fn=live_preview_high,
