@@ -1,10 +1,9 @@
 """Dodge & burn: local enlarger exposure maps (darkroom-style).
 
-Dodge holds back light (negative stops); burn adds light (positive stops).
-The tool is a freeform *card / wand silhouette*: you cut the shape once, then
-wave that stamp over the print while the enlarger timer runs. Exposure
-accumulates only where the card covers on each tick — not as a permanent
-paint trail.
+Dodge holds back light; burn adds light. The base print timer is set in
+*seconds* (like an enlarger clock). Local passes accumulate light-time
+delta under a freeform card/wand, then convert to stops relative to that
+base: local_stops = log2((base + delta) / base).
 """
 
 from __future__ import annotations
@@ -17,25 +16,69 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 
 
-# Reference: ~8 seconds of extra (or withheld) light ≈ 1 stop relative to base.
-REFERENCE_SECONDS_PER_STOP = 8.0
+# Calibrated "normal" enlarger timer — 8s ≡ 0 stops overall exposure.
+REFERENCE_BASE_SECONDS = 8.0
+# Legacy alias: burning for one full base interval ≈ +1 stop.
+REFERENCE_SECONDS_PER_STOP = REFERENCE_BASE_SECONDS
 # Server samples the waved card this often while exposing.
 TICK_SECONDS = 0.25
 
 
-def seconds_to_stops(seconds: float) -> float:
-    """Map enlarger seconds onto relative exposure stops."""
+def base_seconds_to_stops(
+    base_seconds: float,
+    *,
+    reference: float = REFERENCE_BASE_SECONDS,
+) -> float:
+    """Map base enlarger seconds onto overall exposure stops (8s → 0)."""
+    return float(np.log2(max(float(base_seconds), 1e-6) / max(float(reference), 1e-6)))
+
+
+def stops_to_base_seconds(
+    stops: float,
+    *,
+    reference: float = REFERENCE_BASE_SECONDS,
+) -> float:
+    return float(max(float(reference), 1e-6) * (2.0 ** float(stops)))
+
+
+def seconds_to_stops(seconds: float, base_seconds: float | None = None) -> float:
+    """Map a burn-style pass duration onto relative stops vs the base timer."""
+    base = REFERENCE_BASE_SECONDS if base_seconds is None else float(base_seconds)
     seconds = max(float(seconds), 0.0)
-    return float(np.log2(1.0 + seconds / REFERENCE_SECONDS_PER_STOP))
+    return float(np.log2(1.0 + seconds / max(base, 1e-6)))
 
 
-def stops_per_second(total_seconds: float) -> float:
+def relative_pass_stops(seconds: float, base_seconds: float, mode: str) -> float:
+    """Stops for a full-coverage dodge/burn pass of ``seconds`` vs base timer."""
+    t = max(float(seconds), 0.0)
+    base = max(float(base_seconds), 1e-6)
+    if str(mode).lower().startswith("dodge"):
+        t = min(t, base * 0.95)
+        return float(np.log2(max(base - t, base * 0.05) / base))
+    return float(np.log2(1.0 + t / base))
+
+
+def stops_per_second(total_seconds: float, base_seconds: float | None = None) -> float:
     total_seconds = max(float(total_seconds), 1e-6)
-    return seconds_to_stops(total_seconds) / total_seconds
+    return seconds_to_stops(total_seconds, base_seconds) / total_seconds
 
 
-def stops_per_tick(total_seconds: float, tick_seconds: float = TICK_SECONDS) -> float:
-    return stops_per_second(total_seconds) * float(tick_seconds)
+def stops_per_tick(
+    total_seconds: float,
+    tick_seconds: float = TICK_SECONDS,
+    base_seconds: float | None = None,
+) -> float:
+    return stops_per_second(total_seconds, base_seconds) * float(tick_seconds)
+
+
+def delta_seconds_to_local_stops(
+    delta_seconds: np.ndarray,
+    base_seconds: float,
+) -> np.ndarray:
+    """Convert a light-time delta map (burn +, dodge −) into local stops."""
+    base = max(float(base_seconds), 1e-6)
+    effective = np.clip(base + np.asarray(delta_seconds, dtype=np.float32), base * 0.05, base * 8.0)
+    return np.log2(effective / base).astype(np.float32)
 
 
 def _layer_coverage(arr: np.ndarray | None) -> np.ndarray | None:
@@ -297,7 +340,6 @@ def apply_exposure_tick(
 
     mode = str(state.get("db_mode", "burn"))
     tick_s = float(state.get("db_tick_seconds", TICK_SECONDS))
-    per_tick = float(state.get("db_stops_per_tick", stops_per_tick(float(state.get("db_total_seconds", 1.0)), tick_s)))
     sign = -1.0 if mode == "dodge" else 1.0
 
     stamp = state.get("db_stamp")
@@ -315,7 +357,9 @@ def apply_exposure_tick(
         )
 
     accum = ensure_accum(state, height, width)
-    accum = accum + (sign * per_tick) * mask
+    # Accumulate light-time under the card (seconds), not prebaked stops.
+    # Positive = extra burn light; negative = dodged (held back) light.
+    accum = accum + (sign * tick_s) * mask
     state["db_accum"] = accum.astype(np.float32)
 
     left = max(0.0, left - tick_s)
@@ -323,12 +367,21 @@ def apply_exposure_tick(
     if left <= 1e-6:
         state["db_exposing"] = False
         state["db_seconds_left"] = 0.0
+        base = float(state.get("db_base_seconds", REFERENCE_BASE_SECONDS))
         strokes = state.setdefault("db_strokes", [])
         strokes.append(
             {
                 "mode": mode,
                 "seconds": int(state.get("db_total_seconds", 0)),
-                "stops": round(seconds_to_stops(float(state.get("db_total_seconds", 0))), 3),
+                "base_seconds": round(base, 3),
+                "stops": round(
+                    relative_pass_stops(
+                        float(state.get("db_total_seconds", 0)),
+                        base,
+                        mode,
+                    ),
+                    3,
+                ),
             }
         )
     return state["db_accum"], bool(state.get("db_exposing"))
@@ -346,12 +399,16 @@ def reset_local_work(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def local_stops_from_state(state: dict[str, Any] | None) -> np.ndarray | None:
+    """Local stop map from accumulated light-time, relative to the base timer."""
     if not state:
         return None
     accum = state.get("db_accum")
-    if isinstance(accum, np.ndarray) and accum.size and float(np.max(np.abs(accum))) > 1e-6:
-        return accum.astype(np.float32)
-    return None
+    if not isinstance(accum, np.ndarray) or not accum.size:
+        return None
+    if float(np.max(np.abs(accum))) <= 1e-6:
+        return None
+    base = float(state.get("print_base_seconds") or state.get("db_base_seconds") or REFERENCE_BASE_SECONDS)
+    return delta_seconds_to_local_stops(accum, base)
 
 
 def tool_workshop_canvas(height: int = 480, width: int = 480) -> dict[str, Any]:
