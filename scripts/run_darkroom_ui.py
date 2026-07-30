@@ -325,10 +325,10 @@ body.drawer-collapsed #drawer_host {
 }
 .drawer-panel { display: none !important; }
 .drawer-panel.is-open { display: block !important; }
-.drawer-panel .accordion > .label-wrap {
+.drawer-panel .gr-accordion > .label-wrap {
   display: none !important; /* rail is the chrome */
 }
-.drawer-panel .accordion {
+.drawer-panel .gr-accordion {
   margin: 0 !important;
   border: none !important;
   box-shadow: none !important;
@@ -519,27 +519,6 @@ body.drawer-collapsed #drawer_host {
   font-size: 0.72rem !important;
   padding: 2px 8px !important;
 }
-/* Floating toolbars live in #float_host — never steal preview flex space */
-#float_host {
-  position: fixed !important;
-  inset: 0 !important;
-  width: 0 !important;
-  height: 0 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: none !important;
-  background: transparent !important;
-  overflow: visible !important;
-  pointer-events: none !important;
-  z-index: 100040 !important;
-}
-#float_host > .block,
-#float_host .float-toolbar {
-  pointer-events: none !important;
-}
-#float_host .float-toolbar.is-open {
-  pointer-events: auto !important;
-}
 #preview_tool, #active_drawer, #crop_rect, #db_pos {
   position: absolute !important;
   left: -9999px !important;
@@ -551,55 +530,99 @@ body.drawer-collapsed #drawer_host {
 }
 #inspect_preview { display: none !important; }
 
-/* Floating toolbars (right-click tools) — styled like a darktable module panel */
-.float-toolbar {
-  position: fixed !important;
-  z-index: 100050 !important;
-  min-width: 280px;
-  max-width: min(420px, 92vw);
-  max-height: min(78vh, 640px);
-  overflow: auto;
-  padding: 12px 14px !important;
-  border-radius: var(--dr-radius) !important;
-  border: 1px solid var(--dr-border-strong) !important;
-  background: var(--dr-bg-elevated) !important;
-  box-shadow: 0 16px 44px rgba(0,0,0,0.6) !important;
-  display: none !important;
-  color: var(--dr-text) !important;
-}
-/* Gradio renders the Group as wrapper + inner div sharing the elem_id, so the
-   inner copy must open with the outer and drop the fixed-panel chrome. */
-.float-toolbar.is-open,
-.float-toolbar.is-open .float-toolbar { display: block !important; }
-.float-toolbar .float-toolbar {
-  position: static !important;
-  inset: auto !important;
-  width: auto !important;
-  min-width: 0 !important;
-  max-width: none !important;
-  max-height: none !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  overflow: visible !important;
-  z-index: auto !important;
-}
 /* Gradio's internal .styler wrapper tints components with a translucent
    white overlay by default — flatten it everywhere in the dark chrome. */
 .gradio-container .styler {
   background: transparent !important;
 }
-.float-toolbar .float-title {
-  font-size: 0.72rem;
+
+/* ——— Persistent module panel (darktable-style, right side) ——— */
+#module_panel {
+  flex: 0 0 300px !important;
+  width: 300px !important;
+  max-width: 300px !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  /* Gradio's own Column class defaults to flex-wrap: wrap — once open modules'
+     combined height exceeded the panel, later ones wrapped into an invisible
+     second column instead of the panel scrolling. Force a single column. */
+  flex-wrap: nowrap !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  padding: 6px 10px 14px !important;
+  box-sizing: border-box !important;
+  border-left: 1px solid var(--dr-border) !important;
+  background: var(--dr-bg-panel) !important;
+  z-index: 35 !important;
+  transition: flex-basis 0.16s ease, width 0.16s ease, padding 0.16s ease, opacity 0.14s ease !important;
+}
+body.module-collapsed #module_panel {
+  flex-basis: 0 !important;
+  width: 0 !important;
+  max-width: 0 !important;
+  padding: 0 !important;
+  opacity: 0 !important;
+  border-left-width: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
+.module_panel_title {
+  font-size: 0.68rem;
   font-weight: 650;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--dr-accent-strong);
-  margin: 0 0 10px 0;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--dr-border);
+  color: var(--dr-text-faint);
+  margin: 4px 2px 8px;
+}
+#module_panel .gr-accordion {
+  margin: 0 0 8px 0 !important;
+  border: 1px solid var(--dr-border) !important;
+  border-radius: var(--dr-radius) !important;
+  background: var(--dr-bg-elevated) !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+  /* overflow:hidden makes a flex item's min-height:auto resolve to 0, so once
+     several modules are open the flexbox shrink algorithm was compressing —
+     and overlapping — later accordions instead of letting the panel scroll. */
+  flex-shrink: 0 !important;
+}
+#module_panel .gr-accordion > .label-wrap {
+  padding: 9px 12px !important;
+  font-size: 0.8rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.01em !important;
+  color: var(--dr-text) !important;
+  margin: 0 !important;
+  border-bottom: 1px solid transparent !important;
+}
+#module_panel .gr-accordion > .label-wrap:hover {
+  background: var(--dr-bg-hover) !important;
+}
+#module_panel .gr-accordion .label-wrap .icon svg { stroke: var(--dr-text-dim) !important; }
+#module_panel .gr-accordion[data-mod-open="1"] > .label-wrap {
+  border-bottom-color: var(--dr-border) !important;
+  color: var(--dr-accent-strong) !important;
+}
+#module_panel .gr-accordion[data-mod-open="1"] > .label-wrap .icon svg {
+  stroke: var(--dr-accent-strong) !important;
+}
+#module_panel .gr-accordion .form {
+  padding: 4px 12px 12px !important;
+  gap: 6px !important;
+}
+.mod-icon {
+  display: inline-flex;
+  vertical-align: -3px;
+  margin-right: 6px;
+}
+.mod-icon svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 #ctx_menu {
   position: fixed;
@@ -796,6 +819,27 @@ UI_JS = """
   };
   installRailIcons();
   setInterval(installRailIcons, 1200);
+
+  // ——— Module panel header icons (Inspect / Dodge & burn / Crop & straighten) ———
+  const MODULE_ICONS = {
+    mod_inspect: '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16" y2="16"/>',
+    mod_dodge_burn: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2"/><path d="M12 19v2"/><path d="M5 5l1.4 1.4"/><path d="M17.6 17.6 19 19"/><path d="M3 12h2"/><path d="M19 12h2"/><path d="M5 19l1.4-1.4"/><path d="M17.6 6.4 19 5"/>',
+    mod_crop: '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
+  };
+  const installModuleIcons = () => {
+    Object.keys(MODULE_ICONS).forEach((id) => {
+      const acc = document.getElementById(id);
+      const label = acc && acc.querySelector('.label-wrap > span:first-child');
+      if (!label || label.dataset.iconReady === '1') return;
+      label.dataset.iconReady = '1';
+      label.insertAdjacentHTML(
+        'afterbegin',
+        `<span class="mod-icon">${svgWrap(MODULE_ICONS[id])}</span>`
+      );
+    });
+  };
+  installModuleIcons();
+  setInterval(installModuleIcons, 1200);
 
   window.__dbPos = '';
   window.__dbGetPos = () => window.__dbPos || '';
@@ -1021,11 +1065,36 @@ UI_JS = """
     });
   };
 
-  // The dodge/burn card only takes over the pointer once the easel is open
-  // (right-click → Dodge / Burn) or a pass is actually running.
+  // ——— Persistent module panel (darktable-style) open/close helpers ———
+  const isModuleOpen = (id) => {
+    const acc = document.getElementById(id);
+    const lw = acc && acc.querySelector('.label-wrap');
+    return !!(lw && lw.classList.contains('open'));
+  };
+  const openModule = (id) => {
+    const acc = document.getElementById(id);
+    const lw = acc && acc.querySelector('.label-wrap');
+    if (!lw) return;
+    if (!lw.classList.contains('open')) lw.click();
+    setTimeout(() => {
+      try { acc.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
+    }, 60);
+  };
+  // Module accordion bodies mount lazily on first open, so a control inside
+  // one may not exist in the DOM the instant its module opens. Poll briefly.
+  const waitForEl = (selector, fn, tries = 10) => {
+    const el = document.querySelector(selector);
+    if (el) {
+      fn(el);
+      return;
+    }
+    if (tries > 0) setTimeout(() => waitForEl(selector, fn, tries - 1), 60);
+  };
+
+  // The dodge/burn card only takes over the pointer once that module is open
+  // (right-click → Dodge / Burn, or expanding it in the panel) or a pass is running.
   const dbEngaged = (flag) => {
-    const easel = document.getElementById('float_easel');
-    if (easel && easel.classList.contains('is-open')) return true;
+    if (isModuleOpen('mod_dodge_burn')) return true;
     const f = flag || readFlag();
     return !!(f && f.exposing);
   };
@@ -1687,34 +1756,42 @@ UI_JS = """
       const id = (b.id || '').replace('rail_', '');
       b.classList.toggle('rail-active', id === n);
     });
-    if (n === 'frame') setPreviewToolValue('frame');
-    else if (n === 'print') setPreviewToolValue('print');
+    if (n === 'frame') {
+      setPreviewToolValue('frame');
+      try { openModule('mod_crop'); } catch (_) {}
+    } else if (n === 'print') {
+      setPreviewToolValue('print');
+    }
   };
 
-  const closeFloats = () => {
-    document.querySelectorAll('.float-toolbar').forEach((el) => el.classList.remove('is-open'));
-    try { hideTool(); } catch (_) {}
-  };
-
-  const openFloat = (id, x, y) => {
-    closeFloats();
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.classList.add('is-open');
-    if (id === 'float_easel') setTimeout(() => { try { syncWave(); } catch (_) {} }, 30);
-    const pad = 12;
-    const w = Math.min(420, window.innerWidth - 24);
-    const left = Math.min(Math.max(pad, x), window.innerWidth - w - pad);
-    el.style.left = left + 'px';
-    el.style.top = Math.max(pad, y) + 'px';
-    el.style.width = w + 'px';
-    // Measure once open so a tall panel is lifted to stay on screen.
-    requestAnimationFrame(() => {
-      const h = el.getBoundingClientRect().height;
-      const top = Math.max(pad, Math.min(y, window.innerHeight - h - pad));
-      el.style.top = top + 'px';
-    });
-  };
+  // Modules react to their own open/close (arm crop overlay, show the resting
+  // dodge/burn card) whether toggled by hand or by the context-menu shortcut.
+  document.addEventListener('click', (e) => {
+    const lw = e.target && e.target.closest && e.target.closest('#module_panel .label-wrap');
+    if (!lw) return;
+    const acc = lw.closest('.gr-accordion');
+    if (!acc) return;
+    const id = acc.id;
+    setTimeout(() => {
+      const open = lw.classList.contains('open');
+      acc.setAttribute('data-mod-open', open ? '1' : '0');
+      if (id === 'mod_crop') {
+        if (open) {
+          setPreviewToolValue('frame');
+          syncOverlay();
+        } else if (readPreviewTool() === 'frame') {
+          setPreviewToolValue('print');
+          syncOverlay();
+        }
+      } else if (id === 'mod_dodge_burn') {
+        if (open) {
+          try { syncWave(); } catch (_) {}
+        } else {
+          hideTool();
+        }
+      }
+    }, 30);
+  });
 
   const ensureCtxMenu = () => {
     let menu = document.getElementById('ctx_menu');
@@ -1735,53 +1812,32 @@ UI_JS = """
       e.preventDefault();
       e.stopPropagation();
       const act = btn.getAttribute('data-act');
-      const x = parseFloat(menu.dataset.x || '80');
-      const y = parseFloat(menu.dataset.y || '80');
       menu.classList.remove('is-open');
+      // Defer all work off the click stack — building the crop overlay (or
+      // anything else) synchronously during the menu click freezes the tab.
       if (act === 'zoom') {
         setTimeout(() => {
           setPreviewToolValue('inspect');
-          openFloat('float_zoom', x, y);
+          openModule('mod_inspect');
         }, 0);
       } else if (act === 'dodge' || act === 'burn') {
         setTimeout(() => {
           setPreviewToolValue('print');
-          // set db_mode radio
-          const root = document.querySelector('#float_easel');
-          if (root) {
-            const input = root.querySelector(`input[type="radio"][value="${act}"]`);
-            if (input) {
-              input.checked = true;
-              input.dispatchEvent(new Event('input', { bubbles: true }));
-              input.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-          }
-          openFloat('float_easel', x, y);
+          openModule('mod_dodge_burn');
+          // Accordion bodies mount lazily on first open — the radio input
+          // doesn't exist in the DOM yet the instant we open it, so poll.
+          waitForEl(`#mod_dodge_burn input[type="radio"][value="${act}"]`, (input) => {
+            if (!input.checked) input.click();
+          });
         }, 0);
       } else if (act === 'crop') {
-        // Defer — building the crop overlay during the menu click freezes the tab.
-        // Leave the drawer alone: the float carries the full crop controls and
-        // swapping drawers here shrank the print.
-        const mx = x, my = y;
-        setTimeout(() => {
-          setPreviewToolValue('frame');
-          openFloat('float_crop', mx, my);
-          setTimeout(() => syncOverlay(), 30);
-        }, 0);
+        setTimeout(() => openModule('mod_crop'), 0);
       } else if (act === 'autocrop') {
         // Never find buttons by label "Auto crop" — that matches this menu item
-        // and recurses until the tab freezes. Defer all work off the click stack.
-        const mx = x, my = y;
+        // and recurses until the tab freezes.
         setTimeout(() => {
-          setPreviewToolValue('frame');
-          openFloat('float_crop', mx, my);
-          setTimeout(() => {
-            syncOverlay();
-            const root = document.querySelector('#auto_crop_btn');
-            const autoBtn = root && (root.matches('button') ? root : root.querySelector('button'));
-            if (!autoBtn || autoBtn.disabled || autoBtn.dataset.act === 'autocrop') return;
-            autoBtn.click();
-          }, 80);
+          openModule('mod_crop');
+          waitForEl('#auto_crop_btn:not(:disabled)', (autoBtn) => autoBtn.click());
         }, 0);
       }
     });
@@ -1802,15 +1858,9 @@ UI_JS = """
   document.addEventListener('click', (e) => {
     const menu = document.getElementById('ctx_menu');
     if (menu && !menu.contains(e.target)) menu.classList.remove('is-open');
-    // Close floats via Close buttons
-    const t = e.target;
-    if (t && t.closest && (t.textContent || '').trim() === 'Close' && t.closest('.float-toolbar')) {
-      closeFloats();
-    }
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      closeFloats();
       const menu = document.getElementById('ctx_menu');
       if (menu) menu.classList.remove('is-open');
     }
@@ -4176,108 +4226,103 @@ def build_ui() -> gr.Blocks:
                     buttons=["fullscreen", "download"],
                 )
 
-        # Floating toolbars (right-click) — outside preview flex so they never collapse the print
-        with gr.Group(elem_id="float_host"):
-            with gr.Group(elem_id="float_zoom", elem_classes=["float-toolbar"]):
-                gr.HTML('<div class="float-title">Inspect · zoom</div>')
-                gr.Markdown(
-                    "Scroll to zoom · drag to pan when zoomed · double-click resets · "
-                    "fullscreen for a larger view."
-                )
-                float_zoom_close = gr.Button("Close", size="sm")
+            # ——— Persistent module panel (darktable-style, right side) ———
+            with gr.Column(scale=0, elem_id="module_panel", min_width=280):
+                gr.HTML('<div class="module_panel_title">Modules</div>')
+                with gr.Accordion("Inspect · zoom", open=False, elem_id="mod_inspect"):
+                    gr.Markdown(
+                        "Scroll to zoom · drag to pan when zoomed · double-click resets · "
+                        "fullscreen for a larger view."
+                    )
 
-            with gr.Group(elem_id="float_easel", elem_classes=["float-toolbar"]):
-                gr.HTML('<div class="float-title">Dodge & burn · enlarger easel</div>')
-                db_shape = gr.Radio(
-                    choices=[(label, key) for key, label in CARD_PRESETS],
-                    value="soft_oval",
-                    label="Card / wand shape",
-                )
-                db_editor = gr.ImageEditor(
-                    label="Custom card (paint only if shape = Custom)",
-                    type="numpy",
-                    image_mode="RGBA",
-                    height=160,
-                    value=tool_workshop_canvas(),
-                    brush=gr.Brush(
-                        default_size=48,
-                        colors=["#e0954f", "#ffffff", "#6fd1c7"],
-                        default_color="#e0954f",
-                        color_mode="defaults",
-                    ),
-                    eraser=gr.Eraser(),
-                    layers=True,
-                    transforms=(),
-                    sources=(),
-                    buttons=["fullscreen"],
-                    visible=False,
-                )
-                db_mode = gr.Radio(
-                    choices=[
-                        ("Dodge — hold back light (lighter)", "dodge"),
-                        ("Burn — add enlarger light (darker)", "burn"),
-                    ],
-                    value="burn",
-                    label="Mode",
-                )
-                db_seconds = gr.Slider(
-                    1, 32, value=4, step=1, label="Pass (seconds)"
-                )
-                pass_math_md = gr.Markdown(_pass_math_md(8.0, 4.0, "burn"), elem_id="pass_math")
-                db_timer_md = gr.Markdown("**Ready** — Start, then wave over the print")
-                with gr.Row(elem_id="db_actions"):
-                    db_start_btn = gr.Button(
-                        "Start — wave over print →", variant="primary", size="sm"
+                with gr.Accordion("Dodge & burn", open=False, elem_id="mod_dodge_burn"):
+                    db_shape = gr.Radio(
+                        choices=[(label, key) for key, label in CARD_PRESETS],
+                        value="soft_oval",
+                        label="Card / wand shape",
                     )
-                    db_reset_btn = gr.Button("Reset local work", size="sm")
-                db_flag = gr.HTML(_db_flag_html(None), elem_id="db_flag")
-                db_pos = gr.Textbox(value="0.5000,0.5000", elem_id="db_pos", show_label=False)
-                with gr.Column(elem_classes=["db_clock_hidden"]):
-                    db_clock = gr.Timer(value=TICK_SECONDS, active=False)
-                float_easel_close = gr.Button("Close", size="sm")
+                    db_editor = gr.ImageEditor(
+                        label="Custom card (paint only if shape = Custom)",
+                        type="numpy",
+                        image_mode="RGBA",
+                        height=160,
+                        value=tool_workshop_canvas(),
+                        brush=gr.Brush(
+                            default_size=48,
+                            colors=["#e0954f", "#ffffff", "#6fd1c7"],
+                            default_color="#e0954f",
+                            color_mode="defaults",
+                        ),
+                        eraser=gr.Eraser(),
+                        layers=True,
+                        transforms=(),
+                        sources=(),
+                        buttons=["fullscreen"],
+                        visible=False,
+                    )
+                    db_mode = gr.Radio(
+                        choices=[
+                            ("Dodge — hold back light (lighter)", "dodge"),
+                            ("Burn — add enlarger light (darker)", "burn"),
+                        ],
+                        value="burn",
+                        label="Mode",
+                    )
+                    db_seconds = gr.Slider(
+                        1, 32, value=4, step=1, label="Pass (seconds)"
+                    )
+                    pass_math_md = gr.Markdown(_pass_math_md(8.0, 4.0, "burn"), elem_id="pass_math")
+                    db_timer_md = gr.Markdown("**Ready** — Start, then wave over the print")
+                    with gr.Row(elem_id="db_actions"):
+                        db_start_btn = gr.Button(
+                            "Start — wave over print →", variant="primary", size="sm"
+                        )
+                        db_reset_btn = gr.Button("Reset local work", size="sm")
+                    db_flag = gr.HTML(_db_flag_html(None), elem_id="db_flag")
+                    db_pos = gr.Textbox(value="0.5000,0.5000", elem_id="db_pos", show_label=False)
+                    with gr.Column(elem_classes=["db_clock_hidden"]):
+                        db_clock = gr.Timer(value=TICK_SECONDS, active=False)
 
-            with gr.Group(elem_id="float_crop", elem_classes=["float-toolbar"]):
-                gr.HTML('<div class="float-title">Crop & straighten</div>')
-                crop_hint = gr.Markdown(
-                    "_Frame mode is on — draw/resize the box on the print, then Apply._",
-                    elem_id="crop_float_hint",
-                )
-                crop_ratio = gr.Radio(
-                    choices=CROP_RATIO_CHOICES,
-                    value="free",
-                    label="Aspect ratio",
-                    elem_id="crop_ratio",
-                )
-                straighten_deg = gr.Slider(
-                    -15.0, 15.0, value=0.0, step=0.1, label="Straighten (° CW)"
-                )
-                with gr.Row():
-                    auto_crop_rule = gr.Dropdown(
-                        choices=AUTO_CROP_RULE_CHOICES,
-                        value="auto",
-                        label="Auto crop rule",
-                        scale=3,
+                with gr.Accordion("Crop & straighten", open=False, elem_id="mod_crop"):
+                    crop_hint = gr.Markdown(
+                        "_Draw/resize the box on the print, then Apply._",
+                        elem_id="crop_float_hint",
                     )
-                    auto_crop_btn = gr.Button(
-                        "Auto crop",
-                        interactive=False,
-                        variant="secondary",
-                        size="sm",
-                        scale=1,
-                        elem_id="auto_crop_btn",
+                    crop_ratio = gr.Radio(
+                        choices=CROP_RATIO_CHOICES,
+                        value="free",
+                        label="Aspect ratio",
+                        elem_id="crop_ratio",
                     )
-                crop_rect = gr.Textbox(
-                    value=DEFAULT_CROP_RECT,
-                    label="crop_rect",
-                    elem_id="crop_rect",
-                    show_label=False,
-                )
-                with gr.Row():
-                    apply_framing_btn = gr.Button(
-                        "Apply framing", interactive=False, variant="secondary", size="sm"
+                    straighten_deg = gr.Slider(
+                        -15.0, 15.0, value=0.0, step=0.1, label="Straighten (° CW)"
                     )
-                    reset_framing_btn = gr.Button("Reset framing", interactive=False, size="sm")
-                float_crop_close = gr.Button("Close", size="sm")
+                    with gr.Row():
+                        auto_crop_rule = gr.Dropdown(
+                            choices=AUTO_CROP_RULE_CHOICES,
+                            value="auto",
+                            label="Auto crop rule",
+                            scale=3,
+                        )
+                        auto_crop_btn = gr.Button(
+                            "Auto crop",
+                            interactive=False,
+                            variant="secondary",
+                            size="sm",
+                            scale=1,
+                            elem_id="auto_crop_btn",
+                        )
+                    crop_rect = gr.Textbox(
+                        value=DEFAULT_CROP_RECT,
+                        label="crop_rect",
+                        elem_id="crop_rect",
+                        show_label=False,
+                    )
+                    with gr.Row():
+                        apply_framing_btn = gr.Button(
+                            "Apply framing", interactive=False, variant="secondary", size="sm"
+                        )
+                        reset_framing_btn = gr.Button("Reset framing", interactive=False, size="sm")
 
         # Compatibility aliases used by older handlers expecting frame_tools group
         frame_tools = frame_acc
