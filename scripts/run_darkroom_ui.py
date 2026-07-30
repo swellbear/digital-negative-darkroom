@@ -253,13 +253,35 @@ UI_CSS = """
 }
 /* Hide Gradio Timer chrome — it shows a running stopwatch and looks like
    the dodge/burn countdown never stops. We only use it as a 1s tick source. */
-.db_clock_hidden,
-.db_clock_hidden * {
-  display: none !important;
-  height: 0 !important;
+.db_clock_hidden {
+  position: absolute !important;
+  left: -9999px !important;
+  top: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  max-height: 1px !important;
   margin: 0 !important;
   padding: 0 !important;
   overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  clip: rect(0, 0, 0, 0) !important;
+  border: 0 !important;
+}
+.db_clock_hidden,
+.db_clock_hidden * {
+  visibility: hidden !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+}
+/* Gradio sometimes paints last-request duration ("9.5s") beside buttons */
+#db_actions .meta-text,
+#db_actions .eta-bar,
+#db_actions [class*="progress"],
+#db_actions [class*="duration"],
+#db_actions span:has(+ button),
+#controls_col .db_clock_hidden ~ .meta-text {
+  display: none !important;
 }
 @media (max-width: 900px) {
   #main_workspace { flex-wrap: wrap !important; }
@@ -1650,10 +1672,11 @@ def build_ui() -> gr.Blocks:
                         )
                         db_seconds = gr.Slider(1, 16, value=4, step=1, label="Timer (seconds)")
                         db_timer_md = gr.Markdown("**Ready** — Commit Develop, then paint a shape.")
-                        with gr.Row():
+                        with gr.Row(elem_id="db_actions"):
                             db_start_btn = gr.Button("Start exposure", variant="primary", size="sm")
                             db_reset_btn = gr.Button("Reset local work", size="sm")
-                        with gr.Column(elem_classes=["db_clock_hidden"], visible=True):
+                        # Off-screen tick source only — never show Gradio's stopwatch chrome.
+                        with gr.Column(elem_classes=["db_clock_hidden"]):
                             db_clock = gr.Timer(value=1.0, active=False)
                     with gr.Row():
                         print_btn = gr.Button(
