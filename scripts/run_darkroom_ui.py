@@ -468,11 +468,13 @@ body.drawer-collapsed #drawer_host {
 #drawer_host .icon-button-wrapper,
 #drawer_host .reset-button { transform: scale(0.8) !important; }
 /* Keep the dropzone strictly inside its own box — with overflow visible it
-   spilled past its bounds and swallowed clicks meant for Commit Ingest. */
+   spilled past its bounds and swallowed clicks meant for Commit Ingest.
+   The upload-in-progress state (spinner + file name + progress bar) needs
+   more room than the idle dropzone, so allow it to grow to fit. */
 #ingest_upload {
   overflow: hidden !important;
   min-height: 74px !important;
-  max-height: 74px !important;
+  max-height: 120px !important;
   contain: layout paint !important;
 }
 #ingest_upload .wrap,
@@ -481,8 +483,45 @@ body.drawer-collapsed #drawer_host {
 #ingest_upload [data-testid="file"] {
   overflow: hidden !important;
   min-height: 0 !important;
-  max-height: 72px !important;
+  max-height: 118px !important;
 }
+/* Uploading state: keep the file name on one line and let the progress bar
+   and byte counter sit inside the box instead of being sliced. */
+#ingest_upload .file-preview,
+#ingest_upload .progress-bar-wrap,
+#ingest_upload .progress-text,
+#ingest_upload .file-name,
+#ingest_upload .filename,
+#ingest_upload td,
+#ingest_upload .progress-bar {
+  font-size: var(--dr-fs-tiny) !important;
+  line-height: 1.25 !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+#ingest_upload .file-name,
+#ingest_upload .filename,
+#ingest_upload td {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+#ingest_upload table, #ingest_upload tbody, #ingest_upload tr {
+  width: 100% !important;
+  table-layout: fixed !important;
+  display: block !important;
+}
+/* The uploaded-file preview ships 10px of padding on the table, the row and
+   every cell — ~105px of box for two short lines, which overflowed. */
+#ingest_upload .file-preview-holder {
+  max-height: 100% !important;
+  overflow: hidden !important;
+}
+#ingest_upload table.file-preview { padding: 1px 2px !important; margin: 0 !important; }
+#ingest_upload tr.file { padding: 0 !important; }
+#ingest_upload td.filename,
+#ingest_upload td.download { padding: 0 3px !important; }
+#ingest_upload td.filename span { display: inline !important; }
 #ingest_upload .wrap {
   height: auto !important;
 }
@@ -537,17 +576,69 @@ body.drawer-collapsed #drawer_host {
   max-height: min(40vh, 280px) !important;
   overflow-y: auto !important;
 }
+/* Stage + recipe readout: a transparent, collapsible float over the print,
+   pinned under the mode pill instead of eating drawer space. */
 #ritual_status {
-  font-size: 0.6rem !important;
-  line-height: 1.25 !important;
-  margin: 0 0 3px 0 !important;
-  padding: 0 !important;
+  position: absolute !important;
+  top: 30px !important;
+  left: 10px !important;
+  z-index: 7 !important;
+  width: auto !important;
+  max-width: min(300px, 42%) !important;
+  margin: 0 !important;
+  padding: 5px 22px 5px 9px !important;
+  font-size: var(--dr-fs-note) !important;
+  line-height: 1.3 !important;
   color: var(--dr-text-dim) !important;
-  max-height: 96px !important;
+  background: rgba(18, 18, 21, 0.62) !important;
+  backdrop-filter: blur(4px) !important;
+  border: 1px solid var(--dr-border) !important;
+  border-radius: 7px !important;
+  max-height: 44vh !important;
   overflow-y: auto !important;
+  overflow-x: hidden !important;
+  transition: padding 0.12s ease, background 0.12s ease !important;
 }
 #ritual_status p { margin: 0 0 2px 0 !important; }
+#ritual_status p:last-child { margin-bottom: 0 !important; }
 #ritual_status strong { color: var(--dr-text) !important; }
+/* Collapse toggle injected by the UI script. */
+#ritual_status .status-toggle {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  width: 15px;
+  height: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dr-text-faint);
+  cursor: pointer;
+  font-size: 0.6rem;
+  line-height: 1;
+  padding: 0;
+}
+#ritual_status .status-toggle:hover {
+  background: var(--dr-bg-hover);
+  color: var(--dr-text);
+}
+/* Collapsed: shrink to a small chip showing just the current stage. */
+#ritual_status.status-collapsed {
+  max-height: 22px !important;
+  padding: 3px 22px 3px 9px !important;
+  overflow: hidden !important;
+}
+#ritual_status.status-collapsed .prose > *:not(:first-child) { display: none !important; }
+#ritual_status.status-collapsed .prose > *:first-child {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  margin: 0 !important;
+}
+#ritual_status:hover { background: rgba(18, 18, 21, 0.86) !important; }
 #history_box {
   max-height: calc(100vh - 90px) !important;
   overflow-y: auto !important;
@@ -1191,6 +1282,41 @@ UI_JS = """
   };
   installModuleIcons();
   setInterval(installModuleIcons, 1200);
+
+  // ——— Collapse toggle for the floating stage/recipe readout ———
+  const installStatusToggle = () => {
+    const el = document.getElementById('ritual_status');
+    if (!el || el.dataset.toggleReady === '1') return;
+    el.dataset.toggleReady = '1';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'status-toggle';
+    btn.title = 'Minimise';
+    const paint = () => {
+      const collapsed = el.classList.contains('status-collapsed');
+      btn.textContent = collapsed ? '▸' : '▾';
+      btn.title = collapsed ? 'Expand details' : 'Minimise';
+    };
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.toggle('status-collapsed');
+      try { localStorage.setItem('dr_status_collapsed', el.classList.contains('status-collapsed') ? '1' : '0'); } catch (_) {}
+      paint();
+    });
+    if (localStorage.getItem('dr_status_collapsed') === '1') el.classList.add('status-collapsed');
+    paint();
+    el.appendChild(btn);
+  };
+  installStatusToggle();
+  // Gradio replaces the markdown body on every update; re-attach if it's lost.
+  setInterval(() => {
+    const el = document.getElementById('ritual_status');
+    if (el && !el.querySelector('.status-toggle')) {
+      el.dataset.toggleReady = '';
+      installStatusToggle();
+    }
+  }, 900);
 
   window.__dbPos = '';
   window.__dbGetPos = () => window.__dbPos || '';
@@ -4514,11 +4640,6 @@ def build_ui() -> gr.Blocks:
 
             # ——— Drawer panels (one visible) ———
             with gr.Column(scale=0, elem_id="drawer_host", min_width=0):
-                status = gr.Markdown(
-                    "**1. Ingest — working** → 2. Develop → 3. Print  \n"
-                    "_Commit Ingest to begin._",
-                    elem_id="ritual_status",
-                )
                 with gr.Group(elem_id="drawer_ingest", elem_classes=["drawer-panel", "is-open"]):
                     with gr.Accordion("Ingest", open=True, elem_id="acc_ingest") as ingest_acc:
                         sample = gr.Dropdown(
@@ -4614,6 +4735,13 @@ def build_ui() -> gr.Blocks:
                     '<div class="db-size-pill"><span class="db-tool-mode">Print</span> · '
                     'card <strong class="db-size-value">100%</strong> · right-click for tools</div>',
                     elem_id="db_size_readout",
+                )
+                # Stage + recipe readout floats over the print rather than
+                # taking a slice of the drawer above the controls.
+                status = gr.Markdown(
+                    "**1. Ingest — working** → 2. Develop → 3. Print  \n"
+                    "_Commit Ingest to begin._",
+                    elem_id="ritual_status",
                 )
                 preview_tool = gr.Radio(
                     choices=[
