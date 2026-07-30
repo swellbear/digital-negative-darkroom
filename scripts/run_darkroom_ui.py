@@ -19,6 +19,7 @@ import numpy as np
 from digital_negative.auto_crop import (
     RULE_CHOICES as AUTO_CROP_RULE_CHOICES,
     RULE_LABELS as AUTO_CROP_RULE_LABELS,
+    estimate_straighten_degrees,
     format_crop_rect,
     parse_aspect_ratio,
     suggest_crop_box,
@@ -1235,6 +1236,21 @@ body.module-collapsed #module_panel {
   object-fit: contain !important;
 }
 #module_panel #hist_plot button { height: auto !important; min-height: 120px !important; }
+#rotate_row {
+  gap: 4px !important;
+  margin: 2px 0 6px 0 !important;
+}
+#rotate_row button {
+  min-width: 0 !important;
+  flex: 1 1 0 !important;
+  font-size: 11px !important;
+  padding: 2px 4px !important;
+}
+#auto_straighten_btn {
+  min-width: 52px !important;
+  flex: 0 0 auto !important;
+}
+
 
 .mod-icon {
   display: inline-flex;
@@ -2570,6 +2586,7 @@ UI_JS = """
       <button type="button" data-act="dodge">Dodge</button>
       <button type="button" data-act="burn">Burn</button>
       <button type="button" data-act="crop">Crop & straighten</button>
+      <button type="button" data-act="autostraighten">Auto straighten</button>
       <button type="button" data-act="autocrop">Auto crop</button>
     `;
     document.body.appendChild(menu);
@@ -2599,6 +2616,11 @@ UI_JS = """
         }, 0);
       } else if (act === 'crop') {
         setTimeout(() => openModule('mod_crop'), 0);
+      } else if (act === 'autostraighten') {
+        setTimeout(() => {
+          openModule('mod_crop');
+          waitForEl('#auto_straighten_btn:not(:disabled)', (btn) => btn.click());
+        }, 0);
       } else if (act === 'autocrop') {
         // Never find buttons by label "Auto crop" — that matches this menu item
         // and recurses until the tab freezes.
@@ -3912,6 +3934,27 @@ def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
     return rect, hint
 
 
+def suggest_auto_straighten(state):
+    """Set the straighten slider from detected horizontal structure."""
+    if not state or state.get("dn") is None:
+        raise gr.Error("Commit Ingest first.")
+    state = _ensure_geometry_bases(state)
+    src = state.get("original_base")
+    if src is None:
+        src = state.get("geometry_base")
+    if src is None:
+        raise gr.Error("No framing base to analyze.")
+    deg = estimate_straighten_degrees(np.asarray(src))
+    if abs(deg) < 0.15:
+        hint = "_Auto straighten — already level (0.0°). Adjust the slider if you disagree._"
+    else:
+        hint = (
+            f"_Auto straighten — **{deg:+.2f}°**. "
+            f"Tweak if needed, then **Apply framing** (or Auto crop next)._"
+        )
+    return float(deg), hint
+
+
 def rotate_cw(state):
     return rotate_working(1, state)
 
@@ -4002,6 +4045,7 @@ def commit_ingest(sample_path, file_obj, state):
         gr.update(interactive=True),  # apply framing
         gr.update(interactive=True),  # reset framing
         gr.update(interactive=True),  # auto crop
+        gr.update(interactive=True),  # auto straighten
         0.0,
         DEFAULT_CROP_RECT,
         "free",
@@ -5219,6 +5263,7 @@ def guided_first_print(
             apply_frame_u,
             reset_frame_u,
             auto_crop_u,
+            auto_straighten_u,
             straighten_u,
             crop_rect_u,
             crop_ratio_u,
@@ -5245,6 +5290,7 @@ def guided_first_print(
         apply_frame_u = gr.update(interactive=True)
         reset_frame_u = gr.update(interactive=True)
         auto_crop_u = gr.update(interactive=True)
+        auto_straighten_u = gr.update(interactive=True)
         straighten_u = gr.skip()
         crop_rect_u = gr.skip()
         crop_ratio_u = gr.skip()
@@ -5360,6 +5406,7 @@ def guided_first_print(
         apply_frame_u,
         reset_frame_u,
         auto_crop_u,
+        auto_straighten_u,
         straighten_u,
         crop_rect_u,
         crop_ratio_u,
@@ -5439,6 +5486,7 @@ def reset_session():
         gr.update(open=True),
         gr.update(open=True),
         gr.update(open=True),
+        off,
         off,
         off,
         off,
@@ -5607,13 +5655,10 @@ def build_ui() -> gr.Blocks:
 
                 with gr.Group(elem_id="drawer_frame", elem_classes=["drawer-panel"]):
                     with gr.Accordion("Frame", open=True, elem_id="acc_frame") as frame_acc:
-                        with gr.Row():
-                            rotate_ccw_btn = gr.Button("⟲ 90°", size="sm", interactive=False)
-                            rotate_180_btn = gr.Button("180°", size="sm", interactive=False)
-                            rotate_cw_btn = gr.Button("90° ⟳", size="sm", interactive=False)
                         gr.Markdown(
-                            "_Rotate here. **Right-click the print** → "
-                            "**Crop & straighten** or **Auto crop** for the framing toolbar._",
+                            "_Framing lives in **Modules → Crop & straighten** "
+                            "(also **right-click the print**). "
+                            "Rotate 90°, auto-straighten, crop, then Apply._",
                             elem_id="crop_hint",
                         )
 
@@ -5808,18 +5853,37 @@ def build_ui() -> gr.Blocks:
 
                 with gr.Accordion("Crop & straighten", open=False, elem_id="mod_crop"):
                     crop_hint = gr.Markdown(
-                        "_Draw/resize the box on the print, then Apply._",
+                        "_Rotate if needed, auto-straighten / crop, then Apply._",
                         elem_id="crop_float_hint",
                     )
+                    with gr.Row(elem_id="rotate_row"):
+                        rotate_ccw_btn = gr.Button(
+                            "⟲ 90°", size="sm", interactive=False, elem_id="rotate_ccw_btn"
+                        )
+                        rotate_180_btn = gr.Button(
+                            "180°", size="sm", interactive=False, elem_id="rotate_180_btn"
+                        )
+                        rotate_cw_btn = gr.Button(
+                            "90° ⟳", size="sm", interactive=False, elem_id="rotate_cw_btn"
+                        )
                     crop_ratio = gr.Radio(
                         choices=CROP_RATIO_CHOICES,
                         value="free",
                         label="Aspect ratio",
                         elem_id="crop_ratio",
                     )
-                    straighten_deg = gr.Slider(
-                        -15.0, 15.0, value=0.0, step=0.1, label="Straighten °"
-                    )
+                    with gr.Row():
+                        straighten_deg = gr.Slider(
+                            -15.0, 15.0, value=0.0, step=0.1, label="Straighten °", scale=3
+                        )
+                        auto_straighten_btn = gr.Button(
+                            "Auto",
+                            interactive=False,
+                            variant="secondary",
+                            size="sm",
+                            scale=1,
+                            elem_id="auto_straighten_btn",
+                        )
                     with gr.Row():
                         auto_crop_rule = gr.Dropdown(
                             choices=AUTO_CROP_RULE_CHOICES,
@@ -5889,7 +5953,7 @@ def build_ui() -> gr.Blocks:
             sample, file_in, ingest_btn, develop_btn, print_btn,
             ingest_acc, develop_acc, print_acc,
             rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
-            apply_framing_btn, reset_framing_btn, auto_crop_btn,
+            apply_framing_btn, reset_framing_btn, auto_crop_btn, auto_straighten_btn,
             straighten_deg, crop_rect, crop_ratio,
             inspect_out, state, active_drawer,
         ]
@@ -6155,7 +6219,7 @@ def build_ui() -> gr.Blocks:
                 print_btn, unlock_print_btn,
                 ingest_acc, develop_acc, print_acc,
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
-                apply_framing_btn, reset_framing_btn, auto_crop_btn,
+                apply_framing_btn, reset_framing_btn, auto_crop_btn, auto_straighten_btn,
                 straighten_deg, crop_rect, crop_ratio,
                 download_trigger, download_modes,
                 state, active_drawer,
@@ -6204,6 +6268,11 @@ def build_ui() -> gr.Blocks:
             outputs=frame_outputs,
         ).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
+        )
+        auto_straighten_btn.click(
+            fn=suggest_auto_straighten,
+            inputs=[state],
+            outputs=[straighten_deg, crop_hint],
         )
         auto_crop_btn.click(
             fn=suggest_auto_crop,

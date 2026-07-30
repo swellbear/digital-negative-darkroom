@@ -309,3 +309,58 @@ def suggest_crop_box(
 
 def format_crop_rect(box: dict[str, Any]) -> str:
     return ",".join(f"{float(box[k]):.5f}" for k in ("x", "y", "w", "h"))
+
+
+def estimate_straighten_degrees(
+    image: np.ndarray,
+    *,
+    max_degrees: float = 12.0,
+    max_side: int = 420,
+    step: float = 0.25,
+) -> float:
+    """Estimate a fine straighten angle (degrees CW) that levels the horizon.
+
+    Scores candidate rotations by how sharp the horizontal structure becomes
+    (variance of row-to-row differences). Uses the same CW convention as
+    :func:`digital_negative.display.straighten_image`.
+    """
+    from .display import straighten_image
+
+    gray = _to_gray_f32(image)
+    h, w = gray.shape[:2]
+    m = max(h, w)
+    if m > max_side:
+        scale = max_side / float(m)
+        nh, nw = max(24, int(round(h * scale))), max(24, int(round(w * scale)))
+        yy = np.linspace(0, h - 1, nh).astype(np.int32)
+        xx = np.linspace(0, w - 1, nw).astype(np.int32)
+        gray = np.ascontiguousarray(gray[yy][:, xx])
+
+    # Mild high-pass so flat fields don't dominate the score.
+    blur = ndimage.gaussian_filter(gray, sigma=1.4)
+    work = _norm01(np.abs(gray - blur) + 0.35 * gray)
+
+    limit = float(np.clip(max_degrees, 1.0, 20.0))
+    step = float(max(step, 0.1))
+    candidates = np.arange(-limit, limit + 0.5 * step, step, dtype=np.float64)
+
+    best_deg = 0.0
+    best_score = -1.0
+    for deg in candidates:
+        trial = straighten_image(work, float(deg), fill=0.0)
+        # Crop the filled corners so the black wedges don't fake a score.
+        pad = int(round(0.08 * min(trial.shape[:2])))
+        if pad > 0 and trial.shape[0] > 2 * pad + 8 and trial.shape[1] > 2 * pad + 8:
+            core = trial[pad:-pad, pad:-pad]
+        else:
+            core = trial
+        rows = core.mean(axis=1)
+        score = float(np.var(np.diff(rows)))
+        if score > best_score:
+            best_score = score
+            best_deg = float(deg)
+
+    # Snap near-zero noise to exactly 0.
+    if abs(best_deg) < 0.15:
+        return 0.0
+    return float(np.clip(round(best_deg / step) * step, -limit, limit))
