@@ -15,20 +15,21 @@ from .digital_negative import DigitalNegative
 from .papers import PaperProfile
 
 # Approximate relative speeds vs grade 2 (Ilford MG filter family, simplified).
-# Values are multiplicative light factors before the paper curve.
-# Soft filters pass more effective light; hard filters need more exposure.
+# Multiplicative light factors before the paper curve — soft filters are "faster"
+# (more effective light), hard filters need more timer for the same midtone.
+# v4: slightly closer to published MG exposure-factor shape (~½ stop soft→2, ~1 stop 2→5).
 MG_FILTER_SPEED = {
-    0.0: 1.35,
-    0.5: 1.28,
-    1.0: 1.18,
+    0.0: 1.42,
+    0.5: 1.32,
+    1.0: 1.20,
     1.5: 1.10,
     2.0: 1.00,
-    2.5: 0.92,
-    3.0: 0.82,
-    3.5: 0.72,
-    4.0: 0.62,
-    4.5: 0.52,
-    5.0: 0.45,
+    2.5: 0.90,
+    3.0: 0.78,
+    3.5: 0.68,
+    4.0: 0.58,
+    4.5: 0.50,
+    5.0: 0.42,
 }
 
 
@@ -75,20 +76,21 @@ def paper_response(
         log_center = float(np.percentile(log_e, 50))
     x = log_e - float(log_center)
 
-    # Wider grade span: 00 is long & soft; 5 is short & steep
-    slope = 0.28 + 0.95 * (gamma / 1.25)
+    # Grade span: 00 long & soft; 5 short & steep — like swapping MG filters.
+    slope = 0.24 + 1.05 * (gamma / 1.25)
     hard = np.clip((grade - 2.0) / 3.0, 0.0, 1.0)
     soft = 1.0 - hard
-    shadow_gain = 1.0 + 0.70 * hard
-    highlight_gain = 1.0 + 0.35 * soft
+    # Hard grades compress highlights; soft grades open them and lengthen the toe.
+    shadow_gain = 1.0 + 0.85 * hard
+    highlight_gain = 1.0 + 0.42 * soft
     x_shaped = np.where(x >= 0.0, x * shadow_gain, x * highlight_gain)
 
-    core = 0.26 + 0.54 * np.tanh(slope * x_shaped)
-    toe_keep = toe * (0.75 + 0.9 * soft)
-    shoulder_keep = shoulder * (0.55 + 1.0 * soft)
-    toe_lift = toe_keep * 0.60 * (1.0 - _smoothstep(-1.25, 0.05, x))
-    shoulder_open = shoulder_keep * 0.70 * (1.0 - _smoothstep(-1.45, 0.0, x))
-    hard_block = hard * 0.16 * _smoothstep(0.10, 1.15, x)
+    core = 0.24 + 0.56 * np.tanh(slope * x_shaped)
+    toe_keep = toe * (0.80 + 0.95 * soft)
+    shoulder_keep = shoulder * (0.50 + 1.15 * soft)
+    toe_lift = toe_keep * 0.65 * (1.0 - _smoothstep(-1.35, 0.08, x))
+    shoulder_open = shoulder_keep * 0.75 * (1.0 - _smoothstep(-1.50, 0.05, x))
+    hard_block = hard * 0.20 * _smoothstep(0.08, 1.20, x)
     shaped = np.clip(core - toe_lift - shoulder_open + hard_block, 0.0, 1.0)
 
     dens = paper.dmin + (paper.dmax - paper.dmin) * shaped
@@ -136,7 +138,8 @@ def print_negative(
 
     white = float(np.power(10.0, -paper.dmin))
     preview = np.clip(reflectance / max(white, 1e-6), 0.0, 1.0)
-    preview = np.power(preview, 0.80).astype(np.float32)
+    # Mild display gamma so paper Dmax reads as print black without crushing midtones.
+    preview = np.power(preview, 0.78).astype(np.float32)
 
     print_meta.update(
         {

@@ -71,6 +71,7 @@ def load_film_profile(path: str | Path) -> FilmProfile:
 # Tuned to read like tank chemistry, not generic contrast sliders:
 # - High Definition ≈ fine-grain / solvent developer (cleaner, slightly leaner)
 # - High Energy ≈ speed-enhancing / vigorous developer (punchier, grainier, more fog)
+# v4: slightly softer biases so styles feel like chemistry choices, not LUT presets.
 DEVELOPER_STYLES = {
     "standard": {
         "name": "Standard",
@@ -83,21 +84,21 @@ DEVELOPER_STYLES = {
     },
     "high_definition": {
         "name": "High Definition",
-        "contrast_bias": 0.08,
-        "density_bias": 0.92,
-        "grain_bias": 0.55,
-        "fog_lift": -0.015,
-        "toe_softness": 0.08,
-        "shoulder_roll": 0.05,
+        "contrast_bias": 0.06,
+        "density_bias": 0.94,
+        "grain_bias": 0.50,
+        "fog_lift": -0.012,
+        "toe_softness": 0.10,
+        "shoulder_roll": 0.06,
     },
     "high_energy": {
         "name": "High Energy",
-        "contrast_bias": 0.42,
-        "density_bias": 1.18,
-        "grain_bias": 1.45,
-        "fog_lift": 0.025,
-        "toe_softness": -0.06,
-        "shoulder_roll": -0.04,
+        "contrast_bias": 0.36,
+        "density_bias": 1.14,
+        "grain_bias": 1.38,
+        "fog_lift": 0.022,
+        "toe_softness": -0.05,
+        "shoulder_roll": -0.035,
     },
 }
 
@@ -124,16 +125,19 @@ def modify_curve(
 
     # --- Relative development (push / pull) ---
     # Push raises average gradient and builds highlight density faster than the toe.
-    # Pull does the reverse — closer to real tank timing than a uniform scale.
+    # Pull compresses the upper scale first — like shortening tank time, not a global fade.
     scale = float(np.clip(relative_time, 0.45, 2.2))
     above = dens - profile.base_plus_fog
-    # Position along the curve 0..1
     t = np.linspace(0.0, 1.0, len(dens))
-    # Push weights the upper scale more; pull flattens it
     push = max(scale - 1.0, 0.0)
     pull = max(1.0 - scale, 0.0)
-    local = 1.0 + 0.55 * push * (0.35 + 0.65 * t) - 0.50 * pull * (0.55 + 0.45 * (1.0 - t))
-    dens = fog + above * local * float(style["density_bias"]) * (0.78 + 0.22 * scale)
+    local = (
+        1.0
+        + 0.62 * push * (0.28 + 0.72 * t)
+        - 0.48 * pull * (0.40 + 0.60 * t)
+    )
+    # Mild overall CI shift with time; toe stays relatively anchored under pull.
+    dens = fog + above * local * float(style["density_bias"]) * (0.82 + 0.18 * scale)
 
     # Developer toe / shoulder character
     toe_k = float(style["toe_softness"])
@@ -144,13 +148,15 @@ def modify_curve(
         dens = dens - sh_k * (t**2) * (dens - fog)
 
     # --- Contrast (N− / N+) around a mid-curve pivot ---
-    pivot_idx = int(0.45 * (len(dens) - 1))
+    # Zone-ish: N+ steepens the straight line and opens the shoulder a little;
+    # N− flattens midtones while keeping the toe from collapsing.
+    pivot_idx = int(0.42 * (len(dens) - 1))
     pivot = float(dens[pivot_idx])
     contrast_amt = float(np.clip(contrast_modifier + float(style["contrast_bias"]), -1.5, 1.5))
-    # Asymmetric: +contrast steepens highlights a bit more (classic N+ feel)
-    stretch = 1.0 + 0.55 * contrast_amt
-    highlight_extra = 1.0 + 0.20 * max(contrast_amt, 0.0) * t
-    dens = pivot + (dens - pivot) * stretch * highlight_extra
+    stretch = 1.0 + 0.62 * contrast_amt
+    highlight_extra = 1.0 + 0.22 * max(contrast_amt, 0.0) * (t**1.15)
+    toe_protect = 1.0 - 0.12 * max(-contrast_amt, 0.0) * ((1.0 - t) ** 1.4)
+    dens = pivot + (dens - pivot) * stretch * highlight_extra * toe_protect
     dens = np.maximum(dens, fog * 0.98)
 
     return FilmProfile(

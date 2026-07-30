@@ -1,23 +1,24 @@
 {
   "id": "mg-standard",
   "name": "Multigrade Standard",
-  "version": "1.0",
+  "version": "1.1",
   "type": "bw_multigrade",
   "source": {
-    "notes": "Parametric Level-3 paper response approximating variable-contrast RC paper. Not digitized from a specific datasheet; tuned for believable enlarger behavior.",
-    "created": "2026-07-29"
+    "notes": "Parametric Level-3 paper response approximating variable-contrast RC paper. Not digitized from a specific datasheet; v1.1 widens soft↔hard grade separation for more natural enlarger feel.",
+    "created": "2026-07-29",
+    "updated": "2026-07-30"
   },
   "dmax": 2.05,
   "dmin": 0.04,
   "grades": {
-    "00": {"gamma": 0.55, "toe": 0.22, "shoulder": 0.28},
-    "0": {"gamma": 0.70, "toe": 0.18, "shoulder": 0.24},
-    "1": {"gamma": 0.90, "toe": 0.14, "shoulder": 0.20},
-    "2": {"gamma": 1.10, "toe": 0.11, "shoulder": 0.16},
-    "2.5": {"gamma": 1.25, "toe": 0.10, "shoulder": 0.14},
-    "3": {"gamma": 1.45, "toe": 0.09, "shoulder": 0.12},
-    "4": {"gamma": 1.80, "toe": 0.07, "shoulder": 0.10},
-    "5": {"gamma": 2.20, "toe": 0.05, "shoulder": 0.08}
+    "00": {"gamma": 0.48, "toe": 0.26, "shoulder": 0.32},
+    "0": {"gamma": 0.64, "toe": 0.20, "shoulder": 0.26},
+    "1": {"gamma": 0.85, "toe": 0.15, "shoulder": 0.20},
+    "2": {"gamma": 1.08, "toe": 0.11, "shoulder": 0.15},
+    "2.5": {"gamma": 1.25, "toe": 0.10, "shoulder": 0.13},
+    "3": {"gamma": 1.50, "toe": 0.08, "shoulder": 0.11},
+    "4": {"gamma": 1.90, "toe": 0.06, "shoulder": 0.08},
+    "5": {"gamma": 2.35, "toe": 0.04, "shoulder": 0.06}
   },
   "default_grade": 2.5
 }

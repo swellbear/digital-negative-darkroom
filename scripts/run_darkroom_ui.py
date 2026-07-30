@@ -25,6 +25,7 @@ from digital_negative.print_engine import print_negative
 
 # Match commit look as closely as practical while staying interactive.
 LIVE_MAX_SIDE = 2000
+DRAG_MAX_SIDE = 960  # fast proxy while dragging sliders
 REF_MAX_SIDE = 420
 
 FILM_CHOICES = []
@@ -125,43 +126,64 @@ def _history_md(dn) -> str:
     hist = dn.metadata.get("history", [])
     lines = ["### Decision history"]
     if not hist:
-        lines.append("_No locked decisions yet._")
+        lines.append("_No locked decisions yet — explore freely, then Commit to record._")
     for i, h in enumerate(hist, 1):
         op = h.get("op", "?")
         if op == "ingest":
             lines.append(f"{i}. **Ingest** — `{h.get('source')}`")
         elif op == "develop":
             lines.append(
-                f"{i}. **Develop** — {h.get('film_profile_id')} · {h.get('developer_id')} · "
-                f"rel={h.get('relative_time')} · contrast={h.get('contrast_modifier')}"
+                f"{i}. **Develop** — `{h.get('film_profile_id')}` · {h.get('developer_id')} · "
+                f"rel={h.get('relative_time')} · N±={h.get('contrast_modifier')} · "
+                f"grain={h.get('grain_strength')}"
             )
         elif op == "print":
             lines.append(
-                f"{i}. **Print** — {h.get('paper_id')} · grade {h.get('grade')} · "
+                f"{i}. **Print** — `{h.get('paper_id')}` · grade {h.get('grade')} · "
                 f"exp {h.get('overall_exposure'):+g} stops"
+                + (f" · nudge={h.get('contrast')}" if h.get("contrast") not in (None, 0, 0.0) else "")
             )
         elif op == "unlock":
-            lines.append(f"{i}. **Unlock** — {h.get('stage')}")
+            stage = h.get("stage", "?")
+            label = {"development": "Develop", "print": "Print", "ingest": "Ingest"}.get(stage, stage)
+            lines.append(f"{i}. **Unlocked {label}** — revise and re-commit")
         else:
             lines.append(f"{i}. **{op}**")
     locks = dn.metadata.get("ui_state", {}).get("locked_stages", [])
-    lines.append(f"\n**Locked:** {', '.join(locks) or '—'} · **seed:** `{dn.metadata.get('process_seed')}`")
+    lock_labels = []
+    for s in ("ingest", "development", "print"):
+        if s in locks:
+            lock_labels.append({"ingest": "Ingest", "development": "Develop", "print": "Print"}[s])
+    lines.append(
+        f"\n**Locked:** {', '.join(lock_labels) or '—'} · "
+        f"**process seed:** `{dn.metadata.get('process_seed')}`"
+    )
     return "\n".join(lines)
 
 
-def _stage_banner(stage: str) -> str:
+def _stage_banner(stage: str, locked: list | None = None) -> str:
+    """Ritual progress with lock markers for committed stages."""
     steps = [("ingest", "1 Ingest"), ("development", "2 Develop"), ("print", "3 Print")]
     order = {"ingest": 0, "development": 1, "print": 2}
     cur = order.get(stage, -1)
+    locked_set = set(locked or [])
     parts = []
-    for i, (_, label) in enumerate(steps):
+    for i, (key, label) in enumerate(steps):
+        done = key in locked_set
+        tag = f"{label}·locked" if done else label
         if i < cur:
-            parts.append(f"✓ {label}")
+            parts.append(f"✓ {tag}")
         elif i == cur:
-            parts.append(f"**→ {label}**")
+            parts.append(f"**→ {tag}**")
         else:
-            parts.append(label)
+            parts.append(tag)
     return " · ".join(parts)
+
+
+def _locks(state) -> list:
+    if not state or state.get("dn") is None:
+        return []
+    return list(state["dn"].metadata.get("ui_state", {}).get("locked_stages", []))
 
 
 def commit_ingest(sample_path, file_obj, state):
@@ -186,7 +208,7 @@ def commit_ingest(sample_path, file_obj, state):
     latent_full = _to_rgb_u8(dn.to_luminance(), assume_linear=True)
     latent_ref = _downscale_rgb(latent_full, REF_MAX_SIDE)
     summary = (
-        f"{_stage_banner('development')}\n\n"
+        f"{_stage_banner('development', ['ingest'])}\n\n"
         f"**Ingest locked.** The large image is a **theoretical print** through the "
         f"working negative — develop changes assume current (or default) Print settings.  \n"
         f"`{dn.metadata['source']['original_filename']}`  \n\n{_history_md(dn)}"
@@ -194,6 +216,7 @@ def commit_ingest(sample_path, file_obj, state):
     state = {
         "dn": dn,
         "proxy": _proxy_dn(dn, LIVE_MAX_SIDE),
+        "proxy_drag": _proxy_dn(dn, DRAG_MAX_SIDE),
         "latent_ref": latent_ref,
         "neg_ref": None,
         "live_rgb": _downscale_rgb(latent_full, LIVE_MAX_SIDE),
@@ -227,13 +250,18 @@ def _run_live_develop_then_print(
     print_grade,
     print_contrast,
     state,
+    *,
+    max_side: int = LIVE_MAX_SIDE,
 ):
     """Develop with current settings, then print with current/default print settings.
 
     Large viewer shows the theoretical final print — what you'd get after
     Commit Develop + Commit Print with these controls.
     """
-    proxy = state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE)
+    if max_side <= DRAG_MAX_SIDE:
+        proxy = state.get("proxy_drag") or _proxy_dn(state["dn"], DRAG_MAX_SIDE)
+    else:
+        proxy = state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE)
     proxy.metadata["process_seed"] = state["dn"].metadata.get("process_seed")
     profile = load_film_profile(_profile_path(list_film_profiles(), film_id))
     development = develop(
@@ -263,11 +291,12 @@ def _run_live_develop_then_print(
     speed = state["dn"].metadata.get("print", {}).get("filtration", {}).get("values", {}).get(
         "filter_speed", 1.0
     )
+    quality_note = "fast drag" if max_side <= DRAG_MAX_SIDE else "commit-quality"
     summary = (
-        f"{_stage_banner('development')}\n\n"
+        f"{_stage_banner('development', _locks(state))}\n\n"
         f"**Print preview through working negative** "
-        f"({live_rgb.shape[1]}×{live_rgb.shape[0]}) — develop changes shown as a "
-        f"print with current Print settings.  \n"
+        f"({live_rgb.shape[1]}×{live_rgb.shape[0]}, {quality_note}) — develop changes "
+        f"shown as a print with current Print settings.  \n"
         f"Develop: {profile.name} · {developer_id} · rel={float(relative_time):.2f} · "
         f"contrast={float(contrast):+.2f} · grain={float(grain):.2f} · "
         f"density μ={float(development.density.mean()):.2f}  \n"
@@ -278,7 +307,8 @@ def _run_live_develop_then_print(
     )
     state = {
         **state,
-        "proxy": proxy,
+        "proxy": state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE),
+        "proxy_drag": state.get("proxy_drag") or _proxy_dn(state["dn"], DRAG_MAX_SIDE),
         "development": development,
         "live_rgb": live_rgb,
         "neg_ref": neg_ref,
@@ -305,8 +335,15 @@ def live_preview(
     print_grade,
     print_contrast,
     state,
+    quality: str = "high",
 ):
-    """Unified live viewer: develop+print while developing; print-only after Develop lock."""
+    """Unified live viewer: develop+print while developing; print-only after Develop lock.
+
+    quality='drag' uses a faster lower-res proxy while sliders move;
+    quality='high' (release / change) uses commit-accurate resolution.
+    """
+    max_side = DRAG_MAX_SIDE if quality == "drag" else LIVE_MAX_SIDE
+
     if not state or state.get("dn") is None:
         return None, None, None, "*Commit Ingest first.*", state
 
@@ -323,7 +360,7 @@ def live_preview(
         # Print-only commit preview
         if state.get("development_full") is not None:
             t = state["development_full"].transmittance
-            step = max(1, int(np.ceil(max(t.shape) / LIVE_MAX_SIDE)))
+            step = max(1, int(np.ceil(max(t.shape) / max_side)))
             t = np.ascontiguousarray(t[::step, ::step])
         else:
             t = state.get("transmittance_proxy")
@@ -333,6 +370,9 @@ def live_preview(
                 return state.get("live_rgb"), state.get("latent_ref"), state.get("neg_ref"), (
                     state.get("summary_cache", "")
                 ), state
+            if max(t.shape) > max_side:
+                step = max(1, int(np.ceil(max(t.shape) / max_side)))
+                t = np.ascontiguousarray(t[::step, ::step])
 
         paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
         result = print_negative(
@@ -346,9 +386,10 @@ def live_preview(
         )
         live_rgb = _to_rgb_u8(result.preview)
         speed = state["dn"].metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
+        quality_note = "fast drag" if quality == "drag" else "commit-quality"
         summary = (
-            f"{_stage_banner('print')}\n\n"
-            f"**Commit Print preview** ({live_rgb.shape[1]}×{live_rgb.shape[0]}) — "
+            f"{_stage_banner('print', _locks(state))}\n\n"
+            f"**Commit Print preview** ({live_rgb.shape[1]}×{live_rgb.shape[0]}, {quality_note}) — "
             f"this is what Commit Print will lock.  \n"
             f"{paper.name} · grade {float(print_grade):.1f} · exp {float(print_exposure):+.2f} · "
             f"filter ×{float(speed):.2f}  \n\n{_history_md(state['dn'])}"
@@ -368,8 +409,63 @@ def live_preview(
         print_grade,
         print_contrast,
         state,
+        max_side=max_side,
     )
     return live_rgb, state.get("latent_ref"), neg_ref, summary, state
+
+
+def live_preview_drag(
+    film_id,
+    developer_id,
+    relative_time,
+    contrast,
+    grain,
+    paper_id,
+    print_exposure,
+    print_grade,
+    print_contrast,
+    state,
+):
+    return live_preview(
+        film_id,
+        developer_id,
+        relative_time,
+        contrast,
+        grain,
+        paper_id,
+        print_exposure,
+        print_grade,
+        print_contrast,
+        state,
+        quality="drag",
+    )
+
+
+def live_preview_high(
+    film_id,
+    developer_id,
+    relative_time,
+    contrast,
+    grain,
+    paper_id,
+    print_exposure,
+    print_grade,
+    print_contrast,
+    state,
+):
+    return live_preview(
+        film_id,
+        developer_id,
+        relative_time,
+        contrast,
+        grain,
+        paper_id,
+        print_exposure,
+        print_grade,
+        print_contrast,
+        state,
+        quality="high",
+    )
 
 
 def commit_develop(film_id, developer_id, relative_time, contrast, grain, state):
@@ -406,13 +502,14 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
         _to_rgb_u8(negative_lightbox_preview(development.transmittance)), REF_MAX_SIDE
     )
     summary = (
-        f"{_stage_banner('print')}\n\n"
+        f"{_stage_banner('print', locks)}\n\n"
         f"**Develop locked.** Large image is now a **Commit Print preview** — "
         f"refine Print controls, then Commit Print.  \n\n{_history_md(dn)}"
     )
     state = {
         "dn": dn,
         "proxy": state.get("proxy"),
+        "proxy_drag": state.get("proxy_drag"),
         "latent_ref": state.get("latent_ref"),
         "neg_ref": neg_ref,
         "live_rgb": live_view,
@@ -468,10 +565,10 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
     live_rgb = _downscale_rgb(_to_rgb_u8(result.preview), LIVE_MAX_SIDE)
     speed = dn.metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
     summary = (
-        f"{_stage_banner('print')}\n\n"
+        f"{_stage_banner('print', locks)}\n\n"
         f"**Print locked** — {paper.name} · grade {float(print_grade):.1f} · "
         f"exp {float(print_exposure):+.2f} · filter ×{float(speed):.2f}  \n"
-        f"Use Unlock to revise.  \n\n{_history_md(dn)}"
+        f"Use Unlock Print (or Unlock Develop) to revise.  \n\n{_history_md(dn)}"
     )
     state = {**state, "print": result, "live_rgb": live_rgb, "summary_cache": summary}
     return (
@@ -521,9 +618,10 @@ def unlock_develop(state):
         "stage": "development",
     }
     summary = (
-        f"{_stage_banner('development')}\n\n"
+        f"{_stage_banner('development', _locks(state))}\n\n"
         f"**Develop unlocked.** Large image again shows a theoretical print through "
-        f"the working negative (current Print settings).  \n\n"
+        f"the working negative (current Print settings). Move sliders freely, then "
+        f"Commit Develop again when ready.  \n\n"
         f"{_history_md(dn)}"
     )
     state["summary_cache"] = summary
@@ -562,8 +660,9 @@ def unlock_print(state):
     _unlock_stage(dn, "print")
     state = {**state, "print": None, "stage": "print"}
     summary = (
-        f"{_stage_banner('print')}\n\n"
-        f"**Print unlocked.** Large image is a Commit Print preview again.  \n\n"
+        f"{_stage_banner('print', _locks(state))}\n\n"
+        f"**Print unlocked.** Large image is a Commit Print preview again — "
+        f"adjust exposure/grade, then Commit Print.  \n\n"
         f"{_history_md(dn)}"
     )
     state["summary_cache"] = summary
@@ -620,7 +719,7 @@ def build_ui() -> gr.Blocks:
             """
             # Digital Negative Darkroom
             **Large image = theoretical print** while you develop (current Print settings), then **Commit Print preview** after Develop is locked.  
-            **Commit** locks · **Unlock** revises · small images under the viewer are references only.
+            Sliders update live (fast while dragging, higher quality on release). **Commit** locks · **Unlock** revises.
             """
         )
 
@@ -706,7 +805,7 @@ def build_ui() -> gr.Blocks:
                 sample, file_in, ingest_btn, develop_btn, print_btn, state,
             ],
         ).then(
-            fn=live_preview,
+            fn=live_preview_high,
             inputs=preview_inputs,
             outputs=preview_outputs,
         )
@@ -722,8 +821,9 @@ def build_ui() -> gr.Blocks:
             print_grade,
             print_contrast,
         ):
-            ctrl.input(fn=live_preview, inputs=preview_inputs, outputs=preview_outputs)
-            ctrl.change(fn=live_preview, inputs=preview_inputs, outputs=preview_outputs)
+            # Drag = fast lower-res; release/change = commit-quality preview
+            ctrl.input(fn=live_preview_drag, inputs=preview_inputs, outputs=preview_outputs)
+            ctrl.change(fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs)
 
         develop_btn.click(
             fn=commit_develop,
@@ -734,7 +834,7 @@ def build_ui() -> gr.Blocks:
                 develop_btn, unlock_develop_btn, print_btn, unlock_print_btn, state,
             ],
         ).then(
-            fn=live_preview,
+            fn=live_preview_high,
             inputs=preview_inputs,
             outputs=preview_outputs,
         )
@@ -749,7 +849,7 @@ def build_ui() -> gr.Blocks:
                 paper, print_exposure, print_grade, print_contrast, unlock_print_btn, state,
             ],
         ).then(
-            fn=live_preview,
+            fn=live_preview_high,
             inputs=preview_inputs,
             outputs=preview_outputs,
         )
@@ -773,7 +873,7 @@ def build_ui() -> gr.Blocks:
                 print_btn, unlock_print_btn, state,
             ],
         ).then(
-            fn=live_preview,
+            fn=live_preview_high,
             inputs=preview_inputs,
             outputs=preview_outputs,
         )
