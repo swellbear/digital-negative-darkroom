@@ -107,10 +107,73 @@ if SAMPLE_DIR.exists():
             SAMPLE_CHOICES.append((path.name, str(path)))
 
 UI_CSS = """
+/* ——— Darkroom theme: warm-neutral dark chrome, copper accent ——— */
+:root, .gradio-container {
+  --dr-bg-app: #16161a !important;
+  --dr-bg-panel: #1d1d21 !important;
+  --dr-bg-elevated: #262629 !important;
+  --dr-bg-hover: #2d2d31 !important;
+  --dr-border: rgba(255, 255, 255, 0.09) !important;
+  --dr-border-strong: rgba(255, 255, 255, 0.17) !important;
+  --dr-text: #eae6df !important;
+  --dr-text-dim: #a8a49b !important;
+  --dr-text-faint: #757168 !important;
+  --dr-accent: #e0954f !important;
+  --dr-accent-strong: #f0ab6c !important;
+  --dr-accent-soft: rgba(224, 149, 79, 0.16) !important;
+  --dr-accent-border: rgba(224, 149, 79, 0.5) !important;
+  --dr-accent-contrast: #20140a !important;
+  --dr-radius: 9px !important;
+  --dr-font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Helvetica, Arial, sans-serif !important;
+
+  /* Re-point Gradio's own theme variables at the darkroom palette so
+     sliders, primary buttons, and focus rings match without touching
+     every component individually. */
+  --color-accent: var(--dr-accent) !important;
+  --color-accent-soft: var(--dr-accent-soft) !important;
+  --border-color-accent: var(--dr-accent-border) !important;
+  --border-color-accent-subdued: var(--dr-accent-soft) !important;
+  --slider-color: var(--dr-accent) !important;
+  --button-primary-background-fill: var(--dr-accent) !important;
+  --button-primary-background-fill-hover: var(--dr-accent-strong) !important;
+  --button-primary-border-color: var(--dr-accent) !important;
+  --button-primary-border-color-hover: var(--dr-accent-strong) !important;
+  --button-primary-text-color: var(--dr-accent-contrast) !important;
+  --button-primary-text-color-hover: var(--dr-accent-contrast) !important;
+  --button-secondary-background-fill: var(--dr-bg-elevated) !important;
+  --button-secondary-background-fill-hover: var(--dr-bg-hover) !important;
+  --button-secondary-border-color: var(--dr-border-strong) !important;
+  --button-secondary-border-color-hover: var(--dr-accent-border) !important;
+  --button-secondary-text-color: var(--dr-text) !important;
+  --button-secondary-text-color-hover: var(--dr-text) !important;
+  --checkbox-label-background-fill: var(--dr-bg-elevated) !important;
+  --checkbox-label-background-fill-hover: var(--dr-bg-hover) !important;
+  --checkbox-label-background-fill-selected: var(--dr-accent-soft) !important;
+  --checkbox-label-border-color: var(--dr-border) !important;
+  --checkbox-label-border-color-selected: var(--dr-accent-border) !important;
+  --checkbox-label-text-color: var(--dr-text-dim) !important;
+  --checkbox-label-text-color-selected: var(--dr-accent-strong) !important;
+  --checkbox-background-color: var(--dr-bg-elevated) !important;
+  --checkbox-background-color-selected: var(--dr-accent) !important;
+  --checkbox-border-color: var(--dr-border-strong) !important;
+  --checkbox-border-color-selected: var(--dr-accent) !important;
+  --body-background-fill: var(--dr-bg-app) !important;
+  --background-fill-primary: var(--dr-bg-panel) !important;
+  --background-fill-secondary: var(--dr-bg-elevated) !important;
+  --block-background-fill: var(--dr-bg-panel) !important;
+  --block-border-color: var(--dr-border) !important;
+  --body-text-color: var(--dr-text) !important;
+  --body-text-color-subdued: var(--dr-text-dim) !important;
+  --border-color-primary: var(--dr-border) !important;
+  --input-background-fill: var(--dr-bg-elevated) !important;
+  --input-border-color: var(--dr-border) !important;
+  --neutral-50: var(--dr-bg-elevated) !important;
+}
 html, body {
   height: 100% !important;
   overflow: hidden !important;
   margin: 0 !important;
+  background: var(--dr-bg-app) !important;
 }
 .gradio-container {
   max-width: 100% !important;
@@ -121,6 +184,9 @@ html, body {
   box-sizing: border-box !important;
   display: flex !important;
   flex-direction: column !important;
+  background: var(--dr-bg-app) !important;
+  font-family: var(--dr-font) !important;
+  color: var(--dr-text) !important;
 }
 .gradio-container > .main,
 .gradio-container .wrap.svelte-1jdub1s,
@@ -133,10 +199,15 @@ html, body {
 #app_header {
   flex: 0 0 auto !important;
   margin: 0 !important;
-  padding: 0 2px 2px !important;
+  padding: 3px 4px 6px !important;
+  border-bottom: 1px solid var(--dr-border) !important;
 }
 #app_header h1 {
-  font-size: 1.05rem !important;
+  font-size: 0.92rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.02em !important;
+  text-transform: uppercase !important;
+  color: var(--dr-text-dim) !important;
   margin: 0 !important;
   line-height: 1.2 !important;
 }
@@ -162,42 +233,67 @@ html, body {
   height: 100% !important;
 }
 
-/* Icon rail */
+/* Icon rail — darktable-style: flat, quiet, accent only on the active stage */
 #icon_rail {
-  flex: 0 0 56px !important;
-  width: 56px !important;
-  max-width: 56px !important;
+  flex: 0 0 60px !important;
+  width: 60px !important;
+  max-width: 60px !important;
   display: flex !important;
   flex-direction: column !important;
-  gap: 4px !important;
-  padding: 4px 4px 8px !important;
+  gap: 3px !important;
+  padding: 6px 5px 8px !important;
   box-sizing: border-box !important;
-  border-right: 1px solid rgba(255,255,255,0.08) !important;
-  background: rgba(0,0,0,0.22) !important;
+  border-right: 1px solid var(--dr-border) !important;
+  background: var(--dr-bg-app) !important;
   z-index: 40 !important;
   overflow: hidden !important;
 }
 #icon_rail button {
-  min-height: 48px !important;
-  height: 48px !important;
+  min-height: 50px !important;
+  height: 50px !important;
   width: 100% !important;
-  padding: 4px 2px !important;
-  font-size: 0.58rem !important;
+  padding: 5px 2px 4px !important;
+  font-size: 0.56rem !important;
   line-height: 1.1 !important;
   white-space: pre-line !important;
-  border-radius: 8px !important;
-  letter-spacing: 0.01em;
+  border-radius: var(--dr-radius) !important;
+  letter-spacing: 0.02em;
+  color: var(--dr-text-dim) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+  transition: background 0.12s ease, color 0.12s ease !important;
+}
+#icon_rail button:hover {
+  background: var(--dr-bg-hover) !important;
+  color: var(--dr-text) !important;
 }
 #icon_rail button .rail-glyph,
 #icon_rail .rail-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2px;
+}
+#icon_rail button .rail-svg {
+  width: 19px;
+  height: 19px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   display: block;
-  font-size: 1.05rem;
-  line-height: 1.15;
-  margin-bottom: 1px;
+}
+#icon_rail button .rail-label {
+  display: block;
+  font-size: 0.56rem;
+  line-height: 1.1;
 }
 #icon_rail button.rail-active {
-  outline: 1px solid #f2d28a !important;
-  background: rgba(242, 210, 138, 0.16) !important;
+  color: var(--dr-accent-strong) !important;
+  background: var(--dr-accent-soft) !important;
+  border-color: var(--dr-accent-border) !important;
 }
 #icon_rail .rail-spacer { flex: 1 1 auto !important; min-height: 8px !important; }
 
@@ -210,10 +306,10 @@ html, body {
   height: 100% !important;
   overflow-x: hidden !important;
   overflow-y: auto !important;
-  padding: 4px 8px 8px !important;
+  padding: 6px 10px 10px !important;
   box-sizing: border-box !important;
-  border-right: 1px solid rgba(255,255,255,0.06) !important;
-  background: rgba(0,0,0,0.12) !important;
+  border-right: 1px solid var(--dr-border) !important;
+  background: var(--dr-bg-panel) !important;
   z-index: 35 !important;
   transition: flex-basis 0.18s ease, width 0.18s ease, max-width 0.18s ease, padding 0.18s ease, opacity 0.15s ease !important;
 }
@@ -351,6 +447,8 @@ body.drawer-collapsed #drawer_host {
   align-items: center !important;
   justify-content: center !important;
   background: #0a0a0a !important;
+  border: 1px solid var(--dr-border) !important;
+  border-radius: var(--dr-radius) !important;
   box-sizing: border-box !important;
 }
 #live_preview img,
@@ -453,7 +551,7 @@ body.drawer-collapsed #drawer_host {
 }
 #inspect_preview { display: none !important; }
 
-/* Floating toolbars (right-click tools) */
+/* Floating toolbars (right-click tools) — styled like a darktable module panel */
 .float-toolbar {
   position: fixed !important;
   z-index: 100050 !important;
@@ -461,12 +559,13 @@ body.drawer-collapsed #drawer_host {
   max-width: min(420px, 92vw);
   max-height: min(78vh, 640px);
   overflow: auto;
-  padding: 10px 12px !important;
-  border-radius: 10px !important;
-  border: 1px solid rgba(242, 210, 138, 0.45) !important;
-  background: rgba(18, 18, 18, 0.94) !important;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.55) !important;
+  padding: 12px 14px !important;
+  border-radius: var(--dr-radius) !important;
+  border: 1px solid var(--dr-border-strong) !important;
+  background: var(--dr-bg-elevated) !important;
+  box-shadow: 0 16px 44px rgba(0,0,0,0.6) !important;
   display: none !important;
+  color: var(--dr-text) !important;
 }
 /* Gradio renders the Group as wrapper + inner div sharing the elem_id, so the
    inner copy must open with the outer and drop the fixed-panel chrome. */
@@ -487,22 +586,31 @@ body.drawer-collapsed #drawer_host {
   overflow: visible !important;
   z-index: auto !important;
 }
+/* Gradio's internal .styler wrapper tints components with a translucent
+   white overlay by default — flatten it everywhere in the dark chrome. */
+.gradio-container .styler {
+  background: transparent !important;
+}
 .float-toolbar .float-title {
-  font-size: 0.85rem;
+  font-size: 0.72rem;
   font-weight: 650;
-  color: #f2d28a;
-  margin: 0 0 8px 0;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dr-accent-strong);
+  margin: 0 0 10px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--dr-border);
 }
 #ctx_menu {
   position: fixed;
   z-index: 100060;
   display: none;
-  min-width: 180px;
-  padding: 4px;
-  border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(16,16,16,0.96);
-  box-shadow: 0 10px 28px rgba(0,0,0,0.5);
+  min-width: 190px;
+  padding: 5px;
+  border-radius: var(--dr-radius);
+  border: 1px solid var(--dr-border-strong);
+  background: var(--dr-bg-elevated);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.55);
 }
 #ctx_menu.is-open { display: block; }
 #ctx_menu button {
@@ -511,17 +619,31 @@ body.drawer-collapsed #drawer_host {
   text-align: left;
   background: transparent;
   border: 0;
-  color: #eee;
+  color: var(--dr-text-dim);
   padding: 8px 10px;
   border-radius: 6px;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   cursor: pointer;
 }
-#ctx_menu button:hover { background: rgba(242, 210, 138, 0.18); color: #fff; }
+#ctx_menu button:hover { background: var(--dr-accent-soft); color: var(--dr-text); }
 
 /* Compact leftovers from older layout ids */
 #controls_col { display: contents !important; }
-#db_size_readout { font-size: 0.72rem !important; opacity: 0.85; }
+#db_size_readout { font-size: 0.72rem !important; opacity: 0.85; color: var(--dr-text-dim) !important; }
+#db_size_readout .db-size-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dr-border);
+  background: var(--dr-bg-elevated);
+}
+#db_size_readout .db-tool-mode {
+  color: var(--dr-accent-strong);
+  font-weight: 600;
+}
+#db_size_readout .db-size-value { color: var(--dr-text); }
 #db_wave_banner { flex: 0 0 auto; }
 #first_print_guide { display: none !important; }
 
@@ -547,7 +669,7 @@ body.drawer-collapsed #drawer_host {
 }
 #crop_overlay .crop-box {
   position: absolute;
-  border: 2px solid #f2d28a;
+  border: 2px solid var(--dr-accent);
   box-shadow: 0 0 0 1px rgba(0,0,0,0.55);
   pointer-events: auto;
   cursor: move;
@@ -559,14 +681,14 @@ body.drawer-collapsed #drawer_host {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(to right, transparent 33.33%, rgba(242,210,138,0.35) 33.33%, rgba(242,210,138,0.35) 33.66%, transparent 33.66%, transparent 66.66%, rgba(242,210,138,0.35) 66.66%, rgba(242,210,138,0.35) 67%, transparent 67%),
-    linear-gradient(to bottom, transparent 33.33%, rgba(242,210,138,0.35) 33.33%, rgba(242,210,138,0.35) 33.66%, transparent 33.66%, transparent 66.66%, rgba(242,210,138,0.35) 66.66%, rgba(242,210,138,0.35) 67%, transparent 67%);
+    linear-gradient(to right, transparent 33.33%, rgba(224,149,79,0.35) 33.33%, rgba(224,149,79,0.35) 33.66%, transparent 33.66%, transparent 66.66%, rgba(224,149,79,0.35) 66.66%, rgba(224,149,79,0.35) 67%, transparent 67%),
+    linear-gradient(to bottom, transparent 33.33%, rgba(224,149,79,0.35) 33.33%, rgba(224,149,79,0.35) 33.66%, transparent 33.66%, transparent 66.66%, rgba(224,149,79,0.35) 66.66%, rgba(224,149,79,0.35) 67%, transparent 67%);
 }
 #crop_overlay .crop-handle {
   position: absolute;
   width: 12px;
   height: 12px;
-  background: #f2d28a;
+  background: var(--dr-accent);
   border: 1px solid #1a1a1a;
   border-radius: 2px;
   box-sizing: border-box;
@@ -612,8 +734,8 @@ body.drawer-collapsed #drawer_host {
   50% { filter: brightness(1.08); }
 }
 @keyframes db-wave-ring {
-  0%, 100% { box-shadow: 0 0 0 6px rgba(255, 184, 77, 0.16), 0 0 22px rgba(255, 170, 40, 0.28); }
-  50% { box-shadow: 0 0 0 10px rgba(255, 184, 77, 0.28), 0 0 34px rgba(255, 170, 40, 0.45); }
+  0%, 100% { box-shadow: 0 0 0 6px rgba(224, 149, 79, 0.18), 0 0 22px rgba(224, 149, 79, 0.3); }
+  50% { box-shadow: 0 0 0 10px rgba(224, 149, 79, 0.3), 0 0 34px rgba(224, 149, 79, 0.48); }
 }
 @keyframes db-card-breathe {
   0%, 100% { opacity: 0.34; transform: translate(-50%, -50%) scale(0.96); }
@@ -630,7 +752,7 @@ body.db-exposing #live_preview *,
   cursor: none !important;
 }
 #live_preview.db-waving {
-  outline: 3px solid #ffb84d !important;
+  outline: 3px solid var(--dr-accent) !important;
   animation: db-wave-pulse 1.1s ease-in-out infinite, db-wave-ring 1.1s ease-in-out infinite;
 }
 .db_clock_hidden {
@@ -650,6 +772,31 @@ body.db-exposing #live_preview *,
 # (or bare statements), not a bare () => {} which never runs.
 UI_JS = """
 (() => {
+  // ——— Minimal lucide-style line icons for the rail (no icon font needed) ———
+  const RAIL_ICONS = {
+    ingest: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+    develop: '<path d="M14 2v6a2 2 0 0 0 .24.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.75-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.45 15h11.1"/><path d="M8.5 2h7"/>',
+    print: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>',
+    frame: '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
+    log: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
+    new: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  };
+  const RAIL_LABELS = { ingest: 'Ingest', develop: 'Dev', print: 'Print', frame: 'Frame', log: 'Log', new: 'New' };
+  const svgWrap = (inner) =>
+    `<svg class="rail-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`;
+  const installRailIcons = () => {
+    Object.keys(RAIL_ICONS).forEach((key) => {
+      const btn = document.getElementById('rail_' + key);
+      if (!btn || btn.dataset.iconReady === '1') return;
+      btn.dataset.iconReady = '1';
+      btn.innerHTML =
+        `<span class="rail-glyph">${svgWrap(RAIL_ICONS[key])}</span>` +
+        `<span class="rail-label">${RAIL_LABELS[key]}</span>`;
+    });
+  };
+  installRailIcons();
+  setInterval(installRailIcons, 1200);
+
   window.__dbPos = '';
   window.__dbGetPos = () => window.__dbPos || '';
   window.__dbToolArmed = true;
@@ -967,7 +1114,7 @@ UI_JS = """
     const frac = Math.min(0.55, Math.max(0.12, flag.frac || 0.28));
     const toolScale = clampToolScale(window.__dbToolScale || 1);
     const size = Math.max(40, frac * Math.min(r.width, r.height) * 1.15 * toolScale);
-    const stroke = (flag.mode || '').toLowerCase().startsWith('dodge') ? '#66ccff' : '#ffcc66';
+    const stroke = (flag.mode || '').toLowerCase().startsWith('dodge') ? '#6fd1c7' : '#e0954f';
     const svg = tool.querySelector('.db-tool-svg');
     const fillImg = tool.querySelector('.db-tool-fill');
     if (svg) svg.innerHTML = shapePaths(flag.shape, stroke);
@@ -4054,8 +4201,8 @@ def build_ui() -> gr.Blocks:
                     value=tool_workshop_canvas(),
                     brush=gr.Brush(
                         default_size=48,
-                        colors=["#ffcc66", "#ffffff", "#66ccff"],
-                        default_color="#ffcc66",
+                        colors=["#e0954f", "#ffffff", "#6fd1c7"],
+                        default_color="#e0954f",
                         color_mode="defaults",
                     ),
                     eraser=gr.Eraser(),
