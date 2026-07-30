@@ -409,17 +409,84 @@ footer, .gradio-container footer {
   flex: 0 0 40px !important;
   box-sizing: border-box !important;
 }
-/* Camera roll thumbs — compact grid in the narrow ingest drawer. */
-#camera_roll {
+/* Camera roll tab — vertical frame list in its own drawer. */
+#drawer_roll #camera_roll {
   max-width: 100% !important;
 }
-#camera_roll .grid-wrap,
-#camera_roll .gallery-item,
-#camera_roll .thumb {
-  max-width: 100% !important;
+#drawer_roll #camera_roll .grid-wrap,
+#drawer_roll #camera_roll .grid-container,
+#drawer_roll #camera_roll ul,
+#drawer_roll #camera_roll .gallery-container {
+  display: flex !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  gap: 6px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  max-height: min(52vh, 420px) !important;
+  padding: 0 !important;
+  margin: 0 !important;
 }
-#camera_roll img {
+#drawer_roll #camera_roll .thumbnail-item,
+#drawer_roll #camera_roll .gallery-item,
+#drawer_roll #camera_roll li {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 88px !important;
+  min-height: 88px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 1px solid var(--dr-border) !important;
+  border-radius: 6px !important;
+  background: #0a0a0a !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+  cursor: pointer !important;
+  position: relative !important;
+}
+#drawer_roll #camera_roll .thumbnail-item.selected,
+#drawer_roll #camera_roll .gallery-item.selected,
+#drawer_roll #camera_roll li.selected,
+#drawer_roll #camera_roll [aria-selected="true"] {
+  border-color: var(--dr-accent) !important;
+  box-shadow: inset 0 0 0 1px var(--dr-accent) !important;
+}
+#drawer_roll #camera_roll img {
+  width: 100% !important;
+  height: 100% !important;
   object-fit: cover !important;
+}
+#drawer_roll #camera_roll .label,
+#drawer_roll #camera_roll figcaption,
+#drawer_roll #camera_roll .caption {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  margin: 0 !important;
+  padding: 3px 5px !important;
+  font-size: 0.62rem !important;
+  line-height: 1.15 !important;
+  color: var(--dr-text) !important;
+  background: rgba(12, 12, 14, 0.86) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  pointer-events: none !important;
+}
+#drawer_roll #camera_roll .label-wrap,
+#drawer_roll #camera_roll [data-testid="block-label"],
+#drawer_roll #camera_roll .icon-button-wrapper,
+#drawer_roll #camera_roll .icon-button,
+#drawer_roll #camera_roll .top-panel,
+#drawer_roll #camera_roll .download,
+#drawer_roll #camera_roll .icon-wrap {
+  display: none !important;
+}
+#drawer_roll #roll_meta {
+  margin: 0 0 6px !important;
+  font-size: var(--dr-fs-label) !important;
+  color: var(--dr-text-dim) !important;
 }
 
 /* Kill any leftover horizontal scrollbar chrome inside the drawer. */
@@ -3246,6 +3313,7 @@ def _activate_roll_index(state, index: int) -> dict:
 
 
 def _roll_gallery_update(state):
+    """Thumbnails + captions for the Roll drawer."""
     roll = (state or {}).get("roll") or []
     items = []
     for i, frame in enumerate(roll):
@@ -3257,12 +3325,29 @@ def _roll_gallery_update(state):
         name = f"Frame {i + 1}"
         dn = frame.get("dn")
         if dn is not None:
-            name = dn.metadata.get("source", {}).get("original_filename") or name
+            raw = dn.metadata.get("source", {}).get("original_filename") or name
+            name = Path(str(raw)).name
         items.append((thumb, f"{i + 1}. {name}"))
     idx = (state or {}).get("roll_index")
     if not roll or idx is None or int(idx) < 0:
         return gr.update(value=items, selected_index=None)
     return gr.update(value=items, selected_index=int(idx))
+
+
+def _roll_meta_md(state) -> str:
+    roll = (state or {}).get("roll") or []
+    if not roll:
+        return "_No frames yet — add photos from **Ingest**._"
+    idx = int(state.get("roll_index", 0)) + 1
+    dn = (state or {}).get("dn")
+    name = ""
+    if dn is not None:
+        name = dn.metadata.get("source", {}).get("original_filename") or ""
+        name = Path(str(name)).name
+    label = f"**{idx}/{len(roll)}**"
+    if name:
+        label += f" · `{name}`"
+    return f"{label}  \n_Tap a frame to work it · Remove drops the active one._"
 
 
 def _drawer_for_frame(state) -> str:
@@ -4179,13 +4264,14 @@ def _stage_control_updates(state):
         return sample_u, file_u, ingest_u, on, off, off, off, on
     return sample_u, file_u, ingest_u, off, off, off, off, on
 
-def _roll_session_outputs(state):
+def _roll_session_outputs(state, *, drawer: str | None = "roll"):
     """UI tuple shared by add / select / remove on the camera roll."""
     on, off = gr.update(interactive=True), gr.update(interactive=False)
+    empty = {"roll": [], "roll_index": -1}
     if not state or state.get("dn") is None:
         summary = (
             "**1. Ingest — working** → 2. Develop → 3. Print\n\n"
-            "*Add photos to the camera roll to begin.*"
+            "*Add photos from **Ingest** — they collect in the **Roll** tab.*"
         )
         return (
             None,
@@ -4214,9 +4300,10 @@ def _roll_session_outputs(state):
             DEFAULT_CROP_RECT,
             "free",
             None,
-            {"roll": [], "roll_index": -1},
+            empty,
             "ingest",
-            _roll_gallery_update({"roll": [], "roll_index": -1}),
+            _roll_meta_md(empty),
+            _roll_gallery_update(empty),
             off,
         )
 
@@ -4230,7 +4317,7 @@ def _roll_session_outputs(state):
             1,
         )
     elif n > 1 and "frame " not in summary.split("\n", 1)[0]:
-        banner_note = f"_Camera roll · frame {idx}/{n}_\n\n"
+        banner_note = f"_Roll · frame {idx}/{n}_\n\n"
         if banner_note.strip() not in summary:
             summary = summary.replace("\n\n", f"\n\n{banner_note}", 1)
 
@@ -4252,6 +4339,7 @@ def _roll_session_outputs(state):
     if inspect_live is None:
         inspect_live = state.get("latent_inspect")
     mode = state.get("viewer_mode", "live")
+    active = drawer if drawer is not None else _drawer_for_frame(state)
     return (
         gr.update(value=live, label=_VIEWER_LABELS.get(mode, _VIEWER_LABELS["live"])),
         state.get("original_ref"),
@@ -4280,7 +4368,8 @@ def _roll_session_outputs(state):
         "free",
         _inspect_frame(state, live=inspect_live),
         state,
-        _drawer_for_frame(state),
+        active,
+        _roll_meta_md(state),
         _roll_gallery_update(state),
         remove_u,
     )
@@ -4307,26 +4396,27 @@ def commit_ingest(sample_path, file_obj, state):
     if n > 1 or added > 1:
         summary = (
             f"{_stage_banner('development', ['ingest'])}\n\n"
-            f"**Added {added} to camera roll** — frame {new_index + 1}/{n} active  \n"
+            f"**Added {added} to Roll** — frame {new_index + 1}/{n} active  \n"
             f"`{state['dn'].metadata['source']['original_filename']}`  \n"
-            f"_Select a thumbnail to switch · Remove drops the active frame._\n\n"
+            f"_Open the **Roll** tab to switch or remove frames._\n\n"
             f"{_history_md(state['dn'])}"
         )
         state["summary_cache"] = summary
         roll[new_index] = _frame_payload(state)
         state["roll"] = roll
-    return _roll_session_outputs(state)
+    return _roll_session_outputs(state, drawer="roll")
 
 
 def select_roll_frame(state, evt: SelectData | None = None):
     """Switch the working session to a camera-roll thumbnail."""
     if not state or not state.get("roll"):
-        return _roll_session_outputs(state)
+        return _roll_session_outputs(state, drawer="roll")
     index = evt.index if evt is not None else state.get("roll_index", 0)
     if isinstance(index, (list, tuple)):
         index = index[0]
     state = _activate_roll_index(state, int(index))
-    return _roll_session_outputs(state)
+    return _roll_session_outputs(state, drawer="roll")
+
 
 def remove_from_roll(state):
     """Drop the active frame from the camera roll."""
@@ -4350,7 +4440,7 @@ def remove_from_roll(state):
     state["summary_cache"] = summary
     roll[new_idx] = _frame_payload(state)
     state["roll"] = roll
-    return _roll_session_outputs(state)
+    return _roll_session_outputs(state, drawer="roll")
 
 
 def _run_live_develop_then_print(
@@ -5802,9 +5892,11 @@ def reset_session():
         "",
         {"roll": [], "roll_index": -1},
         "ingest",
+        _roll_meta_md({"roll": [], "roll_index": -1}),
         _roll_gallery_update({"roll": [], "roll_index": -1}),
         off,
     )
+
 
 def build_ui() -> gr.Blocks:
     default_sample = SAMPLE_CHOICES[1][1] if len(SAMPLE_CHOICES) > 1 else ""
@@ -5819,6 +5911,9 @@ def build_ui() -> gr.Blocks:
                 rail_ingest = gr.Button(
                     "⬇\nIngest", elem_id="rail_ingest", size="sm",
                     elem_classes=["rail-btn", "rail-active"],
+                )
+                rail_roll = gr.Button(
+                    "▤\nRoll", elem_id="rail_roll", size="sm", elem_classes=["rail-btn"]
                 )
                 rail_develop = gr.Button(
                     "⚗\nDev", elem_id="rail_develop", size="sm", elem_classes=["rail-btn"]
@@ -5845,29 +5940,45 @@ def build_ui() -> gr.Blocks:
                             label="Sample",
                         )
                         file_in = gr.File(
-                            label="Upload to roll",
+                            label="Upload",
                             file_count="multiple",
                             file_types=[
                                 ".arw", ".cr2", ".cr3", ".nef", ".dng", ".raf", ".orf", ".rw2",
                                 ".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp",
                                 ".heic", ".heif", ".avif",
                             ],
-                            height=120,
+                            height=140,
                             elem_id="ingest_upload",
                         )
                         ingest_btn = gr.Button("Add to roll", variant="primary", size="sm")
+                        gr.Markdown(
+                            "_Photos land in the **Roll** tab._",
+                            elem_id="ingest_hint",
+                        )
+
+                with gr.Group(elem_id="drawer_roll", elem_classes=["drawer-panel"]):
+                    with gr.Accordion("Camera roll", open=True, elem_id="acc_roll") as roll_acc:
+                        roll_meta = gr.Markdown(
+                            _roll_meta_md(None),
+                            elem_id="roll_meta",
+                        )
                         roll_gallery = gr.Gallery(
-                            label="Camera roll",
-                            columns=2,
-                            height=150,
+                            label="Frames",
+                            columns=1,
+                            height=380,
                             object_fit="cover",
                             preview=False,
                             allow_preview=False,
+                            show_label=False,
                             elem_id="camera_roll",
                         )
                         remove_roll_btn = gr.Button(
-                            "Remove from roll", size="sm", interactive=False
+                            "Remove frame",
+                            size="sm",
+                            interactive=False,
+                            elem_id="roll_remove",
                         )
+
                 with gr.Group(elem_id="drawer_develop", elem_classes=["drawer-panel"]):
                     with gr.Accordion("Develop", open=True, elem_id="acc_develop") as develop_acc:
                         film = gr.Dropdown(
@@ -6278,7 +6389,7 @@ def build_ui() -> gr.Blocks:
             apply_framing_btn, reset_framing_btn, auto_crop_btn, auto_straighten_btn,
             straighten_deg, crop_rect, crop_ratio,
             inspect_out, state, active_drawer,
-            roll_gallery, remove_roll_btn,
+            roll_meta, roll_gallery, remove_roll_btn,
         ]
 
         ingest_btn.click(
@@ -6564,7 +6675,7 @@ def build_ui() -> gr.Blocks:
                 straighten_deg, crop_rect, crop_ratio,
                 download_trigger, download_modes,
                 state, active_drawer,
-                roll_gallery, remove_roll_btn,
+                roll_meta, roll_gallery, remove_roll_btn,
             ],
         )
         preview_tool.change(
