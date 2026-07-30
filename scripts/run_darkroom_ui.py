@@ -180,7 +180,7 @@ html, body {
   height: 100vh !important;
   max-height: 100vh !important;
   overflow: hidden !important;
-  padding: 4px 6px !important;
+  padding: 0 2px 0 !important;
   box-sizing: border-box !important;
   display: flex !important;
   flex-direction: column !important;
@@ -188,38 +188,58 @@ html, body {
   font-family: var(--dr-font) !important;
   color: var(--dr-text) !important;
 }
+/* Gradio's shell adds page padding, side margins, a max-width and a 16px
+   column gap. Strip it all so the workspace is genuinely full-bleed. */
 .gradio-container > .main,
+.gradio-container .main.fillable,
 .gradio-container .wrap.svelte-1jdub1s,
 .gradio-container .contain {
   flex: 1 1 auto !important;
   min-height: 0 !important;
   height: 100% !important;
+  max-height: 100% !important;
+  max-width: 100% !important;
+  width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  gap: 0 !important;
   overflow: hidden !important;
 }
-#app_header {
-  flex: 0 0 auto !important;
+.gradio-container .contain > .column,
+.gradio-container .main > .wrap > .contain > div {
+  gap: 0 !important;
+  padding: 0 !important;
   margin: 0 !important;
-  padding: 3px 4px 6px !important;
-  border-bottom: 1px solid var(--dr-border) !important;
+  height: 100% !important;
+  min-height: 0 !important;
 }
-#app_header h1 {
-  font-size: 0.92rem !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.02em !important;
-  text-transform: uppercase !important;
-  color: var(--dr-text-dim) !important;
+/* Empty 2px form stub Gradio emits above the workspace. */
+.gradio-container .contain > .column > .form:empty { display: none !important; }
+/* The photo is the point of the app — the title bar is not worth the pixels. */
+#app_header { display: none !important; }
+/* Gradio's footer would otherwise overlap the bottom of the workspace. */
+footer, .gradio-container footer {
+  position: fixed !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: 18px !important;
+  min-height: 0 !important;
+  padding: 0 !important;
   margin: 0 !important;
-  line-height: 1.2 !important;
+  font-size: 0.62rem !important;
+  opacity: 0.35 !important;
+  background: var(--dr-bg-app) !important;
+  z-index: 5 !important;
 }
-#app_header p, #app_header .md, #app_header ul { display: none !important; }
 
-/* Fixed non-scrolling workspace — leave room for Gradio footer.
+/* Fixed non-scrolling workspace — only the slim fixed footer is reserved.
    min-height keeps a short drawer (e.g. Frame) from collapsing the print. */
 #main_workspace {
   flex: 1 1 auto !important;
-  min-height: calc(100vh - 96px) !important;
-  height: 100% !important;
-  max-height: calc(100vh - 64px) !important;
+  min-height: calc(100vh - 20px) !important;
+  height: calc(100vh - 20px) !important;
+  max-height: calc(100vh - 20px) !important;
   display: flex !important;
   flex-direction: row !important;
   flex-wrap: nowrap !important;
@@ -235,13 +255,13 @@ html, body {
 
 /* Icon rail — darktable-style: flat, quiet, accent only on the active stage */
 #icon_rail {
-  flex: 0 0 60px !important;
-  width: 60px !important;
-  max-width: 60px !important;
+  flex: 0 0 42px !important;
+  width: 42px !important;
+  max-width: 42px !important;
   display: flex !important;
   flex-direction: column !important;
-  gap: 3px !important;
-  padding: 6px 5px 8px !important;
+  gap: 1px !important;
+  padding: 3px 3px 4px !important;
   box-sizing: border-box !important;
   border-right: 1px solid var(--dr-border) !important;
   background: var(--dr-bg-app) !important;
@@ -249,15 +269,15 @@ html, body {
   overflow: hidden !important;
 }
 #icon_rail button {
-  min-height: 50px !important;
-  height: 50px !important;
+  min-height: 38px !important;
+  height: 38px !important;
   width: 100% !important;
-  padding: 5px 2px 4px !important;
-  font-size: 0.56rem !important;
-  line-height: 1.1 !important;
+  padding: 3px 1px 2px !important;
+  font-size: 0.48rem !important;
+  line-height: 1 !important;
   white-space: pre-line !important;
-  border-radius: var(--dr-radius) !important;
-  letter-spacing: 0.02em;
+  border-radius: 6px !important;
+  letter-spacing: 0.01em;
   color: var(--dr-text-dim) !important;
   background: transparent !important;
   border: 1px solid transparent !important;
@@ -273,11 +293,11 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 #icon_rail button .rail-svg {
-  width: 19px;
-  height: 19px;
+  width: 16px;
+  height: 16px;
   stroke: currentColor;
   fill: none;
   stroke-width: 1.7;
@@ -287,8 +307,8 @@ html, body {
 }
 #icon_rail button .rail-label {
   display: block;
-  font-size: 0.56rem;
-  line-height: 1.1;
+  font-size: 0.48rem;
+  line-height: 1;
 }
 #icon_rail button.rail-active {
   color: var(--dr-accent-strong) !important;
@@ -299,14 +319,15 @@ html, body {
 
 /* Drawer host — one panel visible; compressed */
 #drawer_host {
-  flex: 0 0 280px !important;
-  width: 280px !important;
-  max-width: 280px !important;
+  flex: 0 0 208px !important;
+  width: 208px !important;
+  max-width: 208px !important;
   min-width: 0 !important;
   height: 100% !important;
+  flex-wrap: nowrap !important;
   overflow-x: hidden !important;
   overflow-y: auto !important;
-  padding: 6px 10px 10px !important;
+  padding: 4px 7px 6px !important;
   box-sizing: border-box !important;
   border-right: 1px solid var(--dr-border) !important;
   background: var(--dr-bg-panel) !important;
@@ -335,28 +356,34 @@ body.drawer-collapsed #drawer_host {
   background: transparent !important;
 }
 #drawer_host .block {
-  margin-top: 2px !important;
-  margin-bottom: 2px !important;
+  margin-top: 1px !important;
+  margin-bottom: 1px !important;
   padding: 0 !important;
 }
 #drawer_host .label-wrap,
 #drawer_host label {
   margin-bottom: 0 !important;
-  font-size: 0.78rem !important;
+  font-size: 0.68rem !important;
+  line-height: 1.15 !important;
 }
-#drawer_host .form { gap: 3px !important; }
-#drawer_host button { min-height: 30px !important; font-size: 0.82rem !important; }
+#drawer_host .form { gap: 2px !important; }
+#drawer_host button { min-height: 24px !important; font-size: 0.7rem !important; padding: 2px 6px !important; }
+#drawer_host input, #drawer_host select, #drawer_host .wrap-inner {
+  font-size: 0.7rem !important;
+  min-height: 24px !important;
+}
+#drawer_host .head, #drawer_host .tab-nav { font-size: 0.7rem !important; }
 #ingest_upload,
 #ingest_upload .wrap,
 #ingest_upload .upload-container,
 #ingest_upload .center,
 #ingest_upload [data-testid="file"] {
   overflow: visible !important;
-  min-height: 120px !important;
+  min-height: 74px !important;
 }
 #ingest_upload .wrap {
   height: auto !important;
-  min-height: 120px !important;
+  min-height: 74px !important;
 }
 #ingest_upload .upload-container,
 #ingest_upload .center {
@@ -364,9 +391,10 @@ body.drawer-collapsed #drawer_host {
   flex-direction: column !important;
   justify-content: center !important;
   align-items: center !important;
-  padding: 12px 8px !important;
-  min-height: 110px !important;
+  padding: 6px 6px !important;
+  min-height: 68px !important;
   box-sizing: border-box !important;
+  font-size: 0.68rem !important;
 }
 #ingest_upload button,
 #ingest_upload .or,
@@ -385,12 +413,18 @@ body.drawer-collapsed #drawer_host {
   overflow-y: auto !important;
 }
 #ritual_status {
-  font-size: 0.78rem !important;
+  font-size: 0.6rem !important;
   line-height: 1.25 !important;
-  margin: 0 0 6px 0 !important;
+  margin: 0 0 3px 0 !important;
+  padding: 0 !important;
+  color: var(--dr-text-dim) !important;
+  max-height: 96px !important;
+  overflow-y: auto !important;
 }
+#ritual_status p { margin: 0 0 2px 0 !important; }
+#ritual_status strong { color: var(--dr-text) !important; }
 #history_box {
-  max-height: calc(100vh - 120px) !important;
+  max-height: calc(100vh - 90px) !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
   font-size: 0.8rem !important;
@@ -409,21 +443,37 @@ body.drawer-collapsed #drawer_host {
 #preview_col {
   flex: 1 1 auto !important;
   min-width: 0 !important;
-  min-height: calc(100vh - 96px) !important;
-  height: 100% !important;
+  min-height: calc(100vh - 22px) !important;
+  height: calc(100vh - 22px) !important;
   display: flex !important;
   flex-direction: column !important;
-  gap: 4px !important;
-  padding: 2px 4px 4px !important;
+  flex-wrap: nowrap !important;
+  gap: 2px !important;
+  padding: 2px 3px 2px !important;
   box-sizing: border-box !important;
   overflow: hidden !important;
   z-index: 1 !important;
   position: relative !important;
 }
-#db_wave_banner,
+/* The status pill floats over the print instead of reserving a strip of it. */
 #db_size_readout {
-  flex: 0 0 auto !important;
+  position: absolute !important;
+  top: 5px !important;
+  left: 10px !important;
+  z-index: 6 !important;
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  pointer-events: none !important;
 }
+#db_wave_banner {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+#db_wave_banner:empty { display: none !important; }
 #preview_col > .block:has(#live_preview),
 #live_preview {
   flex: 1 1 0 !important;
@@ -480,44 +530,100 @@ body.drawer-collapsed #drawer_host {
   background: transparent !important;
   overflow: hidden !important;
 }
-#live_preview .label-wrap {
+/* Keep the print's own caption, but pin it top-right so it can't collide
+   with the mode pill floating at top-left. */
+#live_preview .label-wrap,
+#live_preview [data-testid="block-label"] {
   position: absolute !important;
-  top: 4px !important;
-  left: 8px !important;
+  top: 5px !important;
+  right: 8px !important;
+  left: auto !important;
   z-index: 2 !important;
-  opacity: 0.55 !important;
+  opacity: 0.5 !important;
   pointer-events: none !important;
-  font-size: 0.7rem !important;
-  background: transparent !important;
+  font-size: 0.62rem !important;
+  line-height: 1 !important;
+  padding: 2px 7px !important;
+  border: none !important;
+  border-radius: 999px !important;
+  background: rgba(20, 20, 23, 0.72) !important;
+  white-space: nowrap !important;
 }
+#live_preview [data-testid="block-label"] svg { display: none !important; }
+/* Filmstrip — thin, fixed height, never allowed to push past the viewport */
 #seq_strip {
   flex: 0 0 auto !important;
-  gap: 6px !important;
-  align-items: flex-end !important;
-  min-height: 96px !important;
-  max-height: none !important;
-  overflow: visible !important;
-  padding-bottom: 2px !important;
+  flex-wrap: nowrap !important;
+  gap: 4px !important;
+  align-items: center !important;
+  height: 46px !important;
+  min-height: 46px !important;
+  max-height: 46px !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  margin: 0 !important;
 }
 #seq_strip .block {
-  overflow: visible !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  /* Without an explicit height these blocks render 56px and spill out of the
+     46px strip, clipping against the footer. */
+  height: 44px !important;
+  min-height: 44px !important;
+  max-height: 44px !important;
+  align-self: center !important;
 }
 #seq_strip .image-container,
-#seq_strip .image-frame {
-  height: 56px !important;
-  min-height: 56px !important;
-  max-height: 56px !important;
+#seq_strip .image-frame,
+#seq_strip [data-testid="image"],
+#seq_strip .image-container > button {
+  height: 44px !important;
+  min-height: 44px !important;
+  max-height: 44px !important;
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 1px solid var(--dr-border) !important;
+  border-radius: 5px !important;
+  background: #0a0a0a !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
 }
-#seq_strip .label-wrap {
-  font-size: 0.7rem !important;
-  margin: 0 !important;
-  line-height: 1.1 !important;
+#seq_strip .image-container > button { border: none !important; }
+/* Strip the Gradio label bar and hover buttons off the thumbs — they were
+   eating the whole 44px, leaving the actual frame as a sliver. */
+#seq_strip [data-testid="block-label"],
+#seq_strip .label-wrap,
+#seq_strip .icon-button-wrapper,
+#seq_strip .icon-button,
+#seq_strip .top-panel,
+#seq_strip .icon-wrap,
+#seq_strip .download,
+#seq_strip .image-button-row,
+#seq_strip [aria-label="Fullscreen"] {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
-#seq_strip img { max-height: 52px !important; object-fit: contain !important; }
+#seq_strip img {
+  max-height: 42px !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 4px !important;
+}
 #seq_strip button {
-  min-height: 28px !important;
-  font-size: 0.72rem !important;
-  padding: 2px 8px !important;
+  min-height: 22px !important;
+  height: 22px !important;
+  font-size: 0.62rem !important;
+  padding: 1px 6px !important;
+  border-radius: 5px !important;
 }
 #preview_tool, #active_drawer, #crop_rect, #db_pos {
   position: absolute !important;
@@ -538,9 +644,9 @@ body.drawer-collapsed #drawer_host {
 
 /* ——— Persistent module panel (darktable-style, right side) ——— */
 #module_panel {
-  flex: 0 0 300px !important;
-  width: 300px !important;
-  max-width: 300px !important;
+  flex: 0 0 226px !important;
+  width: 226px !important;
+  max-width: 226px !important;
   min-width: 0 !important;
   height: 100% !important;
   /* Gradio's own Column class defaults to flex-wrap: wrap — once open modules'
@@ -549,7 +655,7 @@ body.drawer-collapsed #drawer_host {
   flex-wrap: nowrap !important;
   overflow-x: hidden !important;
   overflow-y: auto !important;
-  padding: 6px 10px 14px !important;
+  padding: 3px 6px 6px !important;
   box-sizing: border-box !important;
   border-left: 1px solid var(--dr-border) !important;
   background: var(--dr-bg-panel) !important;
@@ -567,17 +673,18 @@ body.module-collapsed #module_panel {
   pointer-events: none !important;
 }
 .module_panel_title {
-  font-size: 0.68rem;
+  font-size: 0.58rem;
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--dr-text-faint);
-  margin: 4px 2px 8px;
+  margin: 1px 2px 4px;
 }
 #module_panel .gr-accordion {
-  margin: 0 0 8px 0 !important;
+  margin: 0 0 4px 0 !important;
+  padding: 0 !important;
   border: 1px solid var(--dr-border) !important;
-  border-radius: var(--dr-radius) !important;
+  border-radius: 7px !important;
   background: var(--dr-bg-elevated) !important;
   box-shadow: none !important;
   overflow: hidden !important;
@@ -587,12 +694,13 @@ body.module-collapsed #module_panel {
   flex-shrink: 0 !important;
 }
 #module_panel .gr-accordion > .label-wrap {
-  padding: 9px 12px !important;
-  font-size: 0.8rem !important;
+  padding: 5px 8px !important;
+  font-size: 0.68rem !important;
   font-weight: 600 !important;
   letter-spacing: 0.01em !important;
   color: var(--dr-text) !important;
   margin: 0 !important;
+  min-height: 0 !important;
   border-bottom: 1px solid transparent !important;
 }
 #module_panel .gr-accordion > .label-wrap:hover {
@@ -607,17 +715,55 @@ body.module-collapsed #module_panel {
   stroke: var(--dr-accent-strong) !important;
 }
 #module_panel .gr-accordion .form {
-  padding: 4px 12px 12px !important;
-  gap: 6px !important;
+  padding: 2px 7px 6px !important;
+  gap: 3px !important;
+}
+#module_panel .block {
+  margin: 1px 0 !important;
+  padding: 0 !important;
+}
+#module_panel label,
+#module_panel .label-wrap span,
+#module_panel .head {
+  font-size: 0.64rem !important;
+  line-height: 1.15 !important;
+  margin-bottom: 0 !important;
+}
+#module_panel button {
+  min-height: 22px !important;
+  font-size: 0.65rem !important;
+  padding: 2px 6px !important;
+}
+#module_panel .prose,
+#module_panel .prose p,
+#module_panel .md {
+  font-size: 0.63rem !important;
+  line-height: 1.25 !important;
+  margin: 1px 0 !important;
+}
+#module_panel input, #module_panel select { font-size: 0.65rem !important; }
+/* Radio pills wrap two-up instead of one tall column per option. */
+#module_panel .wrap:has(> label input[type="radio"]),
+#module_panel fieldset .wrap {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 3px !important;
+}
+#module_panel fieldset label {
+  padding: 2px 6px !important;
+  font-size: 0.62rem !important;
+  line-height: 1.15 !important;
+  min-height: 0 !important;
+  flex: 0 1 auto !important;
 }
 .mod-icon {
   display: inline-flex;
-  vertical-align: -3px;
-  margin-right: 6px;
+  vertical-align: -2px;
+  margin-right: 5px;
 }
 .mod-icon svg {
-  width: 15px;
-  height: 15px;
+  width: 13px;
+  height: 13px;
   stroke: currentColor;
   fill: none;
   stroke-width: 1.8;
@@ -652,15 +798,24 @@ body.module-collapsed #module_panel {
 
 /* Compact leftovers from older layout ids */
 #controls_col { display: contents !important; }
-#db_size_readout { font-size: 0.72rem !important; opacity: 0.85; color: var(--dr-text-dim) !important; }
+#db_size_readout {
+  font-size: 0.62rem !important;
+  opacity: 0.9;
+  color: var(--dr-text-dim) !important;
+  white-space: nowrap !important;
+  line-height: 1 !important;
+}
+#db_size_readout .prose, #db_size_readout .html-container { padding: 0 !important; margin: 0 !important; }
 #db_size_readout .db-size-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 10px;
+  gap: 4px;
+  padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid var(--dr-border);
-  background: var(--dr-bg-elevated);
+  background: rgba(20, 20, 23, 0.82);
+  backdrop-filter: blur(3px);
+  white-space: nowrap;
 }
 #db_size_readout .db-tool-mode {
   color: var(--dr-accent-strong);
@@ -1903,17 +2058,16 @@ UI_JS = """
       if (!col || !live) return;
       const colRect = col.getBoundingClientRect();
       if (colRect.height < 80) return;
-      let used = 12;
-      ['#db_wave_banner', '#db_size_readout', '#seq_strip'].forEach((sel) => {
+      // #db_size_readout is absolutely positioned over the print, so it costs
+      // no vertical budget. Only the wave banner and filmstrip do.
+      let used = 6;
+      ['#db_wave_banner', '#seq_strip'].forEach((sel) => {
         const el = document.querySelector(sel);
         if (!el) return;
         const cs = getComputedStyle(el);
         if (cs.display === 'none' || cs.visibility === 'hidden') return;
-        // Prefer scrollHeight so labeled thumbs aren't clipped out of the budget.
-        used += Math.max(el.getBoundingClientRect().height, el.scrollHeight || 0);
+        used += el.getBoundingClientRect().height;
       });
-      // Keep a little air above the Gradio footer.
-      used += 8;
       const h = Math.max(200, Math.floor(colRect.height - used));
       const hPx = h + 'px';
       if (live.dataset.fitH === hPx) return;
