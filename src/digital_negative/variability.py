@@ -13,17 +13,17 @@ def process_micro_variation(
 ) -> np.ndarray:
     """Apply very low-amplitude, spatially smooth density drift.
 
-    Mimics tiny tank / agitation unevenness. Noticeable on close inspection,
-    never a texture overlay. Strength 1.0 ≈ ±0.01–0.02 density in midtones.
+    Mimics tiny tank / agitation unevenness. Perceptible on a quiet print,
+    never chaotic. Strength 1.0 ≈ ±0.015–0.025 density in midtones.
     """
-    amp = 0.014 * float(np.clip(strength, 0.0, 2.0))
+    amp = 0.018 * float(np.clip(strength, 0.0, 2.0))
     if amp <= 1e-6:
         return density
 
     rng = np.random.default_rng((int(process_seed) ^ 0xA5A5) & 0x7FFFFFFF)
     h, w = density.shape[:2]
-    # Coarse grid, then upsample — keeps variation large-scale / soft
-    gh, gw = max(4, h // 64), max(4, w // 64)
+    # Slightly finer coarse grid — still soft, a bit more "living material"
+    gh, gw = max(4, h // 48), max(4, w // 48)
     field = rng.standard_normal((gh, gw), dtype=np.float32)
     # Separable blur via repeated box (cheap, dependency-free)
     for _ in range(2):

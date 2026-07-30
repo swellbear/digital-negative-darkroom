@@ -170,6 +170,36 @@ def test_spike_alias_skips_print(tmp_path: Path):
     assert artifacts.developed_preview.exists()
 
 
+def test_contrast_modifier_steepens_curve():
+    profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
+    flat = modify_curve(profile, contrast_modifier=-0.8)
+    steep = modify_curve(profile, contrast_modifier=0.8)
+    lo = np.array([1.7])
+    hi = np.array([3.0])
+    flat_span = float(flat.density_from_log_exposure(hi)[0] - flat.density_from_log_exposure(lo)[0])
+    steep_span = float(
+        steep.density_from_log_exposure(hi)[0] - steep.density_from_log_exposure(lo)[0]
+    )
+    assert steep_span > flat_span
+
+
+def test_high_definition_is_leaner_grain_than_standard():
+    from digital_negative.curves import DEVELOPER_STYLES
+
+    assert DEVELOPER_STYLES["high_definition"]["grain_bias"] < DEVELOPER_STYLES["standard"]["grain_bias"]
+    assert DEVELOPER_STYLES["high_definition"]["density_bias"] < DEVELOPER_STYLES["standard"]["density_bias"]
+
+
+def test_pull_reduces_highlight_density():
+    profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
+    normal = modify_curve(profile, relative_time=1.0)
+    pulled = modify_curve(profile, relative_time=0.7)
+    hi = np.array([3.2])
+    assert float(pulled.density_from_log_exposure(hi)[0]) < float(
+        normal.density_from_log_exposure(hi)[0]
+    )
+
+
 def test_preview_develop_does_not_commit_history():
     dn = ingest_path(None)
     profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
