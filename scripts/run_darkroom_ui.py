@@ -3845,8 +3845,11 @@ def commit_develop(film_id, developer_id, development_minutes, contrast, grain, 
     neg_download = _write_negative_package(neg_full, dn)
     state["dl_negative"] = neg_download
     return (
+        # Only the negative exists at this point, and the button already says
+        # so — a one-option menu would just be noise. It appears once Commit
+        # Print gives it something to actually choose between.
         gr.update(
-            choices=[("Negative", "negative")], value="negative", visible=True
+            choices=[("Negative", "negative")], value="negative", visible=False
         ),
         gr.update(value=neg_download, label="⇣ Download negative", visible=True),
         _viewer_frame(state, live=live_view, neg=neg_view),
