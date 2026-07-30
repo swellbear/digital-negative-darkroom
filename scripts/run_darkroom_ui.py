@@ -260,6 +260,23 @@ UI_CSS = """
   opacity: 0.9;
   margin: 2px 0 6px 0 !important;
 }
+#db_size_readout {
+  margin: 0 0 8px 0 !important;
+  font-size: 0.85rem !important;
+  color: #d8c49a;
+  letter-spacing: 0.02em;
+}
+#db_size_readout .db-size-pill {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(255, 184, 77, 0.12);
+  border: 1px solid rgba(255, 184, 77, 0.35);
+}
+#first_print_guide button {
+  min-height: 40px !important;
+  font-weight: 650 !important;
+}
 /* Hide Gradio Timer chrome — it shows a running stopwatch and looks like
    the dodge/burn countdown never stops. We only use it as a 1s tick source. */
 .db_clock_hidden {
@@ -427,6 +444,13 @@ UI_JS = """
 
   const clampToolScale = (s) => Math.min(2.75, Math.max(0.35, s));
 
+  const updateSizeReadout = () => {
+    const el = document.querySelector('#db_size_readout .db-size-value');
+    if (!el) return;
+    const pct = Math.round(clampToolScale(window.__dbToolScale || 1) * 100);
+    el.textContent = pct + '%';
+  };
+
   const formatPos = (nx, ny) =>
     Number(nx).toFixed(4) + ',' + Number(ny).toFixed(4) + ',' + clampToolScale(window.__dbToolScale || 1).toFixed(3);
 
@@ -479,6 +503,7 @@ UI_JS = """
         e.preventDefault();
         const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
         window.__dbToolScale = clampToolScale((window.__dbToolScale || 1) * factor);
+        updateSizeReadout();
         const n = (() => {
           const r = img.getBoundingClientRect();
           if (r.width < 2 || r.height < 2) return null;
@@ -774,6 +799,7 @@ UI_JS = """
     });
   };
   boot();
+  updateSizeReadout();
   // Only track the print for tool cursor — never hijack control clicks (upload, etc.).
   const liveRoot = () => document.querySelector('#live_preview');
   document.addEventListener('pointermove', (e) => {
@@ -1928,6 +1954,10 @@ def start_dodge_burn(
     # Seed last pointer (and scroll size) so a resting card still applies.
     state["db_last_pos"] = [float(seed_nx), float(seed_ny)]
     state["db_applied_ticks"] = 0
+    # Snapshot the print so we can describe darken/lighten when the timer ends.
+    before = state.get("live_rgb")
+    if before is not None:
+        state["db_before_rgb"] = np.asarray(before).copy()
     ensure_accum(state, h, w)
 
     verb = "Dodging" if mode == "dodge" else "Burning"
@@ -2074,14 +2104,33 @@ def tick_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, pos, 
     else:
         mode = state.get("db_mode", "burn")
         verb = "Dodge" if mode == "dodge" else "Burn"
+        expect = "lighter" if mode == "dodge" else "darker"
         status = (
-            f"**Exposure done** — {verb} peak {peak:.2f} stops on the print. "
-            "Inspect below. Start again for another pass, or Reset."
+            f"**Exposure done** — {verb} peak **{peak:.2f} stops** "
+            f"(should read **{expect}** on the print). "
+            "Start again for another pass, or Reset."
         )
 
     live, timer_md, st, hi, state = _db_refresh_print(
         paper_id, print_exposure, print_grade, print_contrast, state, status_md=status
     )
+    before = state.pop("db_before_rgb", None)
+    if before is not None and live is not None and peak >= 1e-4:
+        try:
+            b = float(np.mean(np.asarray(before, dtype=np.float32)))
+            a = float(np.mean(np.asarray(live, dtype=np.float32)))
+            if b > 1.5:
+                b, a = b / 255.0, a / 255.0
+            delta = a - b
+            if abs(delta) >= 0.002:
+                word = "lightened" if delta > 0 else "darkened"
+                pct = abs(delta) / max(b, 1e-6) * 100.0
+                note = f" Print mean **{word} ~{pct:.1f}%** vs pre-pass."
+                st = f"{st}\n\n{note}" if isinstance(st, str) else st
+                if isinstance(state.get("summary_cache"), str):
+                    state["summary_cache"] = state["summary_cache"] + f"\n\n{note}"
+        except Exception:
+            pass
     return (
         gr.update(value=live, label=LIVE_PRINT_LABEL),
         timer_md,
@@ -2313,18 +2362,18 @@ def guided_first_print(
 
     guide = (
         f"{_stage_banner('print', _locks(state))}\n\n"
-        f"**First-print guide ready**  \n"
-        f"1. Base timer is **{float(print_exposure):g}s**  \n"
-        f"2. Card shape is **soft oval** — change it if you want  \n"
-        f"3. Click **Start — wave over print →**  \n"
-        f"4. Move over the **highlighted print on the right** until the timer ends  \n"
-        f"5. Inspect the change · Reset local work if you don’t like it\n\n"
+        f"**First-print guide ready — you’re on the easel**  \n"
+        f"1. Base timer **{float(print_exposure):g}s** (change if you want)  \n"
+        f"2. Soft-oval card loaded — **scroll** over the print to resize  \n"
+        f"3. Mode defaults to **burn (darker)** — switch to dodge for lighter  \n"
+        f"4. **Start — wave over print →** and move on the highlighted print  \n"
+        f"5. When the timer ends, read the before/after note · Reset clears the pass\n\n"
         f"{_history_md(state['dn'])}"
     )
     state["summary_cache"] = guide
     st, hi = _split_summary(guide)
     timer_md = (
-        "**Ready for the easel** — soft oval card loaded.\n\n"
+        "**Ready for the easel** — soft oval loaded. Scroll to size, then Start.\n\n"
         f"{_pass_math_md(print_exposure, 4.0, 'burn')}"
     )
     return (
@@ -2447,11 +2496,15 @@ def build_ui() -> gr.Blocks:
         )
         with gr.Accordion("First print (≈2 min)", open=True, elem_id="first_print_guide"):
             gr.Markdown(
-                "New here? Click **Run first-print guide** — it locks Ingest + Develop with the "
-                "current sample/settings, opens Print, and loads a soft-oval card. Then "
-                "**Start — wave over print →** and move on the print at right."
+                "New here? **Run first-print guide** locks Ingest + Develop with the current "
+                "sample, opens Print with a soft-oval card, and leaves you on the easel. "
+                "Then scroll to size the card and **Start — wave over print →**."
             )
-            guide_btn = gr.Button("Run first-print guide", variant="secondary", size="sm")
+            guide_btn = gr.Button(
+                "▶ Run first-print guide",
+                variant="primary",
+                size="sm",
+            )
 
         with gr.Row(elem_id="main_workspace", equal_height=False):
             with gr.Column(scale=0, elem_id="controls_col", min_width=300):
@@ -2603,6 +2656,10 @@ def build_ui() -> gr.Blocks:
 
             with gr.Column(scale=1, elem_id="preview_col", min_width=480):
                 db_wave_banner = gr.HTML(_wave_banner_html(None), elem_id="db_wave_banner")
+                db_size_readout = gr.HTML(
+                    '<div class="db-size-pill">Card size <strong class="db-size-value">100%</strong> · scroll over print to resize · Ctrl/⌘+scroll zooms</div>',
+                    elem_id="db_size_readout",
+                )
                 live_out = gr.Image(
                     label=LIVE_PRINT_LABEL,
                     type="numpy",

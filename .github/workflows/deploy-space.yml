@@ -1,0 +1,33 @@
+name: Deploy Hugging Face Space
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app.py"
+      - "README.md"
+      - "requirements.txt"
+      - "runtime.txt"
+      - "src/**"
+      - "scripts/run_darkroom_ui.py"
+      - "profiles/**"
+      - "samples/**"
+      - ".github/workflows/deploy-space.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Skips quietly until you add repo secret HF_TOKEN (write token).
+    if: ${{ secrets.HF_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install hub
+        run: pip install -U "huggingface_hub[cli]"
+      - name: Deploy Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ vars.HF_SPACE_ID }}
+        run: bash scripts/deploy_space.sh

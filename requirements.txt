@@ -5,5 +5,6 @@ pillow-heif>=0.16
 rawpy>=0.19
 imageio>=2.31
 tifffile>=2023.1
-gradio>=4.0
+gradio>=6.0,<7
+huggingface_hub>=0.26
 pytest>=8.0
