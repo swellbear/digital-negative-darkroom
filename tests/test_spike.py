@@ -412,6 +412,35 @@ def test_parse_crop_rect_box_to_edge_trims():
     assert full == (0.0, 0.0, 0.0, 0.0)
 
 
+def test_auto_crop_rule_of_thirds_places_subject():
+    from digital_negative.auto_crop import format_crop_rect, suggest_crop_box
+
+    # Bright subject in the upper-left quadrant on a dark field.
+    img = np.zeros((200, 300), dtype=np.float32)
+    img[30:70, 40:90] = 1.0
+    box = suggest_crop_box(img, rule="rule_of_thirds", aspect_ratio=3 / 2)
+    assert 0.2 <= box["w"] <= 1.0
+    assert 0.2 <= box["h"] <= 1.0
+    assert abs(box["w"] / box["h"] - 1.5) < 0.08
+    # Subject should land near a thirds intersection inside the crop.
+    sx = (box["subject"]["x"] - box["x"]) / box["w"]
+    sy = (box["subject"]["y"] - box["y"]) / box["h"]
+    assert min(abs(sx - 1 / 3), abs(sx - 2 / 3)) < 0.22
+    assert min(abs(sy - 1 / 3), abs(sy - 2 / 3)) < 0.22
+    rect = format_crop_rect(box)
+    assert len(rect.split(",")) == 4
+
+    auto = suggest_crop_box(img, rule="auto", aspect_ratio=None)
+    assert auto["w"] * auto["h"] < 0.999
+    assert auto["rule"] in {
+        "rule_of_thirds",
+        "golden_ratio",
+        "center",
+        "horizon_thirds",
+        "leading_room",
+    }
+
+
 def test_resolve_input_prefers_upload_over_sample():
     sys.path.insert(0, str(ROOT / "scripts"))
     # Import after path setup — module lives as scripts/run_darkroom_ui.py
