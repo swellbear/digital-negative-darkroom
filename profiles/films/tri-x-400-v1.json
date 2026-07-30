@@ -2,7 +2,7 @@
   "id": "tri-x-400-v1",
   "name": "Tri-X 400",
   "type": "bw",
-  "version": "1.2",
+  "version": "1.3",
   "iso": 400,
   "manufacturer": "Kodak Alaris / Kodak Professional",
   "grain_scale": 1.12,
@@ -11,8 +11,8 @@
     "reference_url": "https://business.kodakmoments.com/sites/default/files/files/resources/f4017_TriX.pdf",
     "process": "KODAK PROFESSIONAL D-76, large tank, ~7\u00be\u20138 minutes at 20\u00b0C (CI \u2248 0.56 starting recommendation). Curve family digitized at 6/8/10/12 min.",
     "digitization_date": "2026-07-30",
-    "digitization_notes": "v1.2: Tri-X D-76 and T-MAX use multi-time characteristic curve families digitized from F-4017 (interpolated between published times). Other chemistries still morph from the D-76 ~8 min base with character biases. Re-digitize from high-res plots for production.",
-    "chemistry_notes": "D-76 and T-MAX: true curve-family path (chemistry\u00d7time). Other named developers: datasheet normals + CI/time morph of the D-76 base until their curve families are digitized."
+    "digitization_notes": "v1.3: Tri-X D-76 and T-MAX use multi-time characteristic curve families digitized from F-4017 (interpolated between published times). HC-110 and XTOL keep datasheet CI×time morphs of the D-76 base — F-4017 publishes times/CI for those baths but not multi-time D–logE families comparable to the D-76/T-MAX plots. Re-digitize from high-res plots for production.",
+    "chemistry_notes": "D-76 and T-MAX: true curve-family path (chemistry×time). HC-110 (B), XTOL, and other named developers: datasheet normals + CI/time morph of the D-76 base until published multi-time curve families are digitized."
   },
   "curve": {
     "x_label": "relative_log_exposure",

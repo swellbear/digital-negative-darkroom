@@ -451,3 +451,73 @@ def tool_workshop_canvas(height: int = 480, width: int = 480) -> dict[str, Any]:
     bg = np.zeros((h, w, 3), dtype=np.uint8)
     bg[:] = (32, 32, 34)
     return {"background": bg, "layers": [], "composite": bg}
+
+
+CARD_PRESETS = (
+    ("soft_oval", "Soft oval (default card)"),
+    ("circle", "Circle"),
+    ("finger", "Finger / wand"),
+    ("card", "Hard rectangle"),
+    ("custom", "Custom (paint shape)"),
+)
+
+
+def preset_stamp(
+    kind: str,
+    *,
+    target_height: int,
+    target_width: int,
+    frac: float = 0.28,
+    feather_px: float = 6.0,
+) -> np.ndarray:
+    """Build a reusable enlarger-card stamp in print pixel space."""
+    h = max(32, int(target_height))
+    w = max(32, int(target_width))
+    side = max(16, int(round(min(h, w) * float(frac))))
+    yy, xx = np.mgrid[0:side, 0:side].astype(np.float32)
+    cy = (side - 1) * 0.5
+    cx = (side - 1) * 0.5
+    kind = str(kind or "soft_oval").lower()
+
+    if kind in {"circle", "round"}:
+        rr = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+        stamp = (rr <= side * 0.42).astype(np.float32)
+    elif kind in {"finger", "wand"}:
+        # Soft vertical finger / wand
+        nx = (xx - cx) / max(side * 0.18, 1.0)
+        ny = (yy - cy) / max(side * 0.46, 1.0)
+        stamp = (nx * nx + ny * ny <= 1.0).astype(np.float32)
+    elif kind in {"card", "rect", "rectangle"}:
+        margin = max(1, int(side * 0.12))
+        stamp = np.zeros((side, side), dtype=np.float32)
+        stamp[margin : side - margin, margin : side - margin] = 1.0
+    else:
+        # Soft oval card (default)
+        nx = (xx - cx) / max(side * 0.38, 1.0)
+        ny = (yy - cy) / max(side * 0.28, 1.0)
+        stamp = (nx * nx + ny * ny <= 1.0).astype(np.float32)
+
+    if feather_px and feather_px > 0.5:
+        stamp = gaussian_filter(stamp, sigma=float(feather_px) * 0.45)
+        if stamp.max() > 1e-6:
+            stamp = stamp / float(stamp.max())
+    return np.clip(stamp, 0.0, 1.0).astype(np.float32)
+
+
+def resolve_tool_stamp(
+    shape_id: str,
+    editor_value: dict[str, Any] | None,
+    *,
+    target_height: int,
+    target_width: int,
+) -> np.ndarray | None:
+    """Preset card silhouette, or a custom painted stamp from the workshop."""
+    kind = str(shape_id or "soft_oval").lower()
+    if kind != "custom":
+        return preset_stamp(kind, target_height=target_height, target_width=target_width)
+    return extract_tool_stamp(
+        editor_value,
+        feather_px=4.0,
+        target_height=target_height,
+        target_width=target_width,
+    )

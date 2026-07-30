@@ -493,6 +493,22 @@ def test_dodge_burn_timer_darkens_and_lightens():
     assert float(placed[50, 50]) > 0.5
 
 
+def test_preset_stamps_and_resolve():
+    from digital_negative.dodge_burn import (
+        preset_stamp,
+        resolve_tool_stamp,
+        CARD_PRESETS,
+    )
+
+    assert {k for k, _ in CARD_PRESETS} >= {"soft_oval", "circle", "finger", "card", "custom"}
+    oval = preset_stamp("soft_oval", target_height=200, target_width=300)
+    assert oval.shape[0] > 10 and oval.shape[1] > 10
+    assert float(oval.max()) > 0.5
+    circ = resolve_tool_stamp("circle", None, target_height=128, target_width=128)
+    assert circ is not None and float(circ.max()) > 0.5
+    assert resolve_tool_stamp("custom", {"layers": []}, target_height=64, target_width=64) is None
+
+
 def test_dodge_burn_list_stamp_and_last_pos_still_apply():
     """Gradio may round-trip ndarray masks as lists; pointer may briefly drop."""
     from digital_negative.dodge_burn import (
