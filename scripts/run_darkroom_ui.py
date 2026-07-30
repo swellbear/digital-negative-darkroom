@@ -495,9 +495,12 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
 
     # Keep last theoretical print on screen until .then refreshes with Print controls;
     # fall back to positive if no live print was generated yet.
-    live_view = state.get("live_rgb") or _downscale_rgb(
-        _to_rgb_u8(development.positive_preview), LIVE_MAX_SIDE
-    )
+    # Do not use `or` — live_rgb is a numpy array (ambiguous truth value).
+    live_view = state.get("live_rgb")
+    if live_view is None:
+        live_view = _downscale_rgb(
+            _to_rgb_u8(development.positive_preview), LIVE_MAX_SIDE
+        )
     neg_ref = _downscale_rgb(
         _to_rgb_u8(negative_lightbox_preview(development.transmittance)), REF_MAX_SIDE
     )
