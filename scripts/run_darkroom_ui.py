@@ -369,10 +369,15 @@ body.drawer-collapsed #drawer_host {
 }
 /* Slider/number rows: label above, control below, both tight.
    Labels wrapped to two and three lines in a 176px panel, so they're
-   clamped to one line and ellipsised instead. */
+   clamped to one line and ellipsised instead.
+   Gradio nests a <span> inside the <label> that re-declares 14px, so the
+   span has to be targeted too or the text renders full-size and clips. */
 #drawer_host .label-wrap,
 #drawer_host label,
-#drawer_host [data-testid="block-label"] {
+#drawer_host label span,
+#drawer_host .head span,
+#drawer_host [data-testid="block-label"],
+#drawer_host [data-testid="block-label"] span {
   margin: 0 !important;
   padding: 0 !important;
   font-size: var(--dr-fs-label) !important;
@@ -383,11 +388,33 @@ body.drawer-collapsed #drawer_host {
   text-overflow: ellipsis !important;
   max-width: 100% !important;
 }
-/* Radio/checkbox options must stay wrappable — they're multi-word choices. */
+/* Give the label the row: the number box + reset button were taking 82px
+   of a 159px head, squeezing the label to 77px for ~120px of text. */
+#drawer_host .head .tab-like-container,
+#module_panel .head .tab-like-container {
+  flex: 0 0 auto !important;
+  gap: 0 !important;
+}
+#drawer_host .head input[type="number"],
+#module_panel .head input[type="number"] {
+  width: 38px !important;
+  min-width: 38px !important;
+  text-align: right !important;
+}
+#drawer_host .head label,
+#module_panel .head label {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+/* Radio/checkbox options must stay wrappable — they're multi-word choices,
+   and the nowrap/ellipsis clamp above would otherwise truncate them. */
 #drawer_host fieldset label,
-#module_panel fieldset label {
+#drawer_host fieldset label span,
+#module_panel fieldset label,
+#module_panel fieldset label span {
   white-space: normal !important;
   overflow: visible !important;
+  text-overflow: clip !important;
 }
 /* Gradio's .prose sets its own 14px, which dwarfed the 10px controls and let
    the explanatory notes dominate both panels. Pin markdown to the note size. */
@@ -836,14 +863,25 @@ body.module-collapsed #module_panel {
   background: transparent !important;
 }
 #module_panel label,
+#module_panel label span,
 #module_panel .label-wrap span,
+#module_panel .head span,
 #module_panel [data-testid="block-label"],
+#module_panel [data-testid="block-label"] span,
 #module_panel .head {
   font-size: var(--dr-fs-label) !important;
   line-height: 1.1 !important;
   margin: 0 !important;
   padding: 0 !important;
   color: var(--dr-text-dim) !important;
+}
+/* Slider captions must not clip the way the drawer's did. */
+#module_panel .head label,
+#module_panel .head label span {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 100% !important;
 }
 #module_panel button {
   min-height: 20px !important;
