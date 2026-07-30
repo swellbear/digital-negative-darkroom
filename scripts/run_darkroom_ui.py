@@ -73,7 +73,7 @@ from digital_negative.dodge_burn import (
 from digital_negative.ingest import ingest_path
 from digital_negative.papers import load_paper_profile
 from digital_negative.pipeline import list_film_profiles, list_paper_profiles
-from digital_negative.print_engine import print_negative
+from digital_negative.print_engine import TONE_LABELS, print_negative
 
 # Match commit look as closely as practical while staying interactive.
 LIVE_MAX_SIDE = 2000
@@ -3062,7 +3062,11 @@ def _resolve_input(file_obj, sample_path: str | None) -> str | None:
 
 def _to_rgb_u8(gray_float: np.ndarray, *, assume_linear: bool = False) -> np.ndarray:
     view = linear_to_srgb(gray_float) if assume_linear else gray_float
-    g = to_u8_gray(view)
+    arr = np.asarray(view, dtype=np.float32)
+    if arr.ndim == 3 and arr.shape[-1] >= 3:
+        # Toned / colour print path — keep channels.
+        return (np.clip(arr[..., :3], 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+    g = to_u8_gray(arr)
     return np.stack([g, g, g], axis=-1)
 
 
@@ -3962,6 +3966,18 @@ def _run_live_develop_then_print(
     print_exposure,
     print_grade,
     print_contrast,
+    split_on,
+    soft_grade,
+    hard_grade,
+    soft_seconds,
+    hard_seconds,
+    test_strips_on,
+    test_bands,
+    test_stops,
+    flash_stops,
+    dry_down,
+    tone,
+    border_frac,
     state,
     *,
     max_side: int = LIVE_MAX_SIDE,
@@ -3992,6 +4008,10 @@ def _run_live_develop_then_print(
         commit=False,
     )
     paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
+    tech = _technique_kwargs(
+        split_on, soft_grade, hard_grade, soft_seconds, hard_seconds,
+        test_strips_on, test_bands, test_stops, flash_stops, dry_down, tone, border_frac,
+    )
     printed = print_negative(
         development.transmittance,
         state["dn"],
@@ -4001,6 +4021,7 @@ def _run_live_develop_then_print(
         contrast=float(print_contrast),
         local_stops=local_stops_from_state(state),
         commit=False,
+        **tech,
     )
     live_rgb = _to_rgb_u8(printed.preview)
     neg_full = _to_rgb_u8(negative_lightbox_preview(development.transmittance))
@@ -4039,6 +4060,7 @@ def _run_live_develop_then_print(
             "print_grade": float(print_grade),
             "print_contrast": float(print_contrast),
         },
+        "print_technique": tech,
     }
     state = _remember_print_seconds(state, print_exposure)
     return live_rgb, neg_ref, summary, state
@@ -4058,6 +4080,18 @@ def live_preview(
     print_exposure,
     print_grade,
     print_contrast,
+    split_on,
+    soft_grade,
+    hard_grade,
+    soft_seconds,
+    hard_seconds,
+    test_strips_on,
+    test_bands,
+    test_stops,
+    flash_stops,
+    dry_down,
+    tone,
+    border_frac,
     state,
     quality: str = "high",
 ):
@@ -4105,6 +4139,10 @@ def live_preview(
                 t = np.ascontiguousarray(t[::step, ::step])
 
         paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
+        tech = _technique_kwargs(
+            split_on, soft_grade, hard_grade, soft_seconds, hard_seconds,
+            test_strips_on, test_bands, test_stops, flash_stops, dry_down, tone, border_frac,
+        )
         result = print_negative(
             t,
             state["dn"],
@@ -4114,6 +4152,7 @@ def live_preview(
             contrast=float(print_contrast),
             local_stops=local_stops_from_state(state),
             commit=False,
+            **tech,
         )
         live_rgb = _to_rgb_u8(result.preview)
         speed = state["dn"].metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
@@ -4127,7 +4166,13 @@ def live_preview(
             f"{paper.name} · g{float(print_grade):.1f} · {_print_timer_label(print_exposure)} · "
             f"×{float(speed):.2f}{db_note}{exposing}\n\n{_history_md(state['dn'])}"
         )
-        state = {**state, "print_draft": result, "live_rgb": live_rgb, "summary_cache": summary}
+        state = {
+            **state,
+            "print_draft": result,
+            "live_rgb": live_rgb,
+            "summary_cache": summary,
+            "print_technique": tech,
+        }
         state = _remember_print_seconds(state, print_exposure)
         return _pack_preview(
             live_rgb,
@@ -4148,11 +4193,23 @@ def live_preview(
         exposure_index,
         contrast_filter,
         scene_exposure,
-         halation,
+        halation,
         paper_id,
         print_exposure,
         print_grade,
         print_contrast,
+        split_on,
+        soft_grade,
+        hard_grade,
+        soft_seconds,
+        hard_seconds,
+        test_strips_on,
+        test_bands,
+        test_stops,
+        flash_stops,
+        dry_down,
+        tone,
+        border_frac,
         state,
         max_side=max_side,
     )
@@ -4175,6 +4232,18 @@ def live_preview_drag(
     print_exposure,
     print_grade,
     print_contrast,
+    split_on,
+    soft_grade,
+    hard_grade,
+    soft_seconds,
+    hard_seconds,
+    test_strips_on,
+    test_bands,
+    test_stops,
+    flash_stops,
+    dry_down,
+    tone,
+    border_frac,
     state,
 ):
     return live_preview(
@@ -4191,41 +4260,18 @@ def live_preview_drag(
         print_exposure,
         print_grade,
         print_contrast,
-        state,
-        quality="drag",
-    )
-
-
-def live_preview_high(
-    film_id,
-    developer_id,
-    development_minutes,
-    contrast,
-    grain,
-    exposure_index,
-    contrast_filter,
-    scene_exposure,
-    halation,
-    paper_id,
-    print_exposure,
-    print_grade,
-    print_contrast,
-    state,
-):
-    return live_preview(
-        film_id,
-        developer_id,
-        development_minutes,
-        contrast,
-        grain,
-        exposure_index,
-        contrast_filter,
-        scene_exposure,
-        halation,
-        paper_id,
-        print_exposure,
-        print_grade,
-        print_contrast,
+        split_on,
+        soft_grade,
+        hard_grade,
+        soft_seconds,
+        hard_seconds,
+        test_strips_on,
+        test_bands,
+        test_stops,
+        flash_stops,
+        dry_down,
+        tone,
+        border_frac,
         state,
         quality="high",
     )
@@ -4402,6 +4448,42 @@ def _write_print_packages(print_rgb, dn, paper, grade, exposure) -> tuple[str, s
     return print_only, combined
 
 
+def _technique_kwargs(
+    split_on,
+    soft_grade,
+    hard_grade,
+    soft_seconds,
+    hard_seconds,
+    test_strips_on,
+    test_bands,
+    test_stops,
+    flash_stops,
+    dry_down,
+    tone,
+    border_frac,
+) -> dict:
+    """Pack Print-technique controls for :func:`print_negative`."""
+    return {
+        "split_grade": bool(split_on),
+        "soft_grade": float(soft_grade),
+        "hard_grade": float(hard_grade),
+        "soft_exposure_seconds": float(soft_seconds),
+        "hard_exposure_seconds": float(hard_seconds),
+        "test_strips": bool(test_strips_on),
+        "test_strip_bands": int(test_bands),
+        "test_strip_stops": float(test_stops),
+        "flash_stops": float(flash_stops),
+        "dry_down_percent": float(dry_down),
+        "tone": str(tone or "none"),
+        "border_frac": float(border_frac),
+    }
+
+
+def _technique_from_state(state) -> dict:
+    tech = (state or {}).get("print_technique")
+    return dict(tech) if isinstance(tech, dict) else {}
+
+
 def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
     if not state or state.get("development_full") is None:
         raise gr.Error("Commit Develop first.")
@@ -4424,6 +4506,7 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         contrast=float(print_contrast),
         local_stops=local_stops_from_state(state),
         commit=True,
+        **_technique_from_state(state),
     )
     stages = dn.metadata["ui_state"].setdefault("committed_stages", [])
     locks = dn.metadata["ui_state"].setdefault("locked_stages", [])
@@ -4739,6 +4822,7 @@ def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, sta
         contrast=float(print_contrast),
         local_stops=local_stops_from_state(state),
         commit=False,
+        **_technique_from_state(state),
     )
     live_rgb = _to_rgb_u8(result.preview)
     strokes = state.get("db_strokes") or []
@@ -5105,6 +5189,8 @@ def guided_first_print(
         print_exposure,
         print_grade,
         print_contrast,
+        False, 0.0, 5.0, 4.5, 3.5,
+        False, 5, 0.5, 0.0, 0.0, "none", 0.0,
         state,
     )
     live_rgb, original_ref, latent_ref, neg_ref, status, history, inspect_out, state = packed
@@ -5354,6 +5440,21 @@ def build_ui() -> gr.Blocks:
                         base_math_md = gr.Markdown(_base_math_md(8.0), elem_id="base_math")
                         print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="MG grade")
                         print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter")
+                        split_grade = gr.Checkbox(label="Split-grade", value=False)
+                        with gr.Row():
+                            soft_grade = gr.Slider(0.0, 5.0, value=0.0, step=0.5, label="Soft grade")
+                            hard_grade = gr.Slider(0.0, 5.0, value=5.0, step=0.5, label="Hard grade")
+                        with gr.Row():
+                            soft_seconds = gr.Slider(1.0, 64.0, value=4.5, step=0.5, label="Soft (s)")
+                            hard_seconds = gr.Slider(1.0, 64.0, value=3.5, step=0.5, label="Hard (s)")
+                        test_strips = gr.Checkbox(label="Test strips", value=False)
+                        with gr.Row():
+                            test_bands = gr.Slider(3, 9, value=5, step=1, label="Bands")
+                            test_stops = gr.Slider(0.25, 1.0, value=0.5, step=0.25, label="Band stops")
+                        flash_stops = gr.Slider(0.0, 2.0, value=0.0, step=0.05, label="Flash (stops)")
+                        dry_down = gr.Slider(0.0, 20.0, value=0.0, step=0.5, label="Dry-down %")
+                        tone = gr.Dropdown(choices=TONE_LABELS, value="none", label="Tone")
+                        border_frac = gr.Slider(0.0, 0.12, value=0.0, step=0.005, label="Border")
                         with gr.Row():
                             print_btn = gr.Button(
                                 "Commit Print", interactive=False, variant="primary", size="sm"
@@ -5642,11 +5743,23 @@ def build_ui() -> gr.Blocks:
             exposure_index,
             contrast_filter,
             scene_exposure,
-             halation,
+            halation,
             paper,
             print_exposure,
             print_grade,
             print_contrast,
+            split_grade,
+            soft_grade,
+            hard_grade,
+            soft_seconds,
+            hard_seconds,
+            test_strips,
+            test_bands,
+            test_stops,
+            flash_stops,
+            dry_down,
+            tone,
+            border_frac,
             state,
         ]
         preview_outputs = [
@@ -5692,11 +5805,23 @@ def build_ui() -> gr.Blocks:
             exposure_index,
             contrast_filter,
             scene_exposure,
-             halation,
+            halation,
             paper,
             print_exposure,
             print_grade,
             print_contrast,
+            split_grade,
+            soft_grade,
+            hard_grade,
+            soft_seconds,
+            hard_seconds,
+            test_strips,
+            test_bands,
+            test_stops,
+            flash_stops,
+            dry_down,
+            tone,
+            border_frac,
         ):
             # Drag = fast lower-res; release/change = commit-quality preview
             ctrl.input(fn=live_preview_drag, inputs=preview_inputs, outputs=preview_outputs)
