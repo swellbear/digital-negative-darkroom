@@ -15,6 +15,13 @@ import gradio as gr
 from gradio import SelectData
 import numpy as np
 
+from digital_negative.auto_crop import (
+    RULE_CHOICES as AUTO_CROP_RULE_CHOICES,
+    RULE_LABELS as AUTO_CROP_RULE_LABELS,
+    format_crop_rect,
+    parse_aspect_ratio,
+    suggest_crop_box,
+)
 from digital_negative.chemistry import (
     chemistry_choices,
     default_chemistry_id,
@@ -1145,6 +1152,7 @@ UI_JS = """
     if (!stage) return;
     stage.classList.add('crop-armed');
     if (stage.dataset.cropReady === '1') {
+      readBoxFromInput();
       syncOverlay();
       return;
     }
@@ -2041,6 +2049,44 @@ def refresh_crop_stage(straighten_deg, state):
     return _framing_stage_preview(state, float(straighten_deg or 0.0))
 
 
+def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
+    """Set the interactive crop box from classical composition heuristics."""
+    if not state or state.get("dn") is None:
+        raise gr.Error("Commit Ingest first.")
+    state = _ensure_geometry_bases(state)
+    deg = float(straighten_deg or 0.0)
+    # Analyze the same picture the crop stage shows (prefer original photo).
+    src = state.get("original_base")
+    if src is None:
+        src = state.get("geometry_base")
+    if src is None:
+        raise gr.Error("No framing base to analyze.")
+    img = np.asarray(src)
+    if abs(deg) >= 1e-6:
+        img = straighten_image(
+            img.astype(np.float32) if img.dtype == np.uint8 else img,
+            deg,
+            fill=0.0,
+        )
+        if np.asarray(src).dtype == np.uint8:
+            img = np.clip(img, 0, 255).astype(np.uint8)
+    h, w = img.shape[:2]
+    image_aspect = w / max(h, 1)
+    aspect = parse_aspect_ratio(crop_ratio, image_aspect)
+    rule = str(auto_rule or "auto")
+    result = suggest_crop_box(img, rule=rule, aspect_ratio=aspect)
+    rect = format_crop_rect(result)
+    used = AUTO_CROP_RULE_LABELS.get(result.get("rule"), result.get("rule"))
+    asked = AUTO_CROP_RULE_LABELS.get(rule, rule)
+    hint = (
+        f"_Auto crop ready — **{asked}**"
+        + (f" → scored as **{used}**" if rule in {"auto", "best"} else "")
+        + f" · subject ≈ ({result['subject']['x']:.0%}, {result['subject']['y']:.0%}). "
+        f"Tweak the box if needed, then **Apply framing**._"
+    )
+    return rect, hint, _framing_stage_preview(state, deg)
+
+
 def rotate_cw(state):
     return rotate_working(1, state)
 
@@ -2129,6 +2175,7 @@ def commit_ingest(sample_path, file_obj, state):
         gr.update(interactive=True),
         gr.update(interactive=True),  # apply framing
         gr.update(interactive=True),  # reset framing
+        gr.update(interactive=True),  # auto crop
         0.0,
         DEFAULT_CROP_RECT,
         "free",
@@ -3070,6 +3117,7 @@ def guided_first_print(
             rot_cw,
             apply_frame_u,
             reset_frame_u,
+            auto_crop_u,
             straighten_u,
             crop_rect_u,
             crop_ratio_u,
@@ -3097,6 +3145,7 @@ def guided_first_print(
         rot_cw = gr.update(interactive=True)
         apply_frame_u = gr.update(interactive=True)
         reset_frame_u = gr.update(interactive=True)
+        auto_crop_u = gr.update(interactive=True)
         straighten_u = gr.skip()
         crop_rect_u = gr.skip()
         crop_ratio_u = gr.skip()
@@ -3200,6 +3249,7 @@ def guided_first_print(
         rot_cw,
         apply_frame_u,
         reset_frame_u,
+        auto_crop_u,
         straighten_u,
         crop_rect_u,
         crop_ratio_u,
@@ -3279,6 +3329,7 @@ def reset_session():
         gr.update(open=True),
         gr.update(open=True),
         gr.update(open=True),
+        off,
         off,
         off,
         off,
@@ -3484,13 +3535,32 @@ def build_ui() -> gr.Blocks:
                     gr.Markdown(
                         "Drag on the picture to draw a crop box · drag handles to resize · "
                         "pick a ratio to lock · straighten tilts the easel first. "
-                        "Applies from the last ingest / 90° base (not cumulative)."
+                        "**Auto crop** proposes a box from classical composition rules — "
+                        "tweak it, then Apply. Framing uses the last ingest / 90° base."
                     )
                     crop_ratio = gr.Radio(
                         choices=CROP_RATIO_CHOICES,
                         value="free",
                         label="Aspect ratio",
                         elem_id="crop_ratio",
+                    )
+                    with gr.Row():
+                        auto_crop_rule = gr.Dropdown(
+                            choices=AUTO_CROP_RULE_CHOICES,
+                            value="auto",
+                            label="Auto crop rule",
+                            scale=3,
+                        )
+                        auto_crop_btn = gr.Button(
+                            "Auto crop",
+                            interactive=False,
+                            variant="secondary",
+                            size="sm",
+                            scale=1,
+                        )
+                    crop_hint = gr.Markdown(
+                        "_Pick a rule and hit Auto crop, or draw the box yourself._",
+                        elem_id="crop_hint",
                     )
                     straighten_deg = gr.Slider(
                         -15.0,
@@ -3582,7 +3652,7 @@ def build_ui() -> gr.Blocks:
                 sample, file_in, ingest_btn, develop_btn, print_btn,
                 ingest_acc, develop_acc, print_acc,
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
-                apply_framing_btn, reset_framing_btn,
+                apply_framing_btn, reset_framing_btn, auto_crop_btn,
                 straighten_deg, crop_rect, crop_ratio, crop_stage,
                 inspect_out, inspect_acc, state,
             ],
@@ -3797,6 +3867,7 @@ def build_ui() -> gr.Blocks:
                 rotate_cw_btn,
                 apply_framing_btn,
                 reset_framing_btn,
+                auto_crop_btn,
                 straighten_deg,
                 crop_rect,
                 crop_ratio,
@@ -3865,7 +3936,7 @@ def build_ui() -> gr.Blocks:
                 print_btn, unlock_print_btn,
                 ingest_acc, develop_acc, print_acc,
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
-                apply_framing_btn, reset_framing_btn,
+                apply_framing_btn, reset_framing_btn, auto_crop_btn,
                 straighten_deg, crop_rect, crop_ratio, crop_stage,
                 state,
             ],
@@ -3906,6 +3977,11 @@ def build_ui() -> gr.Blocks:
             outputs=frame_outputs,
         ).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
+        )
+        auto_crop_btn.click(
+            fn=suggest_auto_crop,
+            inputs=[auto_crop_rule, crop_ratio, straighten_deg, state],
+            outputs=[crop_rect, crop_hint, crop_stage],
         )
         straighten_deg.release(
             fn=refresh_crop_stage,
