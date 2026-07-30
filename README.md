@@ -47,7 +47,7 @@ profiles/papers/         MG Standard, MG Warmtone
 src/digital_negative/
   ingest.py              Raw/image → linear Digital Negative
   development.py         Log-E → density (+ grain)
-  print_engine.py        Enlarger / paper stage
+  print_engine.py        Enlarger / paper stage (+ dodge/burn local stops)
   pipeline.py            Orchestration
 scripts/run_spike.py
 scripts/run_darkroom_ui.py
