@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 import gradio as gr
+from gradio import SelectData
 import numpy as np
 
 from digital_negative.curves import DEVELOPER_STYLES, load_film_profile
@@ -305,9 +306,77 @@ def _split_summary(full: str) -> tuple[str, str]:
     return full, ""
 
 
+_VIEWER_LABELS = {
+    "live": "Commit preview (live) — theoretical print",
+    "original": "Original photo (enlarged) — click Live print to return",
+    "latent": "Latent DN (enlarged) — click Live print to return",
+    "negative": "Developed negative (enlarged) — click Live print to return",
+}
+
+
+def _viewer_frame(state, live=None, original=None, latent=None, neg=None):
+    """Large preview image + label for the current viewer mode."""
+    mode = (state or {}).get("viewer_mode", "live")
+    if mode == "original":
+        img = (state or {}).get("original_view")
+        if img is None:
+            img = original if original is not None else (state or {}).get("original_ref")
+    elif mode == "latent":
+        img = (state or {}).get("latent_view")
+        if img is None:
+            img = latent if latent is not None else (state or {}).get("latent_ref")
+    elif mode == "negative":
+        img = (state or {}).get("neg_view")
+        if img is None:
+            img = neg if neg is not None else (state or {}).get("neg_ref")
+    else:
+        mode = "live"
+        img = live if live is not None else (state or {}).get("live_rgb")
+    return gr.update(value=img, label=_VIEWER_LABELS.get(mode, _VIEWER_LABELS["live"]))
+
+
 def _pack_preview(live, original, latent, neg, summary, state):
     status, hist = _split_summary(summary or "")
-    return live, original, latent, neg, status, hist, state
+    if state is not None:
+        # Keep large copies in sync when live path refreshes
+        if live is not None:
+            state = {**state, "live_rgb": live}
+        if neg is not None:
+            state = {**state, "neg_ref": neg, "neg_view": neg}
+    shown = _viewer_frame(state, live=live, original=original, latent=latent, neg=neg)
+    return shown, original, latent, neg, status, hist, state
+
+
+def focus_viewer(mode: str):
+    """Return a handler that puts a reference (or live print) in the large preview."""
+
+    def _fn(state, evt: SelectData | None = None):
+        if not state or state.get("dn") is None:
+            return gr.update(), "*Commit Ingest first.*", state
+        # Image deselect → return to live print
+        if evt is not None and getattr(evt, "selected", True) is False:
+            mode_use = "live"
+        else:
+            mode_use = mode
+        state = {**state, "viewer_mode": mode_use}
+        tip = {
+            "live": "_Large view: live theoretical print (updates with controls)._",
+            "original": "_Large view: **Original** — use for start reference while editing._",
+            "latent": "_Large view: **Latent DN** — linear Digital Negative._",
+            "negative": "_Large view: **Developed negative** — updates as you Develop._",
+        }.get(mode_use, "")
+        banner = _stage_banner(state.get("stage", "development"), _locks(state))
+        status = f"{banner}\n\n{tip}"
+        return _viewer_frame(state), status, state
+
+    return _fn
+
+
+def focus_viewer_button(mode: str):
+    def _fn(state):
+        return focus_viewer(mode)(state, None)
+
+    return _fn
 
 
 def commit_ingest(sample_path, file_obj, state):
@@ -330,13 +399,16 @@ def commit_ingest(sample_path, file_obj, state):
     )
 
     latent_full = _to_rgb_u8(dn.to_luminance(), assume_linear=True)
+    latent_view = _downscale_rgb(latent_full, LIVE_MAX_SIDE)
     latent_ref = _downscale_rgb(latent_full, REF_MAX_SIDE)
     original_full = original_photo_preview(path, dn_image=dn.image)
+    original_view = _downscale_rgb(original_full, LIVE_MAX_SIDE)
     original_ref = _downscale_rgb(original_full, REF_MAX_SIDE)
     summary = (
         f"{_stage_banner('development', ['ingest'])}\n\n"
         f"**Ingest locked** — `{dn.metadata['source']['original_filename']}`  \n"
-        f"_Develop controls below — Commit Develop when ready._\n\n"
+        f"_Click Original / Latent / Negative under the preview to enlarge. "
+        f"Live print returns to the theoretical print._\n\n"
         f"{_history_md(dn)}"
     )
     state = {
@@ -344,9 +416,13 @@ def commit_ingest(sample_path, file_obj, state):
         "proxy": _proxy_dn(dn, LIVE_MAX_SIDE),
         "proxy_drag": _proxy_dn(dn, DRAG_MAX_SIDE),
         "original_ref": original_ref,
+        "original_view": original_view,
         "latent_ref": latent_ref,
+        "latent_view": latent_view,
         "neg_ref": None,
-        "live_rgb": _downscale_rgb(latent_full, LIVE_MAX_SIDE),
+        "neg_view": None,
+        "live_rgb": latent_view,
+        "viewer_mode": "live",
         "development": None,
         "development_full": None,
         "stage": "development",
@@ -354,7 +430,7 @@ def commit_ingest(sample_path, file_obj, state):
         "source_path": path,
     }
     return (
-        state["live_rgb"],
+        gr.update(value=latent_view, label=_VIEWER_LABELS["live"]),
         original_ref,
         latent_ref,
         None,
@@ -417,9 +493,10 @@ def _run_live_develop_then_print(
         commit=False,
     )
     live_rgb = _to_rgb_u8(printed.preview)
-    neg_ref = _downscale_rgb(
-        _to_rgb_u8(negative_lightbox_preview(development.transmittance)), REF_MAX_SIDE
-    )
+    neg_view = _to_rgb_u8(negative_lightbox_preview(development.transmittance))
+    neg_ref = _downscale_rgb(neg_view, REF_MAX_SIDE)
+    # Keep negative enlarge view at live preview resolution
+    neg_view = _downscale_rgb(neg_view, LIVE_MAX_SIDE)
     speed = state["dn"].metadata.get("print", {}).get("filtration", {}).get("values", {}).get(
         "filter_speed", 1.0
     )
@@ -440,6 +517,7 @@ def _run_live_develop_then_print(
         "development": development,
         "live_rgb": live_rgb,
         "neg_ref": neg_ref,
+        "neg_view": neg_view,
         "stage": "development",
         "summary_cache": summary,
         "draft_print": {
@@ -643,9 +721,10 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
         live_view = _downscale_rgb(
             _to_rgb_u8(development.positive_preview), LIVE_MAX_SIDE
         )
-    neg_ref = _downscale_rgb(
-        _to_rgb_u8(negative_lightbox_preview(development.transmittance)), REF_MAX_SIDE
+    neg_view = _downscale_rgb(
+        _to_rgb_u8(negative_lightbox_preview(development.transmittance)), LIVE_MAX_SIDE
     )
+    neg_ref = _downscale_rgb(neg_view, REF_MAX_SIDE)
     summary = (
         f"{_stage_banner('print', locks)}\n\n"
         f"**Develop locked** — refine Print below, then Commit Print.\n\n{_history_md(dn)}"
@@ -655,9 +734,13 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
         "proxy": state.get("proxy"),
         "proxy_drag": state.get("proxy_drag"),
         "original_ref": state.get("original_ref"),
+        "original_view": state.get("original_view"),
         "latent_ref": state.get("latent_ref"),
+        "latent_view": state.get("latent_view"),
         "neg_ref": neg_ref,
+        "neg_view": neg_view,
         "live_rgb": live_view,
+        "viewer_mode": state.get("viewer_mode", "live"),
         "development": development,
         "development_full": development,
         "transmittance_proxy": t_proxy,
@@ -666,7 +749,7 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
         "source_path": state.get("source_path"),
     }
     return (
-        live_view,
+        _viewer_frame(state, live=live_view, neg=neg_view),
         state.get("original_ref"),
         state.get("latent_ref"),
         neg_ref,
@@ -942,15 +1025,26 @@ def build_ui() -> gr.Blocks:
 
             with gr.Column(scale=1, elem_id="preview_col", min_width=480):
                 live_out = gr.Image(
-                    label="Commit preview (live)",
+                    label="Commit preview (live) — theoretical print",
                     type="numpy",
                     elem_id="live_preview",
                     height=620,
                 )
                 with gr.Row(elem_id="ref_row"):
-                    original_out = gr.Image(label="Original", type="numpy", height=96)
-                    latent_out = gr.Image(label="Latent DN", type="numpy", height=96)
-                    neg_out = gr.Image(label="Negative", type="numpy", height=96)
+                    original_out = gr.Image(
+                        label="Original (click to enlarge)", type="numpy", height=96
+                    )
+                    latent_out = gr.Image(
+                        label="Latent DN (click to enlarge)", type="numpy", height=96
+                    )
+                    neg_out = gr.Image(
+                        label="Negative (click to enlarge)", type="numpy", height=96
+                    )
+                with gr.Row():
+                    view_orig_btn = gr.Button("Original", size="sm")
+                    view_lat_btn = gr.Button("Latent DN", size="sm")
+                    view_neg_btn = gr.Button("Negative", size="sm")
+                    view_live_btn = gr.Button("Live print", size="sm", variant="primary")
 
         # Always pass develop + print controls so the large viewer can show a
         # theoretical print through the working negative while developing.
@@ -1065,6 +1159,16 @@ def build_ui() -> gr.Blocks:
                 ingest_acc, develop_acc, print_acc, state,
             ],
         )
+
+        # Thumbnail / button → enlarge in main preview
+        focus_outputs = [live_out, status, state]
+        original_out.select(fn=focus_viewer("original"), inputs=[state], outputs=focus_outputs)
+        latent_out.select(fn=focus_viewer("latent"), inputs=[state], outputs=focus_outputs)
+        neg_out.select(fn=focus_viewer("negative"), inputs=[state], outputs=focus_outputs)
+        view_orig_btn.click(fn=focus_viewer_button("original"), inputs=[state], outputs=focus_outputs)
+        view_lat_btn.click(fn=focus_viewer_button("latent"), inputs=[state], outputs=focus_outputs)
+        view_neg_btn.click(fn=focus_viewer_button("negative"), inputs=[state], outputs=focus_outputs)
+        view_live_btn.click(fn=focus_viewer_button("live"), inputs=[state], outputs=focus_outputs)
     return demo
 
 
