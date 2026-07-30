@@ -395,6 +395,23 @@ def test_straighten_and_crop_framing():
     assert framed.shape[0] >= 32 and framed.shape[1] >= 32
 
 
+def test_parse_crop_rect_box_to_edge_trims():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "run_darkroom_ui", ROOT / "scripts" / "run_darkroom_ui.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    left, top, right, bottom = mod.parse_crop_rect("0.1,0.2,0.5,0.4")
+    assert abs(left - 0.1) < 1e-6
+    assert abs(top - 0.2) < 1e-6
+    assert abs(right - 0.4) < 1e-6  # 1 - (0.1+0.5)
+    assert abs(bottom - 0.4) < 1e-6  # 1 - (0.2+0.4)
+    full = mod.parse_crop_rect(mod.DEFAULT_CROP_RECT)
+    assert full == (0.0, 0.0, 0.0, 0.0)
+
+
 def test_resolve_input_prefers_upload_over_sample():
     sys.path.insert(0, str(ROOT / "scripts"))
     # Import after path setup — module lives as scripts/run_darkroom_ui.py
