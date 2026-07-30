@@ -416,5 +416,10 @@
       ],
       "source": "ILFORD HP5 Plus non-ILFORD table \u00b7 EI 400"
     }
-  ]
+  ],
+  "reciprocity": {
+    "threshold_s": 1.0,
+    "p": 0.78,
+    "contrast_gain": 0.12
+  }
 }

@@ -412,5 +412,10 @@
       ],
       "source": "ILFORD FP4 Plus non-ILFORD table \u00b7 EI 125"
     }
-  ]
+  ],
+  "reciprocity": {
+    "threshold_s": 0.5,
+    "p": 0.82,
+    "contrast_gain": 0.12
+  }
 }
