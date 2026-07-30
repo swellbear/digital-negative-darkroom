@@ -251,6 +251,16 @@ UI_CSS = """
   opacity: 0.9;
   margin: 2px 0 6px 0 !important;
 }
+/* Hide Gradio Timer chrome — it shows a running stopwatch and looks like
+   the dodge/burn countdown never stops. We only use it as a 1s tick source. */
+.db_clock_hidden,
+.db_clock_hidden * {
+  display: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
 @media (max-width: 900px) {
   #main_workspace { flex-wrap: wrap !important; }
   #controls_col {
@@ -1298,9 +1308,10 @@ def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print
         f"**{verb}** — {left}s left · ~{total_stops:.2f} stops if held still.  \n"
         f"_Move or reshape the tool while the timer runs._"
     )
-    return _db_refresh_print(
+    live, timer_md, st, hi, state = _db_refresh_print(
         paper_id, print_exposure, print_grade, print_contrast, state, status_md=status
     )
+    return live, timer_md, st, hi, state, gr.update(active=True)
 
 
 def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, state, *, status_md: str):
@@ -1358,25 +1369,30 @@ def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, sta
 
 def tick_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, editor, state):
     if not state or not state.get("db_exposing"):
-        # No-op while idle — don't thrash the preview
+        # Idle: keep the clock off and don't thrash the preview.
         return (
             gr.skip(),
             gr.skip(),
             gr.skip(),
             gr.skip(),
             state,
+            gr.update(active=False),
         )
     h, w = _db_target_shape(state)
     apply_exposure_tick(state, editor, height=h, width=w)
     left = int(state.get("db_seconds_left", 0))
-    if state.get("db_exposing"):
+    still = bool(state.get("db_exposing"))
+    if still:
         verb = "Dodging" if state.get("db_mode") == "dodge" else "Burning"
         status = f"**{verb}… {left}s left** — move or reshape the tool"
     else:
         status = "**Exposure done** — inspect the print. Start again for another pass, or Reset."
-    return _db_refresh_print(
+    live, timer_md, st, hi, state = _db_refresh_print(
         paper_id, print_exposure, print_grade, print_contrast, state, status_md=status
     )
+    # Stop the Gradio Timer when the enlarger countdown finishes.
+    clock = gr.update(active=still)
+    return live, timer_md, st, hi, state, clock
 
 
 def reset_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, state):
@@ -1397,7 +1413,7 @@ def reset_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, stat
     )
     # Clear brush layers; keep current print as background
     editor = _editor_from_print(live_rgb)
-    return live_rgb, timer_line, status, history, editor, state
+    return live_rgb, timer_line, status, history, editor, state, gr.update(active=False)
 
 
 def unlock_develop(state):
@@ -1637,7 +1653,8 @@ def build_ui() -> gr.Blocks:
                         with gr.Row():
                             db_start_btn = gr.Button("Start exposure", variant="primary", size="sm")
                             db_reset_btn = gr.Button("Reset local work", size="sm")
-                        db_clock = gr.Timer(value=1.0, active=True)
+                        with gr.Column(elem_classes=["db_clock_hidden"], visible=True):
+                            db_clock = gr.Timer(value=1.0, active=False)
                     with gr.Row():
                         print_btn = gr.Button(
                             "Commit Print", interactive=False, variant="primary", size="sm"
@@ -1799,17 +1816,17 @@ def build_ui() -> gr.Blocks:
                 db_editor,
                 state,
             ],
-            outputs=[live_out, db_timer_md, status, history, state],
+            outputs=[live_out, db_timer_md, status, history, state, db_clock],
         )
         db_clock.tick(
             fn=tick_dodge_burn,
             inputs=[paper, print_exposure, print_grade, print_contrast, db_editor, state],
-            outputs=[live_out, db_timer_md, status, history, state],
+            outputs=[live_out, db_timer_md, status, history, state, db_clock],
         )
         db_reset_btn.click(
             fn=reset_dodge_burn,
             inputs=[paper, print_exposure, print_grade, print_contrast, state],
-            outputs=[live_out, db_timer_md, status, history, db_editor, state],
+            outputs=[live_out, db_timer_md, status, history, db_editor, state, db_clock],
         )
 
         unlock_develop_btn.click(
