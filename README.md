@@ -60,9 +60,9 @@ bash scripts/deploy_space.sh   # creates/updates spaces/<you>/digital-negative-d
 
 Or: [New Space](https://huggingface.co/new-space) → SDK **Gradio**, app file **`app.py`**, link this GitHub repo.
 
-### GitHub Action
+### GitHub → Space
 
-Add repo secret `HF_TOKEN` (write access). Push to `main` runs `.github/workflows/deploy-space.yml`.
+On [huggingface.co/new-space](https://huggingface.co/new-space): SDK **Gradio**, app file **`app.py`**, connect this GitHub repo (or run `bash scripts/deploy_space.sh` after `hf auth login`).
 
 `app.py` fetches sample raws on first boot when `samples/raws/` is empty (raws are gitignored).
 
