@@ -2373,7 +2373,7 @@ def build_ui() -> gr.Blocks:
                     "_Commit Ingest to begin._",
                     elem_id="ritual_status",
                 )
-                with gr.Accordion("1 · Ingest", open=False) as ingest_acc:
+                with gr.Accordion("1 · Ingest", open=True) as ingest_acc:
                     sample = gr.Dropdown(
                         choices=SAMPLE_CHOICES,
                         value=default_sample,
@@ -2390,7 +2390,8 @@ def build_ui() -> gr.Blocks:
                     )
                     ingest_btn = gr.Button("Commit Ingest", variant="primary", size="sm")
 
-                with gr.Accordion("2 · Develop", open=True) as develop_acc:
+                # Keep later stages collapsed until Commit Ingest / Commit Develop open them.
+                with gr.Accordion("2 · Develop", open=False) as develop_acc:
                     film = gr.Dropdown(
                         choices=FILM_CHOICES,
                         value=FILM_CHOICES[0][1] if FILM_CHOICES else None,
@@ -2416,7 +2417,7 @@ def build_ui() -> gr.Blocks:
                         )
                         unlock_develop_btn = gr.Button("Unlock", interactive=False, size="sm")
 
-                with gr.Accordion("3 · Print", open=True) as print_acc:
+                with gr.Accordion("3 · Print", open=False) as print_acc:
                     paper = gr.Dropdown(
                         choices=PAPER_CHOICES,
                         value=PAPER_CHOICES[0][1] if PAPER_CHOICES else None,
