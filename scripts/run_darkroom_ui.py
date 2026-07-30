@@ -17,7 +17,12 @@ import numpy as np
 from digital_negative.curves import DEVELOPER_STYLES, load_film_profile
 from digital_negative.development import develop
 from digital_negative.digital_negative import DigitalNegative
-from digital_negative.display import linear_to_srgb, negative_lightbox_preview, to_u8_gray
+from digital_negative.display import (
+    linear_to_srgb,
+    negative_lightbox_preview,
+    original_photo_preview,
+    to_u8_gray,
+)
 from digital_negative.ingest import ingest_path
 from digital_negative.papers import load_paper_profile
 from digital_negative.pipeline import list_film_profiles, list_paper_profiles
@@ -68,6 +73,9 @@ UI_CSS = """
   max-height: 140px !important;
   object-fit: contain !important;
   background: #0c0c0c !important;
+}
+#ref_row {
+  gap: 8px;
 }
 """
 
@@ -207,16 +215,19 @@ def commit_ingest(sample_path, file_obj, state):
 
     latent_full = _to_rgb_u8(dn.to_luminance(), assume_linear=True)
     latent_ref = _downscale_rgb(latent_full, REF_MAX_SIDE)
+    original_full = original_photo_preview(path, dn_image=dn.image)
+    original_ref = _downscale_rgb(original_full, REF_MAX_SIDE)
     summary = (
         f"{_stage_banner('development', ['ingest'])}\n\n"
-        f"**Ingest locked.** The large image is a **theoretical print** through the "
-        f"working negative — develop changes assume current (or default) Print settings.  \n"
+        f"**Ingest locked.** Large image = theoretical print through the working negative.  \n"
+        f"References below: **Original** (camera/display) → **Latent DN** → developed negative.  \n"
         f"`{dn.metadata['source']['original_filename']}`  \n\n{_history_md(dn)}"
     )
     state = {
         "dn": dn,
         "proxy": _proxy_dn(dn, LIVE_MAX_SIDE),
         "proxy_drag": _proxy_dn(dn, DRAG_MAX_SIDE),
+        "original_ref": original_ref,
         "latent_ref": latent_ref,
         "neg_ref": None,
         "live_rgb": _downscale_rgb(latent_full, LIVE_MAX_SIDE),
@@ -224,9 +235,11 @@ def commit_ingest(sample_path, file_obj, state):
         "development_full": None,
         "stage": "development",
         "summary_cache": summary,
+        "source_path": path,
     }
     return (
         state["live_rgb"],
+        original_ref,
         latent_ref,
         None,
         summary,
@@ -345,11 +358,12 @@ def live_preview(
     max_side = DRAG_MAX_SIDE if quality == "drag" else LIVE_MAX_SIDE
 
     if not state or state.get("dn") is None:
-        return None, None, None, "*Commit Ingest first.*", state
+        return None, None, None, None, "*Commit Ingest first.*", state
 
     if _locked(state, "print"):
         return (
             state.get("live_rgb"),
+            state.get("original_ref"),
             state.get("latent_ref"),
             state.get("neg_ref"),
             state.get("summary_cache", ""),
@@ -367,9 +381,14 @@ def live_preview(
             if t is None and state.get("development") is not None:
                 t = state["development"].transmittance
             if t is None:
-                return state.get("live_rgb"), state.get("latent_ref"), state.get("neg_ref"), (
-                    state.get("summary_cache", "")
-                ), state
+                return (
+                    state.get("live_rgb"),
+                    state.get("original_ref"),
+                    state.get("latent_ref"),
+                    state.get("neg_ref"),
+                    state.get("summary_cache", ""),
+                    state,
+                )
             if max(t.shape) > max_side:
                 step = max(1, int(np.ceil(max(t.shape) / max_side)))
                 t = np.ascontiguousarray(t[::step, ::step])
@@ -395,7 +414,14 @@ def live_preview(
             f"filter ×{float(speed):.2f}  \n\n{_history_md(state['dn'])}"
         )
         state = {**state, "print_draft": result, "live_rgb": live_rgb, "summary_cache": summary}
-        return live_rgb, state.get("latent_ref"), state.get("neg_ref"), summary, state
+        return (
+            live_rgb,
+            state.get("original_ref"),
+            state.get("latent_ref"),
+            state.get("neg_ref"),
+            summary,
+            state,
+        )
 
     # Develop unlocked: show print through the working negative
     live_rgb, neg_ref, summary, state = _run_live_develop_then_print(
@@ -411,7 +437,7 @@ def live_preview(
         state,
         max_side=max_side,
     )
-    return live_rgb, state.get("latent_ref"), neg_ref, summary, state
+    return live_rgb, state.get("original_ref"), state.get("latent_ref"), neg_ref, summary, state
 
 
 def live_preview_drag(
@@ -513,6 +539,7 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
         "dn": dn,
         "proxy": state.get("proxy"),
         "proxy_drag": state.get("proxy_drag"),
+        "original_ref": state.get("original_ref"),
         "latent_ref": state.get("latent_ref"),
         "neg_ref": neg_ref,
         "live_rgb": live_view,
@@ -521,9 +548,11 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
         "transmittance_proxy": t_proxy,
         "stage": "print",
         "summary_cache": summary,
+        "source_path": state.get("source_path"),
     }
     return (
         live_view,
+        state.get("original_ref"),
         state.get("latent_ref"),
         neg_ref,
         summary,
@@ -576,6 +605,7 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
     state = {**state, "print": result, "live_rgb": live_rgb, "summary_cache": summary}
     return (
         live_rgb,
+        state.get("original_ref"),
         state.get("latent_ref"),
         state.get("neg_ref"),
         summary,
@@ -631,6 +661,7 @@ def unlock_develop(state):
     on, off = gr.update(interactive=True), gr.update(interactive=False)
     return (
         state.get("live_rgb"),
+        state.get("original_ref"),
         state.get("latent_ref"),
         state.get("neg_ref"),
         summary,
@@ -686,10 +717,11 @@ def unlock_print(state):
 def reset_session():
     summary = (
         "*Commit Ingest. While developing, the large image shows a theoretical print "
-        "using current Print settings.*"
+        "using current Print settings. References show Original → Latent DN → negative.*"
     )
     on, off = gr.update(interactive=True), gr.update(interactive=False)
     return (
+        None,
         None,
         None,
         None,
@@ -722,6 +754,7 @@ def build_ui() -> gr.Blocks:
             """
             # Digital Negative Darkroom
             **Large image = theoretical print** while you develop (current Print settings), then **Commit Print preview** after Develop is locked.  
+            References under the viewer: **Original photo → Latent DN → Developed negative**.  
             Sliders update live (fast while dragging, higher quality on release). **Commit** locks · **Unlock** revises.
             """
         )
@@ -781,6 +814,9 @@ def build_ui() -> gr.Blocks:
                     elem_id="live_preview",
                 )
                 with gr.Row(elem_id="ref_row"):
+                    original_out = gr.Image(
+                        label="Original photo (reference)", type="numpy", height=140
+                    )
                     latent_out = gr.Image(label="Latent DN (reference)", type="numpy", height=140)
                     neg_out = gr.Image(label="Developed negative (reference)", type="numpy", height=140)
 
@@ -798,13 +834,13 @@ def build_ui() -> gr.Blocks:
             print_contrast,
             state,
         ]
-        preview_outputs = [live_out, latent_out, neg_out, summary, state]
+        preview_outputs = [live_out, original_out, latent_out, neg_out, summary, state]
 
         ingest_btn.click(
             fn=commit_ingest,
             inputs=[sample, file_in, state],
             outputs=[
-                live_out, latent_out, neg_out, summary,
+                live_out, original_out, latent_out, neg_out, summary,
                 sample, file_in, ingest_btn, develop_btn, print_btn, state,
             ],
         ).then(
@@ -832,7 +868,7 @@ def build_ui() -> gr.Blocks:
             fn=commit_develop,
             inputs=[film, developer, relative_time, contrast, grain, state],
             outputs=[
-                live_out, latent_out, neg_out, summary,
+                live_out, original_out, latent_out, neg_out, summary,
                 film, developer, relative_time, contrast, grain,
                 develop_btn, unlock_develop_btn, print_btn, unlock_print_btn, state,
             ],
@@ -846,7 +882,7 @@ def build_ui() -> gr.Blocks:
             fn=unlock_develop,
             inputs=[state],
             outputs=[
-                live_out, latent_out, neg_out, summary,
+                live_out, original_out, latent_out, neg_out, summary,
                 film, developer, relative_time, contrast, grain,
                 develop_btn, unlock_develop_btn, print_btn,
                 paper, print_exposure, print_grade, print_contrast, unlock_print_btn, state,
@@ -861,7 +897,7 @@ def build_ui() -> gr.Blocks:
             fn=commit_print,
             inputs=[paper, print_exposure, print_grade, print_contrast, state],
             outputs=[
-                live_out, latent_out, neg_out, summary,
+                live_out, original_out, latent_out, neg_out, summary,
                 paper, print_exposure, print_grade, print_contrast,
                 print_btn, unlock_print_btn, state,
             ],
@@ -885,7 +921,7 @@ def build_ui() -> gr.Blocks:
             fn=reset_session,
             inputs=[],
             outputs=[
-                live_out, latent_out, neg_out, summary,
+                live_out, original_out, latent_out, neg_out, summary,
                 sample, file_in, ingest_btn,
                 film, developer, relative_time, contrast, grain,
                 develop_btn, unlock_develop_btn,

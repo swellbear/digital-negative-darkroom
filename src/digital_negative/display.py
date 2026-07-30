@@ -42,6 +42,48 @@ def negative_lightbox_preview(transmittance: np.ndarray) -> np.ndarray:
     return np.power(view, 0.85).astype(np.float32)
 
 
+def original_photo_preview(path: str | Path | None = None, *, dn_image: np.ndarray | None = None) -> np.ndarray:
+    """Display-referred RGB of the source for start→finish comparison.
+
+    This is *not* the Digital Negative:
+    - Camera raw → camera-WB sRGB demosaic with a normal display TRC
+    - JPEG/TIFF/PNG → pixels as stored
+    - Synthetic / no path → display-mapped scene from the DN image
+    """
+    if path:
+        path = Path(path)
+        suffix = path.suffix.lower()
+        raw_suffixes = {
+            ".arw", ".cr2", ".cr3", ".nef", ".nrw", ".orf", ".raf", ".rw2",
+            ".dng", ".pef", ".srw",
+        }
+        if suffix in raw_suffixes:
+            import rawpy
+
+            with rawpy.imread(str(path)) as raw:
+                rgb = raw.postprocess(
+                    output_bps=8,
+                    no_auto_bright=True,
+                    use_camera_wb=True,
+                    output_color=rawpy.ColorSpace.sRGB,
+                    highlight_mode=rawpy.HighlightMode.Clip,
+                )
+            return np.ascontiguousarray(rgb)
+        with Image.open(path) as im:
+            return np.asarray(im.convert("RGB"), dtype=np.uint8)
+
+    # Synthetic / fallback: display-map DN luminance (or RGB) for a readable source view
+    if dn_image is None:
+        return np.zeros((64, 64, 3), dtype=np.uint8)
+    if dn_image.ndim == 3 and dn_image.shape[-1] >= 3:
+        # Prefer Y if XYZ-like; otherwise Rec.709-ish luma from first three channels
+        luma = dn_image[..., 1]
+    else:
+        luma = dn_image
+    g = to_u8_gray(linear_to_srgb(luma))
+    return np.stack([g, g, g], axis=-1)
+
+
 def save_gray_preview(path: str | Path, image: np.ndarray, *, assume_linear: bool = False) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
