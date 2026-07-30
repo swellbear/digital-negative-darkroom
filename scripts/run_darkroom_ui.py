@@ -107,395 +107,292 @@ if SAMPLE_DIR.exists():
             SAMPLE_CHOICES.append((path.name, str(path)))
 
 UI_CSS = """
+html, body {
+  height: 100% !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+}
 .gradio-container {
   max-width: 100% !important;
-  padding: 8px 12px !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  overflow: hidden !important;
+  padding: 4px 6px !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: column !important;
 }
-/* Force controls | preview side-by-side; do not stack on typical laptop widths */
+.gradio-container > .main,
+.gradio-container .wrap.svelte-1jdub1s,
+.gradio-container .contain {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+#app_header {
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+  padding: 0 2px 2px !important;
+}
+#app_header h1 {
+  font-size: 1.05rem !important;
+  margin: 0 !important;
+  line-height: 1.2 !important;
+}
+#app_header p, #app_header .md, #app_header ul { display: none !important; }
+
+/* Fixed non-scrolling workspace */
 #main_workspace {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  max-height: calc(100vh - 36px) !important;
   display: flex !important;
   flex-direction: row !important;
   flex-wrap: nowrap !important;
-  align-items: flex-start !important;
-  gap: 12px !important;
+  align-items: stretch !important;
+  gap: 0 !important;
+  overflow: hidden !important;
 }
 #main_workspace > div {
   min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
 }
-#controls_col {
-  flex: 0 0 340px !important;
-  width: 340px !important;
-  max-width: 340px !important;
-  position: sticky !important;
-  top: 6px !important;
-  /* No max-height / internal scroll — that was clipping accordion bodies
-     and developer dropdown lists so options/controls never fully appeared. */
-  max-height: none !important;
-  overflow-x: hidden !important;
-  overflow-y: visible !important;
-  padding-right: 8px !important;
-  align-self: flex-start !important;
-  z-index: 30 !important;
+
+/* Icon rail */
+#icon_rail {
+  flex: 0 0 56px !important;
+  width: 56px !important;
+  max-width: 56px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  padding: 4px 4px 8px !important;
   box-sizing: border-box !important;
+  border-right: 1px solid rgba(255,255,255,0.08) !important;
+  background: rgba(0,0,0,0.22) !important;
+  z-index: 40 !important;
+  overflow: hidden !important;
 }
-#preview_col {
-  flex: 1 1 auto !important;
+#icon_rail button {
+  min-height: 44px !important;
+  height: 44px !important;
+  width: 100% !important;
+  padding: 2px !important;
+  font-size: 0.62rem !important;
+  line-height: 1.05 !important;
+  white-space: pre-line !important;
+  border-radius: 8px !important;
+}
+#icon_rail button.rail-active {
+  outline: 1px solid #f2d28a !important;
+  background: rgba(242, 210, 138, 0.16) !important;
+}
+#icon_rail .rail-spacer { flex: 1 1 auto !important; min-height: 8px !important; }
+
+/* Drawer host — one panel visible; compressed */
+#drawer_host {
+  flex: 0 0 280px !important;
+  width: 280px !important;
+  max-width: 280px !important;
   min-width: 0 !important;
-  z-index: 1 !important;
+  height: 100% !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  padding: 4px 8px 8px !important;
+  box-sizing: border-box !important;
+  border-right: 1px solid rgba(255,255,255,0.06) !important;
+  background: rgba(0,0,0,0.12) !important;
+  z-index: 35 !important;
+  transition: flex-basis 0.18s ease, width 0.18s ease, max-width 0.18s ease, padding 0.18s ease, opacity 0.15s ease !important;
 }
-/* Compact control density */
-#controls_col .block {
+body.drawer-collapsed #drawer_host {
+  flex-basis: 0 !important;
+  width: 0 !important;
+  max-width: 0 !important;
+  padding: 0 !important;
+  opacity: 0 !important;
+  border-right-width: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
+.drawer-panel { display: none !important; }
+.drawer-panel.is-open { display: block !important; }
+.drawer-panel .accordion > .label-wrap {
+  display: none !important; /* rail is the chrome */
+}
+.drawer-panel .accordion {
+  margin: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+#drawer_host .block {
   margin-top: 2px !important;
   margin-bottom: 2px !important;
   padding: 0 !important;
-  overflow: visible !important;
 }
-#controls_col .label-wrap,
-#controls_col label,
-#controls_col .svelte-1b6s6s {
+#drawer_host .label-wrap,
+#drawer_host label {
   margin-bottom: 0 !important;
-  font-size: 0.82rem !important;
+  font-size: 0.78rem !important;
 }
-#controls_col .form {
-  gap: 4px !important;
-  overflow: visible !important;
-}
-#controls_col button {
-  min-height: 34px !important;
-  font-size: 0.9rem !important;
-}
-/* Accordion: never clip body — show full Develop/Print/Inspect controls */
-#controls_col .accordion,
-#controls_col .accordion > .wrap,
-#controls_col .accordion > div,
-#preview_col .accordion,
-#preview_col .accordion > .wrap,
-#preview_col .accordion > div {
-  overflow: visible !important;
-  max-height: none !important;
-}
-#controls_col .accordion .wrap,
-#preview_col .accordion .wrap {
-  height: auto !important;
-}
-#controls_col .accordion {
-  margin-bottom: 6px !important;
-}
-#controls_col .accordion > .label-wrap {
-  padding: 6px 8px !important;
-  font-size: 0.9rem !important;
-}
-/* Open dropdown lists (film / developer / paper) must escape parents */
-#controls_col [role="listbox"],
-#controls_col ul.options,
-#controls_col .options,
-#controls_col .secondary-wrap {
+#drawer_host .form { gap: 3px !important; }
+#drawer_host button { min-height: 30px !important; font-size: 0.82rem !important; }
+#drawer_host [role="listbox"],
+#drawer_host ul.options {
   z-index: 9999 !important;
-}
-#controls_col [role="listbox"],
-#controls_col ul.options {
-  max-height: min(55vh, 420px) !important;
+  max-height: min(40vh, 280px) !important;
   overflow-y: auto !important;
-  overflow-x: hidden !important;
-}
-/* Avoid clipping long chemistry names in the closed dropdown */
-#controls_col .wrap.fullscreen-allowed,
-#controls_col .container {
-  overflow: visible !important;
-}
-#app_header h1 {
-  font-size: 1.35rem !important;
-  margin: 0 0 2px 0 !important;
-}
-#app_header p, #app_header {
-  margin: 0 0 6px 0 !important;
-  font-size: 0.88rem !important;
-  line-height: 1.35 !important;
 }
 #ritual_status {
-  padding: 6px 8px !important;
-  margin-bottom: 6px !important;
-  border-left: 3px solid #c45c26;
-  background: linear-gradient(90deg, rgba(196,92,38,0.12), transparent);
-  font-size: 0.82rem !important;
-  line-height: 1.35 !important;
-  max-height: 9rem;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
-  overflow-wrap: anywhere !important;
-  word-break: break-word !important;
-  max-width: 100% !important;
-  box-sizing: border-box !important;
-}
-#ritual_status *,
-#history_box *,
-#controls_col .prose,
-#controls_col .prose * {
-  max-width: 100% !important;
-  overflow-wrap: anywhere !important;
-  word-break: break-word !important;
-}
-#ritual_status code,
-#history_box code,
-#controls_col .prose code {
-  white-space: pre-wrap !important;
-  word-break: break-all !important;
-  overflow-wrap: anywhere !important;
-  font-size: 0.78em !important;
+  font-size: 0.78rem !important;
+  line-height: 1.25 !important;
+  margin: 0 0 6px 0 !important;
 }
 #history_box {
-  margin-top: 4px !important;
-  padding: 8px 10px !important;
-  border: 1px solid rgba(128,128,128,0.25);
-  background: rgba(0,0,0,0.08);
-  font-size: 0.8rem !important;
-  line-height: 1.4 !important;
-  max-height: 220px;
-  max-width: 100% !important;
-  width: 100% !important;
-  box-sizing: border-box !important;
-  overflow-x: hidden !important;
+  max-height: calc(100vh - 120px) !important;
   overflow-y: auto !important;
+  overflow-x: hidden !important;
+  font-size: 0.8rem !important;
+  line-height: 1.35 !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+}
+#history_box *,
+#history_box code {
   overflow-wrap: anywhere !important;
   word-break: break-word !important;
+  white-space: pre-wrap !important;
 }
-#history_box ol,
-#history_box ul {
-  padding-left: 1.15rem !important;
-  margin: 0.25rem 0 !important;
+
+/* Preview fills remaining viewport */
+#preview_col {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  padding: 2px 4px 4px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  z-index: 1 !important;
 }
-#history_box p,
-#history_box li {
-  margin: 0.2rem 0 !important;
-}
+#preview_col > .block:has(#live_preview),
 #live_preview {
+  flex: 1 1 auto !important;
   min-height: 0 !important;
 }
+#live_preview {
+  height: 100% !important;
+  max-height: none !important;
+}
 #live_preview .image-frame,
-#live_preview .image-container,
-#inspect_preview .image-frame,
-#inspect_preview .image-container {
-  overflow: auto !important;
-  max-height: calc(100vh - 160px) !important;
-  background: #0c0c0c !important;
+#live_preview .image-container {
+  height: 100% !important;
+  max-height: none !important;
 }
 #live_preview img,
 #live_preview .image-container img,
 #live_preview .image-frame img {
-  max-height: calc(100vh - 160px) !important;
+  max-height: calc(100vh - 120px) !important;
   width: auto !important;
-  max-width: 100% !important;
   object-fit: contain !important;
-  background: #0c0c0c !important;
-  transform-origin: center center;
-  cursor: zoom-in;
 }
-#inspect_preview {
-  min-height: 60vh !important;
-}
-#inspect_preview img,
-#inspect_preview .image-container img,
-#inspect_preview .image-frame img {
-  max-height: none !important;
-  max-width: none !important;
-  width: auto !important;
-  height: auto !important;
-  object-fit: contain !important;
-  background: #0c0c0c !important;
-  transform-origin: center center;
-  cursor: grab;
-}
-#inspect_hint {
-  font-size: 0.8rem !important;
-  opacity: 0.85;
-  margin: 2px 0 6px 0 !important;
-}
-#ref_row {
+#seq_strip {
+  flex: 0 0 auto !important;
   gap: 6px !important;
-  margin-top: 6px !important;
+  align-items: center !important;
 }
-#ref_row img {
-  max-height: 88px !important;
-  object-fit: contain !important;
-  background: #0c0c0c !important;
+#seq_strip .image-container,
+#seq_strip .image-frame {
+  height: 56px !important;
+  min-height: 56px !important;
 }
-#db_hint {
-  font-size: 0.8rem !important;
-  opacity: 0.9;
-  margin: 2px 0 6px 0 !important;
+#seq_strip img { max-height: 52px !important; object-fit: contain !important; }
+#seq_strip button {
+  min-height: 28px !important;
+  font-size: 0.72rem !important;
+  padding: 2px 8px !important;
 }
-#db_size_readout {
-  margin: 0 0 8px 0 !important;
-  font-size: 0.85rem !important;
-  color: #d8c49a;
-  letter-spacing: 0.02em;
-}
-#db_size_readout .db-size-pill {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 4px;
-  background: rgba(255, 184, 77, 0.12);
-  border: 1px solid rgba(255, 184, 77, 0.35);
-}
-#first_print_guide button {
-  min-height: 40px !important;
-  font-weight: 650 !important;
-}
-/* Hide Gradio Timer chrome — it shows a running stopwatch and looks like
-   the dodge/burn countdown never stops. We only use it as a 1s tick source. */
-.db_clock_hidden {
+#preview_tool, #active_drawer, #crop_rect, #db_pos {
   position: absolute !important;
   left: -9999px !important;
-  top: 0 !important;
   width: 1px !important;
   height: 1px !important;
-  max-height: 1px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  overflow: hidden !important;
   opacity: 0 !important;
+  overflow: hidden !important;
   pointer-events: none !important;
-  clip: rect(0, 0, 0, 0) !important;
-  border: 0 !important;
 }
-.db_clock_hidden,
-.db_clock_hidden * {
-  visibility: hidden !important;
-  font-size: 0 !important;
-  line-height: 0 !important;
-}
-/* Gradio sometimes paints last-request duration ("9.5s") beside buttons */
-#db_actions .meta-text,
-#db_actions .eta-bar,
-#db_actions [class*="progress"],
-#db_actions [class*="duration"],
-#db_actions span:has(+ button),
-#controls_col .db_clock_hidden ~ .meta-text {
+#inspect_preview { display: none !important; }
+
+/* Floating toolbars (right-click tools) */
+.float-toolbar {
+  position: fixed !important;
+  z-index: 100050 !important;
+  min-width: 280px;
+  max-width: min(420px, 92vw);
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  padding: 10px 12px !important;
+  border-radius: 10px !important;
+  border: 1px solid rgba(242, 210, 138, 0.45) !important;
+  background: rgba(18, 18, 18, 0.94) !important;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.55) !important;
   display: none !important;
 }
-#db_flag { display: none !important; }
-#db_pos { display: none !important; }
-#db_wave_banner:empty,
-#db_wave_banner .db-wave-idle {
-  display: none !important;
-}
-#db_wave_banner .db-wave-active {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
+.float-toolbar.is-open { display: block !important; }
+.float-toolbar .float-title {
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: #f2d28a;
   margin: 0 0 8px 0;
-  padding: 10px 14px;
-  border-radius: 6px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: #1a1208;
-  background: linear-gradient(90deg, #ffb84d, #ffcc66 40%, #ffe0a0 70%, #ffcc66);
-  border: 1px solid #e09a30;
-  box-shadow: 0 0 0 1px rgba(255, 180, 60, 0.35), 0 6px 18px rgba(0, 0, 0, 0.25);
-  animation: db-wave-pulse 1.2s ease-in-out infinite;
 }
-#db_wave_banner .db-wave-active .db-wave-arrow {
-  font-size: 1.15rem;
-  opacity: 0.9;
-}
-body.db-exposing #controls_col {
-  opacity: 0.55;
-  pointer-events: none;
-}
-body.db-exposing #controls_col #db_actions,
-body.db-exposing #controls_col .db_clock_hidden {
-  pointer-events: auto;
-  opacity: 1;
-}
-body.db-exposing #preview_col {
-  position: relative;
-  z-index: 2;
-}
-#live_preview.db-waving {
-  outline: 3px solid #ffb84d !important;
-  outline-offset: 4px;
-  border-radius: 4px;
-  box-shadow: 0 0 0 8px rgba(255, 184, 77, 0.18), 0 0 28px rgba(255, 170, 40, 0.35) !important;
-  animation: db-wave-ring 1.2s ease-in-out infinite;
-}
-body.db-exposing #live_preview,
-body.db-exposing #live_preview *,
-#live_preview.db-waving,
-#live_preview.db-waving *,
-#live_preview.db-waving img,
-#live_preview.db-tool-hover,
-#live_preview.db-tool-hover *,
-#live_preview.db-tool-hover img {
-  cursor: none !important;
-}
-#live_preview.db-waving .label-wrap span,
-#live_preview.db-waving label span {
-  color: #ffb84d !important;
-  font-weight: 700 !important;
-}
-#db_tool_cursor {
+#ctx_menu {
   position: fixed;
-  pointer-events: none;
-  z-index: 100000;
-  transform: translate(-50%, -50%);
-  width: 120px;
-  height: 120px;
+  z-index: 100060;
   display: none;
+  min-width: 180px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(16,16,16,0.96);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.5);
 }
-#db_tool_cursor.db-tool-preview .db-tool-fill {
-  opacity: 0.18;
-}
-#db_tool_cursor.db-tool-preview .db-tool-svg {
-  opacity: 0.95;
-}
-#db_tool_cursor .db-tool-fill {
-  position: absolute;
-  inset: 0;
+#ctx_menu.is-open { display: block; }
+#ctx_menu button {
+  display: block;
   width: 100%;
-  height: 100%;
-  object-fit: contain;
-  opacity: 0.35;
-  filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: #eee;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
 }
-#db_tool_cursor .db-tool-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  filter: drop-shadow(0 0 3px rgba(0,0,0,0.9));
-}
-#db_tool_cursor.db-card-resting {
-  animation: db-card-breathe 1.4s ease-in-out infinite;
-}
-#db_stamp_asset { display: none !important; }
-@keyframes db-wave-pulse {
-  0%, 100% { filter: brightness(1); }
-  50% { filter: brightness(1.08); }
-}
-@keyframes db-wave-ring {
-  0%, 100% { box-shadow: 0 0 0 6px rgba(255, 184, 77, 0.16), 0 0 22px rgba(255, 170, 40, 0.28); }
-  50% { box-shadow: 0 0 0 10px rgba(255, 184, 77, 0.28), 0 0 34px rgba(255, 170, 40, 0.45); }
-}
-@keyframes db-card-breathe {
-  0%, 100% { opacity: 0.34; transform: translate(-50%, -50%) scale(0.96); }
-  50% { opacity: 0.55; transform: translate(-50%, -50%) scale(1.02); }
-}
-/* Interactive crop overlay on the live theoretical print */
+#ctx_menu button:hover { background: rgba(242, 210, 138, 0.18); color: #fff; }
+
+/* Compact leftovers from older layout ids */
+#controls_col { display: contents !important; }
+#db_size_readout { font-size: 0.72rem !important; opacity: 0.85; }
+#db_wave_banner { flex: 0 0 auto; }
+#first_print_guide { display: none !important; }
+
+/* Crop overlay on live print */
 #live_preview.crop-armed {
   position: relative !important;
   user-select: none;
   cursor: crosshair;
 }
 #live_preview.crop-armed .image-container,
-#live_preview.crop-armed .image-frame {
-  position: relative !important;
-}
-#live_preview.crop-armed img {
-  cursor: crosshair;
-}
+#live_preview.crop-armed .image-frame { position: relative !important; }
+#live_preview.crop-armed img { cursor: crosshair; }
 #crop_overlay {
   position: absolute;
   inset: 0;
@@ -515,14 +412,11 @@ body.db-exposing #live_preview *,
   cursor: move;
   box-sizing: border-box;
 }
-#crop_overlay .crop-box::before,
-#crop_overlay .crop-box::after {
+#crop_overlay .crop-box::before {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-}
-#crop_overlay .crop-box::before {
   background:
     linear-gradient(to right, transparent 33.33%, rgba(242,210,138,0.35) 33.33%, rgba(242,210,138,0.35) 33.66%, transparent 33.66%, transparent 66.66%, rgba(242,210,138,0.35) 66.66%, rgba(242,210,138,0.35) 67%, transparent 67%),
     linear-gradient(to bottom, transparent 33.33%, rgba(242,210,138,0.35) 33.33%, rgba(242,210,138,0.35) 33.66%, transparent 33.66%, transparent 66.66%, rgba(242,210,138,0.35) 66.66%, rgba(242,210,138,0.35) 67%, transparent 67%);
@@ -546,24 +440,59 @@ body.db-exposing #live_preview *,
 #crop_overlay .crop-handle.s { left: 50%; bottom: -6px; margin-left: -6px; cursor: ns-resize; }
 #crop_overlay .crop-handle.w { left: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
 #crop_overlay .crop-handle.e { right: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
-#live_preview.inspect-armed img {
-  cursor: zoom-in;
+#live_preview.inspect-armed img { cursor: zoom-in; }
+
+#db_tool_cursor {
+  position: fixed;
+  pointer-events: none;
+  z-index: 100000;
+  transform: translate(-50%, -50%);
+  width: 120px;
+  height: 120px;
+  display: none;
 }
-#preview_tool {
-  margin-bottom: 4px !important;
+#db_tool_cursor.db-tool-preview .db-tool-fill { opacity: 0.18; }
+#db_tool_cursor.db-tool-preview .db-tool-svg { opacity: 0.95; }
+#db_tool_cursor .db-tool-fill {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; opacity: 0.35;
+  filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));
 }
-#frame_tools {
-  margin-top: 6px !important;
-  margin-bottom: 4px !important;
-  padding: 8px 10px !important;
-  border: 1px solid rgba(242, 210, 138, 0.35) !important;
-  border-radius: 8px !important;
-  background: rgba(0, 0, 0, 0.18) !important;
+#db_tool_cursor .db-tool-svg {
+  position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible;
+  filter: drop-shadow(0 0 3px rgba(0,0,0,0.9));
 }
-#crop_ratio_row {
-  gap: 6px !important;
+#db_tool_cursor.db-card-resting {
+  animation: db-card-breathe 1.4s ease-in-out infinite;
 }
-#crop_rect {
+#db_stamp_asset { display: none !important; }
+@keyframes db-wave-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.08); }
+}
+@keyframes db-wave-ring {
+  0%, 100% { box-shadow: 0 0 0 6px rgba(255, 184, 77, 0.16), 0 0 22px rgba(255, 170, 40, 0.28); }
+  50% { box-shadow: 0 0 0 10px rgba(255, 184, 77, 0.28), 0 0 34px rgba(255, 170, 40, 0.45); }
+}
+@keyframes db-card-breathe {
+  0%, 100% { opacity: 0.34; transform: translate(-50%, -50%) scale(0.96); }
+  50% { opacity: 0.55; transform: translate(-50%, -50%) scale(1.02); }
+}
+body.db-exposing #live_preview,
+body.db-exposing #live_preview *,
+#live_preview.db-waving,
+#live_preview.db-waving *,
+#live_preview.db-waving img,
+#live_preview.db-tool-hover,
+#live_preview.db-tool-hover *,
+#live_preview.db-tool-hover img {
+  cursor: none !important;
+}
+#live_preview.db-waving {
+  outline: 3px solid #ffb84d !important;
+  animation: db-wave-pulse 1.1s ease-in-out infinite, db-wave-ring 1.1s ease-in-out infinite;
+}
+.db_clock_hidden {
   position: absolute !important;
   left: -9999px !important;
   width: 1px !important;
@@ -571,19 +500,6 @@ body.db-exposing #live_preview *,
   opacity: 0 !important;
   overflow: hidden !important;
   pointer-events: none !important;
-}
-#inspect_preview {
-  display: none !important;
-}
-@media (max-width: 900px) {
-  #main_workspace { flex-wrap: wrap !important; }
-  #controls_col {
-    flex: 1 1 100% !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    position: relative !important;
-    max-height: none !important;
-  }
 }
 """
 
@@ -1376,6 +1292,182 @@ UI_JS = """
   const bootCrop = () => { try { setupCropTool(); syncPreviewToolClasses(); } catch (_) {} };
   bootCrop();
   setInterval(bootCrop, 1500);
+
+  // ——— Fixed icon-rail workspace + right-click floating tools ———
+  const setPreviewToolValue = (tool) => {
+    const root = document.querySelector('#preview_tool');
+    if (!root) return;
+    const input = root.querySelector(`input[type="radio"][value="${tool}"]`);
+    if (input && !input.checked) {
+      input.checked = true;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    syncPreviewToolClasses();
+  };
+
+  const writeActiveDrawer = (name) => {
+    const root = document.querySelector('#active_drawer');
+    const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+    if (!box) return;
+    if (box.value === name) return;
+    box.value = name;
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  const readActiveDrawer = () => {
+    const root = document.querySelector('#active_drawer');
+    const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+    return (box && box.value) || document.body.dataset.drawer || 'ingest';
+  };
+
+  window.__drawerCollapsed = false;
+  const applyDrawer = (name, { fromServer = false } = {}) => {
+    const n = (name || 'ingest').toLowerCase();
+    if (!fromServer && document.body.dataset.drawer === n && !document.body.classList.contains('drawer-collapsed')) {
+      document.body.classList.add('drawer-collapsed');
+      window.__drawerCollapsed = true;
+      document.querySelectorAll('#icon_rail .rail-btn').forEach((b) => b.classList.remove('rail-active'));
+      return;
+    }
+    document.body.classList.remove('drawer-collapsed');
+    window.__drawerCollapsed = false;
+    document.body.dataset.drawer = n;
+    document.querySelectorAll('.drawer-panel').forEach((el) => {
+      el.classList.toggle('is-open', el.id === 'drawer_' + n);
+    });
+    document.querySelectorAll('#icon_rail .rail-btn').forEach((b) => {
+      const id = (b.id || '').replace('rail_', '');
+      b.classList.toggle('rail-active', id === n);
+    });
+    if (n === 'frame') setPreviewToolValue('frame');
+    else if (n === 'print') setPreviewToolValue('print');
+  };
+
+  const closeFloats = () => {
+    document.querySelectorAll('.float-toolbar').forEach((el) => el.classList.remove('is-open'));
+  };
+
+  const openFloat = (id, x, y) => {
+    closeFloats();
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('is-open');
+    const pad = 12;
+    const w = Math.min(420, window.innerWidth - 24);
+    let left = Math.min(Math.max(pad, x), window.innerWidth - w - pad);
+    let top = Math.min(Math.max(pad, y), window.innerHeight - 120);
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    el.style.width = w + 'px';
+  };
+
+  const ensureCtxMenu = () => {
+    let menu = document.getElementById('ctx_menu');
+    if (menu) return menu;
+    menu = document.createElement('div');
+    menu.id = 'ctx_menu';
+    menu.innerHTML = `
+      <button type="button" data-act="zoom">Inspect · zoom</button>
+      <button type="button" data-act="dodge">Dodge</button>
+      <button type="button" data-act="burn">Burn</button>
+      <button type="button" data-act="crop">Crop & straighten</button>
+      <button type="button" data-act="autocrop">Auto crop</button>
+    `;
+    document.body.appendChild(menu);
+    menu.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      const act = btn.getAttribute('data-act');
+      const x = parseFloat(menu.dataset.x || '80');
+      const y = parseFloat(menu.dataset.y || '80');
+      menu.classList.remove('is-open');
+      if (act === 'zoom') {
+        setPreviewToolValue('inspect');
+        openFloat('float_zoom', x, y);
+      } else if (act === 'dodge' || act === 'burn') {
+        setPreviewToolValue('print');
+        // set db_mode radio
+        const root = document.querySelector('#float_easel');
+        if (root) {
+          const input = root.querySelector(`input[type="radio"][value="${act}"]`);
+          if (input) {
+            input.checked = true;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+        openFloat('float_easel', x, y);
+      } else if (act === 'crop') {
+        writeActiveDrawer('frame');
+        applyDrawer('frame', { fromServer: true });
+        setPreviewToolValue('frame');
+        openFloat('float_crop', x, y);
+      } else if (act === 'autocrop') {
+        writeActiveDrawer('frame');
+        applyDrawer('frame', { fromServer: true });
+        setPreviewToolValue('frame');
+        openFloat('float_crop', x, y);
+        // Click Auto crop if present
+        const autoBtn = Array.from(document.querySelectorAll('button')).find(
+          (b) => (b.textContent || '').trim() === 'Auto crop'
+        );
+        if (autoBtn) autoBtn.click();
+      }
+    });
+    return menu;
+  };
+
+  document.addEventListener('contextmenu', (e) => {
+    const live = document.querySelector('#live_preview');
+    if (!live || !live.contains(e.target)) return;
+    e.preventDefault();
+    const menu = ensureCtxMenu();
+    menu.dataset.x = String(e.clientX);
+    menu.dataset.y = String(e.clientY);
+    menu.style.left = e.clientX + 'px';
+    menu.style.top = e.clientY + 'px';
+    menu.classList.add('is-open');
+  });
+  document.addEventListener('click', (e) => {
+    const menu = document.getElementById('ctx_menu');
+    if (menu && !menu.contains(e.target)) menu.classList.remove('is-open');
+    // Close floats via Close buttons
+    const t = e.target;
+    if (t && t.closest && (t.textContent || '').trim() === 'Close' && t.closest('.float-toolbar')) {
+      closeFloats();
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeFloats();
+      const menu = document.getElementById('ctx_menu');
+      if (menu) menu.classList.remove('is-open');
+    }
+  });
+
+  // Rail clicks (toggle collapse if same icon)
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest && e.target.closest('#icon_rail button.rail-btn');
+    if (!btn) return;
+    const name = (btn.id || '').replace('rail_', '');
+    if (!name || name === 'new') return;
+    applyDrawer(name, { fromServer: false });
+    writeActiveDrawer(name);
+  });
+
+  // Rail clicks also toggle via Gradio → active_drawer; observe that box.
+  let lastDrawerVal = '';
+  const syncDrawerFromBox = () => {
+    const v = readActiveDrawer();
+    if (v && v !== lastDrawerVal) {
+      lastDrawerVal = v;
+      applyDrawer(v, { fromServer: true });
+    }
+  };
+  setInterval(syncDrawerFromBox, 400);
+  applyDrawer(readActiveDrawer() || 'ingest', { fromServer: true });
 })();
 """
 
@@ -1784,16 +1876,27 @@ def focus_viewer_button(mode: str):
 
 
 def on_preview_tool_change(tool: str):
-    """Show frame controls only in Frame mode; keep live preview as the workspace."""
+    """Update the live preview label for the active tool mode."""
     tool = str(tool or "print")
     labels = {
-        "print": LIVE_PRINT_LABEL + " · Print tool (dodge/burn)",
-        "frame": LIVE_PRINT_LABEL + " · Frame tool (crop & straighten)",
-        "inspect": LIVE_PRINT_LABEL + " · Inspect tool (scroll zoom · drag pan)",
+        "print": LIVE_PRINT_LABEL + " · easel",
+        "frame": LIVE_PRINT_LABEL + " · frame",
+        "inspect": LIVE_PRINT_LABEL + " · inspect",
     }
+    return gr.update(label=labels.get(tool, LIVE_PRINT_LABEL))
+
+
+def set_workspace_drawer(name: str):
+    """Toggle left drawers — clicking the active icon collapses the drawer."""
+    # Implemented primarily in JS; this keeps Gradio accordion open states in sync.
+    name = str(name or "ingest")
     return (
-        gr.update(visible=tool == "frame"),
-        gr.update(label=labels.get(tool, LIVE_PRINT_LABEL)),
+        gr.update(open=name == "ingest"),
+        gr.update(open=name == "develop"),
+        gr.update(open=name == "print"),
+        gr.update(open=name == "frame"),
+        gr.update(open=name == "log"),
+        name,
     )
 
 
@@ -2252,6 +2355,7 @@ def commit_ingest(sample_path, file_obj, state):
         "free",
         _inspect_frame(state, live=latent_inspect),
         state,
+        "develop",
     )
 
 
@@ -2592,6 +2696,7 @@ def commit_develop(film_id, developer_id, development_minutes, contrast, grain, 
         gr.update(open=False),  # collapse Develop
         gr.update(open=True),   # show Print
         state,
+        "print",
     )
 
 
@@ -3124,6 +3229,7 @@ def unlock_develop(state):
         gr.update(open=True),
         gr.update(open=True),
         state,
+        "develop",
     )
 
 
@@ -3403,6 +3509,7 @@ def reset_session():
         DEFAULT_CROP_RECT,
         "free",
         None,
+        "ingest",
     )
 
 
@@ -3410,273 +3517,253 @@ def build_ui() -> gr.Blocks:
     default_sample = SAMPLE_CHOICES[1][1] if len(SAMPLE_CHOICES) > 1 else ""
     with gr.Blocks(title="Digital Negative Darkroom") as demo:
         state = gr.State(None)
-        gr.Markdown(
-            """
-            # Digital Negative Darkroom
-            **Ingest → Develop → Print** · Commit locks · Unlock revises · Right image = enlarger easel / theoretical print
-            """,
-            elem_id="app_header",
-        )
-        with gr.Accordion("First print (≈2 min)", open=True, elem_id="first_print_guide"):
-            gr.Markdown(
-                "New here? **Run first-print guide** locks Ingest + Develop with the current "
-                "sample, opens Print with a soft-oval card, and leaves you on the easel. "
-                "Then scroll to size the card and **Start — wave over print →**."
-            )
-            guide_btn = gr.Button(
-                "▶ Run first-print guide",
-                variant="primary",
-                size="sm",
-            )
+        active_drawer = gr.Textbox(value="ingest", elem_id="active_drawer", show_label=False)
+        gr.Markdown("# Digital Negative Darkroom", elem_id="app_header")
 
         with gr.Row(elem_id="main_workspace", equal_height=False):
-            with gr.Column(scale=0, elem_id="controls_col", min_width=300):
+            # ——— Icon rail ———
+            with gr.Column(scale=0, elem_id="icon_rail", min_width=56):
+                rail_ingest = gr.Button("Ingest", elem_id="rail_ingest", size="sm", elem_classes=["rail-btn", "rail-active"])
+                rail_develop = gr.Button("Develop", elem_id="rail_develop", size="sm", elem_classes=["rail-btn"])
+                rail_print = gr.Button("Print", elem_id="rail_print", size="sm", elem_classes=["rail-btn"])
+                rail_frame = gr.Button("Frame", elem_id="rail_frame", size="sm", elem_classes=["rail-btn"])
+                rail_log = gr.Button("Log", elem_id="rail_log", size="sm", elem_classes=["rail-btn"])
+                gr.HTML('<div class="rail-spacer"></div>')
+                reset_btn = gr.Button("New", elem_id="rail_new", size="sm")
+
+            # ——— Drawer panels (one visible) ———
+            with gr.Column(scale=0, elem_id="drawer_host", min_width=0):
                 status = gr.Markdown(
                     "**1. Ingest — working** → 2. Develop → 3. Print  \n"
                     "_Commit Ingest to begin._",
                     elem_id="ritual_status",
                 )
-                with gr.Accordion("1 · Ingest", open=True) as ingest_acc:
-                    sample = gr.Dropdown(
-                        choices=SAMPLE_CHOICES,
-                        value=default_sample,
-                        label="Sample (if no upload)",
-                    )
-                    file_in = gr.File(
-                        label="Upload (overrides sample)",
-                        file_types=[
-                            ".arw", ".cr2", ".cr3", ".nef", ".dng", ".raf", ".orf", ".rw2",
-                            ".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp",
-                            ".heic", ".heif", ".avif",
-                        ],
-                        # Gradio 6 needs a real drop-zone height — 56px made "Click to upload" unreliable.
-                        height=120,
-                        elem_id="ingest_upload",
-                    )
-                    ingest_btn = gr.Button("Commit Ingest", variant="primary", size="sm")
-
-                # Keep later stages collapsed until Commit Ingest / Commit Develop open them.
-                with gr.Accordion("2 · Develop", open=False) as develop_acc:
-                    film = gr.Dropdown(
-                        choices=FILM_CHOICES,
-                        value=FILM_CHOICES[0][1] if FILM_CHOICES else None,
-                        label="Film",
-                    )
-                    developer = gr.Dropdown(
-                        choices=_INIT_DEV_CHOICES,
-                        value=_INIT_DEV_ID,
-                        label="Developer",
-                    )
-                    development_minutes = gr.Slider(
-                        _INIT_TMIN,
-                        _INIT_TMAX,
-                        value=_INIT_TNORM,
-                        step=0.25,
-                        label=f"Dev time (min) · N={_INIT_TNORM:g} @ 20°C",
-                    )
-                    contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Contrast N− / N+")
-                    grain = gr.Slider(0.0, 2.5, value=1.0, step=0.05, label="Grain")
-                    with gr.Row():
-                        develop_btn = gr.Button(
-                            "Commit Develop", interactive=False, variant="primary", size="sm"
+                with gr.Group(elem_id="drawer_ingest", elem_classes=["drawer-panel", "is-open"]):
+                    with gr.Accordion("Ingest", open=True, elem_id="acc_ingest") as ingest_acc:
+                        sample = gr.Dropdown(
+                            choices=SAMPLE_CHOICES,
+                            value=default_sample,
+                            label="Sample (if no upload)",
                         )
-                        unlock_develop_btn = gr.Button("Unlock", interactive=False, size="sm")
+                        file_in = gr.File(
+                            label="Upload (overrides sample)",
+                            file_types=[
+                                ".arw", ".cr2", ".cr3", ".nef", ".dng", ".raf", ".orf", ".rw2",
+                                ".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp",
+                                ".heic", ".heif", ".avif",
+                            ],
+                            height=88,
+                            elem_id="ingest_upload",
+                        )
+                        ingest_btn = gr.Button("Commit Ingest", variant="primary", size="sm")
 
-                with gr.Accordion("3 · Print", open=False) as print_acc:
-                    paper = gr.Dropdown(
-                        choices=PAPER_CHOICES,
-                        value=PAPER_CHOICES[0][1] if PAPER_CHOICES else None,
-                        label="Paper",
-                    )
-                    print_exposure = gr.Slider(
-                        2.0,
-                        64.0,
-                        value=8.0,
-                        step=0.5,
-                        label="Base exposure (seconds)",
-                        info="Enlarger timer — dodge/burn is relative to this base",
-                    )
-                    base_math_md = gr.Markdown(_base_math_md(8.0), elem_id="base_math")
-                    print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="MG filtration")
-                    print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter nudge")
-                    with gr.Accordion("Dodge & burn · enlarger easel", open=True):
+                with gr.Group(elem_id="drawer_develop", elem_classes=["drawer-panel"]):
+                    with gr.Accordion("Develop", open=True, elem_id="acc_develop") as develop_acc:
+                        film = gr.Dropdown(
+                            choices=FILM_CHOICES,
+                            value=FILM_CHOICES[0][1] if FILM_CHOICES else None,
+                            label="Film",
+                        )
+                        developer = gr.Dropdown(
+                            choices=_INIT_DEV_CHOICES,
+                            value=_INIT_DEV_ID,
+                            label="Developer",
+                        )
+                        development_minutes = gr.Slider(
+                            _INIT_TMIN,
+                            _INIT_TMAX,
+                            value=_INIT_TNORM,
+                            step=0.25,
+                            label=f"Dev time (min) · N={_INIT_TNORM:g}",
+                        )
+                        contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Contrast N− / N+")
+                        grain = gr.Slider(0.0, 2.5, value=1.0, step=0.05, label="Grain")
+                        with gr.Row():
+                            develop_btn = gr.Button(
+                                "Commit Develop", interactive=False, variant="primary", size="sm"
+                            )
+                            unlock_develop_btn = gr.Button("Unlock", interactive=False, size="sm")
+
+                with gr.Group(elem_id="drawer_print", elem_classes=["drawer-panel"]):
+                    with gr.Accordion("Print", open=True, elem_id="acc_print") as print_acc:
+                        paper = gr.Dropdown(
+                            choices=PAPER_CHOICES,
+                            value=PAPER_CHOICES[0][1] if PAPER_CHOICES else None,
+                            label="Paper",
+                        )
+                        print_exposure = gr.Slider(
+                            2.0, 64.0, value=8.0, step=0.5, label="Base exposure (seconds)"
+                        )
+                        base_math_md = gr.Markdown(_base_math_md(8.0), elem_id="base_math")
+                        print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="MG filtration")
+                        print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter nudge")
+                        with gr.Row():
+                            print_btn = gr.Button(
+                                "Commit Print", interactive=False, variant="primary", size="sm"
+                            )
+                            unlock_print_btn = gr.Button("Unlock", interactive=False, size="sm")
                         gr.Markdown(
-                            "The **print on the right** is the easel. Pick a card shape — outline "
-                            "follows your pointer. **Scroll** over the print to resize the tool. "
-                            "Burn adds enlarger light (**darker**); dodge holds light back (**lighter**). "
-                            "Start, then wave. Reset clears local work only.",
+                            "_Dodge / burn: **right-click the print** → Dodge or Burn._",
                             elem_id="db_hint",
                         )
-                        db_shape = gr.Radio(
-                            choices=[(label, key) for key, label in CARD_PRESETS],
-                            value="soft_oval",
-                            label="Card / wand shape",
+
+                with gr.Group(elem_id="drawer_frame", elem_classes=["drawer-panel"]):
+                    with gr.Accordion("Frame", open=True, elem_id="acc_frame") as frame_acc:
+                        with gr.Row():
+                            rotate_ccw_btn = gr.Button("⟲ 90°", size="sm", interactive=False)
+                            rotate_180_btn = gr.Button("180°", size="sm", interactive=False)
+                            rotate_cw_btn = gr.Button("90° ⟳", size="sm", interactive=False)
+                        crop_ratio = gr.Radio(
+                            choices=CROP_RATIO_CHOICES,
+                            value="free",
+                            label="Aspect ratio",
+                            elem_id="crop_ratio",
                         )
-                        db_editor = gr.ImageEditor(
-                            label="Custom card (paint only if shape = Custom)",
-                            type="numpy",
-                            image_mode="RGBA",
-                            height=220,
-                            value=tool_workshop_canvas(),
-                            brush=gr.Brush(
-                                default_size=48,
-                                colors=["#ffcc66", "#ffffff", "#66ccff"],
-                                default_color="#ffcc66",
-                                color_mode="defaults",
-                            ),
-                            eraser=gr.Eraser(),
-                            layers=True,
-                            transforms=(),
-                            sources=(),
-                            buttons=["fullscreen"],
-                            visible=False,
-                        )
-                        db_mode = gr.Radio(
-                            choices=[
-                                ("Dodge — hold back light (lighter print)", "dodge"),
-                                ("Burn — add enlarger light (darker print)", "burn"),
-                            ],
-                            value="burn",
-                            label="Mode",
-                        )
-                        db_seconds = gr.Slider(
-                            1,
-                            32,
-                            value=4,
-                            step=1,
-                            label="Dodge/burn pass (seconds)",
-                            info="Relative to the base exposure timer above",
-                        )
-                        pass_math_md = gr.Markdown(_pass_math_md(8.0, 4.0, "burn"), elem_id="pass_math")
-                        db_timer_md = gr.Markdown(
-                            "**Ready** — pick a shape, then **Start — wave over print →**"
-                        )
-                        with gr.Row(elem_id="db_actions"):
-                            db_start_btn = gr.Button(
-                                "Start — wave over print →",
-                                variant="primary",
-                                size="sm",
+                        with gr.Row():
+                            auto_crop_rule = gr.Dropdown(
+                                choices=AUTO_CROP_RULE_CHOICES,
+                                value="auto",
+                                label="Auto crop rule",
+                                scale=3,
                             )
-                            db_reset_btn = gr.Button("Reset local work", size="sm")
-                        db_flag = gr.HTML(_db_flag_html(None), elem_id="db_flag")
-                        # Keep in the DOM (CSS-hidden) so Timer.tick + pointer JS can sync it.
-                        db_pos = gr.Textbox(value="0.5000,0.5000", elem_id="db_pos", show_label=False)
-                        # Off-screen tick source — samples the waved card ~4×/sec.
-                        with gr.Column(elem_classes=["db_clock_hidden"]):
-                            db_clock = gr.Timer(value=TICK_SECONDS, active=False)
-                    with gr.Row():
-                        print_btn = gr.Button(
-                            "Commit Print", interactive=False, variant="primary", size="sm"
+                            auto_crop_btn = gr.Button(
+                                "Auto crop", interactive=False, variant="secondary", size="sm", scale=1
+                            )
+                        crop_hint = gr.Markdown(
+                            "_Right-click print → Crop, or draw the box in Frame mode._",
+                            elem_id="crop_hint",
                         )
-                        unlock_print_btn = gr.Button("Unlock", interactive=False, size="sm")
+                        straighten_deg = gr.Slider(
+                            -15.0, 15.0, value=0.0, step=0.1, label="Straighten (° CW)"
+                        )
+                        crop_rect = gr.Textbox(
+                            value=DEFAULT_CROP_RECT,
+                            label="crop_rect",
+                            elem_id="crop_rect",
+                            show_label=False,
+                        )
+                        with gr.Row():
+                            apply_framing_btn = gr.Button(
+                                "Apply framing", interactive=False, variant="secondary", size="sm"
+                            )
+                            reset_framing_btn = gr.Button("Reset framing", interactive=False, size="sm")
 
-                reset_btn = gr.Button("New negative", size="sm")
-                with gr.Accordion("Decision log", open=True):
-                    history = gr.Markdown(
-                        "_Locked decisions only — exploring does not write here._",
-                        elem_id="history_box",
-                    )
+                with gr.Group(elem_id="drawer_log", elem_classes=["drawer-panel"]):
+                    with gr.Accordion("Decision log", open=True, elem_id="acc_log") as log_acc:
+                        history = gr.Markdown(
+                            "_Locked decisions only — exploring does not write here._",
+                            elem_id="history_box",
+                        )
 
-            with gr.Column(scale=1, elem_id="preview_col", min_width=480):
+            # ——— Live theoretical print (fills remaining viewport) ———
+            with gr.Column(scale=1, elem_id="preview_col", min_width=420):
                 db_wave_banner = gr.HTML(_wave_banner_html(None), elem_id="db_wave_banner")
                 db_size_readout = gr.HTML(
-                    '<div class="db-size-pill"><span class="db-tool-mode">Print</span> · card <strong class="db-size-value">100%</strong> · Frame draws crop on this print · Inspect zooms</div>',
+                    '<div class="db-size-pill"><span class="db-tool-mode">Print</span> · '
+                    'card <strong class="db-size-value">100%</strong> · right-click for tools</div>',
                     elem_id="db_size_readout",
                 )
                 preview_tool = gr.Radio(
                     choices=[
-                        ("Print · dodge/burn", "print"),
-                        ("Frame · crop & straighten", "frame"),
-                        ("Inspect · zoom", "inspect"),
+                        ("print", "print"),
+                        ("frame", "frame"),
+                        ("inspect", "inspect"),
                     ],
                     value="print",
-                    label="Live preview tools",
+                    label="preview_tool",
                     elem_id="preview_tool",
+                    show_label=False,
                 )
                 live_out = gr.Image(
-                    label=LIVE_PRINT_LABEL + " · Print tool (dodge/burn)",
+                    label=LIVE_PRINT_LABEL + " · easel",
                     type="numpy",
                     elem_id="live_preview",
-                    height=620,
+                    height=640,
                     buttons=["fullscreen", "download"],
                 )
-                with gr.Group(visible=False, elem_id="frame_tools") as frame_tools:
+
+                # Floating toolbars (shown via right-click JS)
+                with gr.Group(elem_id="float_zoom", elem_classes=["float-toolbar"]):
+                    gr.HTML('<div class="float-title">Inspect · zoom</div>')
                     gr.Markdown(
-                        "Crop and straighten on the **live theoretical print** above. "
-                        "Draw/resize the box · lock a ratio · Auto crop suggests classical rules · "
-                        "then **Apply framing**."
+                        "Scroll to zoom · drag to pan when zoomed · double-click resets · "
+                        "fullscreen for a larger view."
                     )
-                    crop_ratio = gr.Radio(
-                        choices=CROP_RATIO_CHOICES,
-                        value="free",
-                        label="Aspect ratio",
-                        elem_id="crop_ratio",
+                    float_zoom_close = gr.Button("Close", size="sm")
+
+                with gr.Group(elem_id="float_easel", elem_classes=["float-toolbar"]):
+                    gr.HTML('<div class="float-title">Dodge & burn · enlarger easel</div>')
+                    db_shape = gr.Radio(
+                        choices=[(label, key) for key, label in CARD_PRESETS],
+                        value="soft_oval",
+                        label="Card / wand shape",
                     )
-                    with gr.Row():
-                        auto_crop_rule = gr.Dropdown(
-                            choices=AUTO_CROP_RULE_CHOICES,
-                            value="auto",
-                            label="Auto crop rule",
-                            scale=3,
-                        )
-                        auto_crop_btn = gr.Button(
-                            "Auto crop",
-                            interactive=False,
-                            variant="secondary",
-                            size="sm",
-                            scale=1,
-                        )
-                    crop_hint = gr.Markdown(
-                        "_Pick a rule and hit Auto crop, or draw the box on the print._",
-                        elem_id="crop_hint",
-                    )
-                    straighten_deg = gr.Slider(
-                        -15.0,
-                        15.0,
-                        value=0.0,
-                        step=0.1,
-                        label="Straighten (° CW)",
-                    )
-                    crop_rect = gr.Textbox(
-                        value=DEFAULT_CROP_RECT,
-                        label="crop_rect",
-                        elem_id="crop_rect",
-                        show_label=False,
-                    )
-                    with gr.Row():
-                        apply_framing_btn = gr.Button(
-                            "Apply framing", interactive=False, variant="secondary", size="sm"
-                        )
-                        reset_framing_btn = gr.Button("Reset framing", interactive=False, size="sm")
-                with gr.Row():
-                    rotate_ccw_btn = gr.Button("Rotate ⟲ 90°", size="sm", interactive=False)
-                    rotate_180_btn = gr.Button("Rotate 180°", size="sm", interactive=False)
-                    rotate_cw_btn = gr.Button("Rotate 90° ⟳", size="sm", interactive=False)
-                with gr.Row(elem_id="ref_row"):
-                    original_out = gr.Image(
-                        label="Original (click to enlarge)",
+                    db_editor = gr.ImageEditor(
+                        label="Custom card (paint only if shape = Custom)",
                         type="numpy",
-                        height=96,
+                        image_mode="RGBA",
+                        height=160,
+                        value=tool_workshop_canvas(),
+                        brush=gr.Brush(
+                            default_size=48,
+                            colors=["#ffcc66", "#ffffff", "#66ccff"],
+                            default_color="#ffcc66",
+                            color_mode="defaults",
+                        ),
+                        eraser=gr.Eraser(),
+                        layers=True,
+                        transforms=(),
+                        sources=(),
                         buttons=["fullscreen"],
+                        visible=False,
+                    )
+                    db_mode = gr.Radio(
+                        choices=[
+                            ("Dodge — hold back light (lighter)", "dodge"),
+                            ("Burn — add enlarger light (darker)", "burn"),
+                        ],
+                        value="burn",
+                        label="Mode",
+                    )
+                    db_seconds = gr.Slider(
+                        1, 32, value=4, step=1, label="Pass (seconds)"
+                    )
+                    pass_math_md = gr.Markdown(_pass_math_md(8.0, 4.0, "burn"), elem_id="pass_math")
+                    db_timer_md = gr.Markdown("**Ready** — Start, then wave over the print")
+                    with gr.Row(elem_id="db_actions"):
+                        db_start_btn = gr.Button(
+                            "Start — wave over print →", variant="primary", size="sm"
+                        )
+                        db_reset_btn = gr.Button("Reset local work", size="sm")
+                    db_flag = gr.HTML(_db_flag_html(None), elem_id="db_flag")
+                    db_pos = gr.Textbox(value="0.5000,0.5000", elem_id="db_pos", show_label=False)
+                    with gr.Column(elem_classes=["db_clock_hidden"]):
+                        db_clock = gr.Timer(value=TICK_SECONDS, active=False)
+                    float_easel_close = gr.Button("Close", size="sm")
+
+                with gr.Group(elem_id="float_crop", elem_classes=["float-toolbar"]):
+                    gr.HTML('<div class="float-title">Crop & straighten</div>')
+                    gr.Markdown(
+                        "Frame mode is on — draw/resize the box on the print. "
+                        "Full controls also live under the **Frame** icon."
+                    )
+                    float_crop_close = gr.Button("Close", size="sm")
+
+                with gr.Row(elem_id="seq_strip"):
+                    original_out = gr.Image(
+                        label="Original", type="numpy", height=56, buttons=["fullscreen"]
                     )
                     latent_out = gr.Image(
-                        label="Latent DN (click to enlarge)",
-                        type="numpy",
-                        height=96,
-                        buttons=["fullscreen"],
+                        label="Latent DN", type="numpy", height=56, buttons=["fullscreen"]
                     )
                     neg_out = gr.Image(
-                        label="Negative (click to enlarge)",
-                        type="numpy",
-                        height=96,
-                        buttons=["fullscreen"],
+                        label="Negative", type="numpy", height=56, buttons=["fullscreen"]
                     )
-                with gr.Row():
                     view_orig_btn = gr.Button("Original", size="sm")
-                    view_lat_btn = gr.Button("Latent DN", size="sm")
-                    view_neg_btn = gr.Button("Negative", size="sm")
-                    view_live_btn = gr.Button("Live print", size="sm", variant="primary")
-                # Hidden high-res twin kept for backend inspect caches / downloads.
+                    view_lat_btn = gr.Button("Latent", size="sm")
+                    view_neg_btn = gr.Button("Neg", size="sm")
+                    view_live_btn = gr.Button("Live", size="sm", variant="primary")
+
                 inspect_out = gr.Image(
                     label="Inspect",
                     type="numpy",
@@ -3684,6 +3771,8 @@ def build_ui() -> gr.Blocks:
                     visible=False,
                     buttons=["fullscreen", "download"],
                 )
+                # Compatibility aliases used by older handlers expecting frame_tools group
+                frame_tools = frame_acc
 
         # Always pass develop + print controls so the large viewer can show a
         # theoretical print through the working negative while developing.
@@ -3713,7 +3802,7 @@ def build_ui() -> gr.Blocks:
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
                 apply_framing_btn, reset_framing_btn, auto_crop_btn,
                 straighten_deg, crop_rect, crop_ratio,
-                inspect_out, state,
+                inspect_out, state, active_drawer,
             ],
         ).then(
             fn=live_preview_high,
@@ -3813,7 +3902,7 @@ def build_ui() -> gr.Blocks:
                 live_out, original_out, latent_out, neg_out, status, history,
                 film, developer, development_minutes, contrast, grain,
                 develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
-                develop_acc, print_acc, state,
+                develop_acc, print_acc, state, active_drawer,
             ],
         ).then(
             fn=live_preview_high,
@@ -3883,63 +3972,6 @@ def build_ui() -> gr.Blocks:
             ],
         )
 
-        guide_btn.click(
-            fn=guided_first_print,
-            inputs=[
-                sample,
-                file_in,
-                film,
-                developer,
-                development_minutes,
-                contrast,
-                grain,
-                paper,
-                print_exposure,
-                print_grade,
-                print_contrast,
-                state,
-            ],
-            outputs=[
-                live_out,
-                original_out,
-                latent_out,
-                neg_out,
-                status,
-                history,
-                sample,
-                file_in,
-                ingest_btn,
-                film,
-                developer,
-                development_minutes,
-                contrast,
-                grain,
-                develop_btn,
-                unlock_develop_btn,
-                print_btn,
-                unlock_print_btn,
-                ingest_acc,
-                develop_acc,
-                print_acc,
-                rotate_ccw_btn,
-                rotate_180_btn,
-                rotate_cw_btn,
-                apply_framing_btn,
-                reset_framing_btn,
-                auto_crop_btn,
-                straighten_deg,
-                crop_rect,
-                crop_ratio,
-                inspect_out,
-                state,
-                db_editor,
-                db_timer_md,
-                base_math_md,
-                pass_math_md,
-                db_shape,
-                db_wave_banner,
-            ],
-        )
 
         unlock_develop_btn.click(
             fn=unlock_develop,
@@ -3949,7 +3981,7 @@ def build_ui() -> gr.Blocks:
                 film, developer, development_minutes, contrast, grain,
                 develop_btn, unlock_develop_btn, print_btn,
                 paper, print_exposure, print_grade, print_contrast, unlock_print_btn,
-                develop_acc, print_acc, state,
+                develop_acc, print_acc, state, active_drawer,
             ],
         ).then(
             fn=live_preview_high,
@@ -3995,16 +4027,17 @@ def build_ui() -> gr.Blocks:
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
                 apply_framing_btn, reset_framing_btn, auto_crop_btn,
                 straighten_deg, crop_rect, crop_ratio,
-                state,
+                state, active_drawer,
             ],
         )
 
         preview_tool.change(
             fn=on_preview_tool_change,
             inputs=[preview_tool],
-            outputs=[frame_tools, live_out],
+            outputs=[live_out],
         )
 
+        # Rail drawers are driven by #active_drawer (JS) + workflow auto-switch.
         rotate_outputs = [
             live_out, original_out, latent_out, neg_out, status, history,
             develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
