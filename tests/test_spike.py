@@ -226,3 +226,19 @@ def test_original_photo_preview_synthetic_is_rgb():
     rgb = original_photo_preview(None, dn_image=dn.image)
     assert rgb.ndim == 3 and rgb.shape[-1] == 3
     assert rgb.dtype == np.uint8
+
+
+def test_resolve_input_prefers_upload_over_sample():
+    sys.path.insert(0, str(ROOT / "scripts"))
+    # Import after path setup — module lives as scripts/run_darkroom_ui.py
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "run_darkroom_ui", ROOT / "scripts" / "run_darkroom_ui.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod._resolve_input("/tmp/mine.jpg", "/tmp/sample.nef") == "/tmp/mine.jpg"
+    assert mod._resolve_input(None, "/tmp/sample.nef") == "/tmp/sample.nef"
+    assert mod._resolve_input(None, None) is None
+    assert mod._resolve_input(None, "") is None
