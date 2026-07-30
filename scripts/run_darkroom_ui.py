@@ -1712,7 +1712,7 @@ def _wave_banner_html(state) -> str:
     return (
         f'<div class="db-wave-active" role="status">'
         f'<span class="db-wave-arrow">↓</span>'
-        f'<span><strong>{verb}</strong> — move your pointer over the print below '
+        f'<span><strong>{verb}</strong> — tool outline follows your pointer on the print '
         f'({tip}) · <strong>{left}s</strong> left</span>'
         f'<span class="db-wave-arrow">↓</span>'
         f"</div>"
