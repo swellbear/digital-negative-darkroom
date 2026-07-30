@@ -116,6 +116,35 @@ def test_warmtone_paper_loads():
     assert paper.dmax < 2.05
 
 
+def test_fiber_paper_has_deeper_dmax():
+    std = load_paper_profile(ROOT / "profiles" / "papers" / "mg-standard-v1.json")
+    fiber = load_paper_profile(ROOT / "profiles" / "papers" / "fiber-glossy-v1.json")
+    assert fiber.dmax > std.dmax
+
+
+def test_hard_filter_is_slower_than_soft():
+    """Without timer compensation, grade 5 should print lighter than grade 0."""
+    dn = ingest_path(None)
+    profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
+    paper = load_paper_profile(ROOT / "profiles" / "papers" / "mg-standard-v1.json")
+    developed = develop(dn, profile, grain_strength=0.0, process_variation=0.0)
+    soft = print_negative(developed.transmittance, dn, paper, overall_exposure=0.0, grade=0.0)
+    hard = print_negative(developed.transmittance, dn, paper, overall_exposure=0.0, grade=5.0)
+    assert float(soft.preview.mean()) < float(hard.preview.mean())
+    assert dn.metadata["print"]["filtration"]["values"]["filter_speed"] < 1.0
+
+
+def test_push_builds_more_highlight_density_than_toe():
+    profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
+    normal = modify_curve(profile, relative_time=1.0)
+    pushed = modify_curve(profile, relative_time=1.7)
+    toe = np.array([1.3])
+    hi = np.array([3.2])
+    toe_gain = float(pushed.density_from_log_exposure(toe)[0] - normal.density_from_log_exposure(toe)[0])
+    hi_gain = float(pushed.density_from_log_exposure(hi)[0] - normal.density_from_log_exposure(hi)[0])
+    assert hi_gain > toe_gain
+
+
 def test_full_pipeline_writes_print_artifacts(tmp_path: Path):
     artifacts = run_darkroom_pipeline(
         output_dir=tmp_path,

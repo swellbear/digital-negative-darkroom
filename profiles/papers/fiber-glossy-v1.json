@@ -1,0 +1,23 @@
+{
+  "id": "fiber-glossy",
+  "name": "Fiber Glossy",
+  "version": "1.0",
+  "type": "bw_multigrade",
+  "source": {
+    "notes": "Carefully tuned Level-3 fiber glossy response: higher Dmax, slightly shorter toe than RC Multigrade Standard, snappier shoulder. Meant to feel like a wet fiber print under the enlarger — deeper blacks, a touch more snap at the same grade.",
+    "created": "2026-07-30"
+  },
+  "dmax": 2.20,
+  "dmin": 0.03,
+  "grades": {
+    "00": {"gamma": 0.52, "toe": 0.20, "shoulder": 0.26},
+    "0": {"gamma": 0.68, "toe": 0.16, "shoulder": 0.22},
+    "1": {"gamma": 0.88, "toe": 0.13, "shoulder": 0.18},
+    "2": {"gamma": 1.12, "toe": 0.10, "shoulder": 0.14},
+    "2.5": {"gamma": 1.30, "toe": 0.09, "shoulder": 0.12},
+    "3": {"gamma": 1.52, "toe": 0.08, "shoulder": 0.10},
+    "4": {"gamma": 1.90, "toe": 0.06, "shoulder": 0.08},
+    "5": {"gamma": 2.35, "toe": 0.04, "shoulder": 0.06}
+  },
+  "default_grade": 2.5
+}

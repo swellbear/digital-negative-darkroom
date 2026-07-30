@@ -5,11 +5,11 @@ Desktop darkroom workflow for digital capture: ingest a camera raw as a **Digita
 ## What’s working now
 
 1. Ingest raw/image → **linear scene-referred Digital Negative** (CIE XYZ for raws)
-2. Film stocks: **HP5 Plus**, **FP4 Plus**, **Delta 100**
-3. Development: relative time, contrast, grain, developer style
-4. Print: exposure (stops), multigrade grade, paper response  
-   Papers: **Multigrade Standard**, **Multigrade Warmtone**
-5. Sequential Gradio UI: **Commit Ingest → Commit Develop → Commit Print**
+2. Film stocks: **HP5 Plus** (refined), **FP4 Plus**, **Delta 100**
+3. Development: relative time / N±, grain, developer styles, mild seed-controlled variation
+4. Print: exposure (stops), multigrade grade with **filter speed**, papers  
+   **Multigrade Standard**, **Multigrade Warmtone**, **Fiber Glossy**
+5. Ritual Gradio UI: commit locks stages + visible decision history
 6. CLI
 
 ## Quick start

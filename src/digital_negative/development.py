@@ -9,6 +9,7 @@ import numpy as np
 from .curves import DEVELOPER_STYLES, FilmProfile, modify_curve
 from .digital_negative import DigitalNegative
 from .grain import apply_grain
+from .variability import process_micro_variation
 
 
 @dataclass
@@ -26,11 +27,7 @@ def linear_to_relative_log_exposure(
     mid_log_e: float = 2.2,
     mid_scene: float | None = None,
 ) -> np.ndarray:
-    """Map near-linear scene values onto a film relative log-E axis.
-
-    mid_scene (default: image median of positive pixels) is placed at mid_log_e
-    so a typical exposure sits on the straight-line portion of HP5-like curves.
-    """
+    """Map near-linear scene values onto a film relative log-E axis."""
     eps = 1e-6
     positive = linear[linear > eps]
     if mid_scene is None:
@@ -50,16 +47,10 @@ def transmittance_to_positive_preview(
     fog: float,
     d_max: float,
 ) -> np.ndarray:
-    """Simple enlarger-style positive from a negative transmission image.
-
-    Thin negative (low density / shadows) passes more light → dark print.
-    Dense negative (highlights) holds light back → light print.
-    So display lightness rises with negative density.
-    """
+    """Contact-style positive from negative transmittance (inspection aid)."""
     density = -np.log10(np.maximum(transmittance, 1e-6))
     span = max(d_max - fog, 1e-3)
     positive = np.clip((density - fog) / span, 0.0, 1.0)
-    # Mild paper-like shoulder so the preview doesn't look purely linear
     positive = np.power(positive, 0.90)
     return positive.astype(np.float32)
 
@@ -73,6 +64,7 @@ def develop(
     grain_strength: float | None = None,
     developer_id: str | None = None,
     mid_log_e: float = 2.2,
+    process_variation: float = 1.0,
 ) -> DevelopmentResult:
     """Apply film characteristic curve development to a Digital Negative."""
     dev = dn.metadata.setdefault("development", {})
@@ -91,7 +83,8 @@ def develop(
     if developer not in DEVELOPER_STYLES:
         developer = "standard"
     style = DEVELOPER_STYLES[developer]
-    grain *= float(style["grain_bias"])
+    # Push slightly increases perceived grain; pull reduces it
+    grain_eff = grain * float(style["grain_bias"]) * (0.85 + 0.25 * rel)
 
     working_profile = modify_curve(
         profile,
@@ -102,15 +95,15 @@ def develop(
     luminance = dn.to_luminance()
     log_e = linear_to_relative_log_exposure(luminance, mid_log_e=mid_log_e)
     density = working_profile.density_from_log_exposure(log_e)
+    seed = int(dn.metadata.get("process_seed", 0))
+    density = process_micro_variation(density, process_seed=seed, strength=process_variation)
     density = apply_grain(
         density,
         profile=working_profile,
-        grain_strength=grain,
-        process_seed=int(dn.metadata.get("process_seed", 0)),
+        grain_strength=grain_eff,
+        process_seed=seed,
     )
     transmittance = density_to_transmittance(density)
-    # Practical enlarging range: deep shadows near fog through a solid
-    # highlight around densitometric ~1.6 (typical MG paper scale).
     positive = transmittance_to_positive_preview(
         transmittance,
         fog=working_profile.base_plus_fog,
@@ -124,6 +117,11 @@ def develop(
         "version": profile.version,
         "iso": profile.iso,
     }
+    user_grain = float(
+        grain_strength
+        if grain_strength is not None
+        else dev.get("grain_strength", profile.defaults.get("grain_strength", 1.0))
+    )
     dn.metadata["development"].update(
         {
             "enabled": True,
@@ -131,11 +129,8 @@ def develop(
             "developer_name": style["name"],
             "relative_time": rel,
             "contrast_modifier": contrast,
-            "grain_strength": float(
-                grain_strength
-                if grain_strength is not None
-                else dev.get("grain_strength", profile.defaults.get("grain_strength", 1.0))
-            ),
+            "grain_strength": user_grain,
+            "process_variation": float(process_variation),
         }
     )
     stages = dn.metadata.setdefault("ui_state", {}).setdefault("committed_stages", [])
@@ -143,15 +138,15 @@ def develop(
         stages.append("development")
     dn.metadata["ui_state"]["current_stage"] = "development"
     dn.touch()
-    history = dn.metadata.setdefault("history", [])
-    history.append(
+    dn.metadata.setdefault("history", []).append(
         {
             "op": "develop",
             "film_profile_id": profile.id,
             "developer_id": developer,
             "relative_time": rel,
             "contrast_modifier": contrast,
-            "grain_strength": dn.metadata["development"]["grain_strength"],
+            "grain_strength": user_grain,
+            "process_variation": float(process_variation),
         }
     )
 
