@@ -168,3 +168,22 @@ def test_spike_alias_skips_print(tmp_path: Path):
     artifacts = run_spike_pipeline(output_dir=tmp_path)
     assert artifacts.print_result is None
     assert artifacts.developed_preview.exists()
+
+
+def test_preview_develop_does_not_commit_history():
+    dn = ingest_path(None)
+    profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
+    before = len(dn.metadata.get("history", []))
+    develop(dn, profile, grain_strength=0.2, process_variation=0.0, commit=False)
+    assert len(dn.metadata.get("history", [])) == before
+    assert "development" not in dn.metadata.get("ui_state", {}).get("committed_stages", [])
+
+
+def test_preview_print_does_not_commit_history():
+    dn = ingest_path(None)
+    profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
+    paper = load_paper_profile(ROOT / "profiles" / "papers" / "mg-standard-v1.json")
+    developed = develop(dn, profile, grain_strength=0.0, process_variation=0.0, commit=True)
+    before = len(dn.metadata.get("history", []))
+    print_negative(developed.transmittance, dn, paper, commit=False)
+    assert len(dn.metadata.get("history", [])) == before

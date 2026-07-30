@@ -103,12 +103,14 @@ def print_negative(
     overall_exposure: float | None = None,
     grade: float | None = None,
     contrast: float | None = None,
+    commit: bool = True,
 ) -> PrintResult:
     """Expose paper through a developed negative.
 
     overall_exposure: timer stops (+ = more light = darker print)
     grade: multigrade filtration 00–5 (also applies filter speed factor)
     contrast: fine nudge between filter steps
+    commit=False: live preview only — no history entry
     """
     print_meta = dn.metadata.setdefault("print", {})
     exposure_stops = float(
@@ -153,18 +155,20 @@ def print_negative(
             "contrast": contrast_nudge,
         }
     )
-    dn.metadata["ui_state"]["current_stage"] = "print"
-    dn.touch()
-    dn.metadata.setdefault("history", []).append(
-        {
-            "op": "print",
-            "paper_id": paper.id,
-            "grade": grade_value,
-            "overall_exposure": exposure_stops,
-            "contrast": contrast_nudge,
-            "filter_speed": speed,
-        }
-    )
+    dn.metadata.setdefault("ui_state", {})["current_stage"] = "print"
+
+    if commit:
+        dn.touch()
+        dn.metadata.setdefault("history", []).append(
+            {
+                "op": "print",
+                "paper_id": paper.id,
+                "grade": grade_value,
+                "overall_exposure": exposure_stops,
+                "contrast": contrast_nudge,
+                "filter_speed": speed,
+            }
+        )
 
     return PrintResult(
         print_density=print_density,

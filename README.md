@@ -9,7 +9,7 @@ Desktop darkroom workflow for digital capture: ingest a camera raw as a **Digita
 3. Development: relative time / N±, grain, developer styles, mild seed-controlled variation
 4. Print: exposure (stops), multigrade grade with **filter speed**, papers  
    **Multigrade Standard**, **Multigrade Warmtone**, **Fiber Glossy**
-5. Ritual Gradio UI: commit locks stages + visible decision history
+5. Ritual Gradio UI: **live** Develop/Print previews; Commit locks the stage
 6. CLI
 
 ## Quick start

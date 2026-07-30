@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Sequential Gradio UI: Ingest → Develop → Print with stage locks + history."""
+"""Sequential Gradio UI with live Develop/Print preview + Commit locks."""
 
 from __future__ import annotations
 
+import copy
 import json
 import sys
 from pathlib import Path
@@ -11,15 +12,18 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 import gradio as gr
+import numpy as np
 
 from digital_negative.curves import DEVELOPER_STYLES, load_film_profile
 from digital_negative.development import develop
+from digital_negative.digital_negative import DigitalNegative
 from digital_negative.display import negative_lightbox_preview, to_pil_gray
 from digital_negative.ingest import ingest_path
 from digital_negative.papers import load_paper_profile
 from digital_negative.pipeline import list_film_profiles, list_paper_profiles
 from digital_negative.print_engine import print_negative
 
+LIVE_MAX_SIDE = 720
 
 FILM_CHOICES = []
 for path in list_film_profiles():
@@ -58,14 +62,34 @@ def _resolve_input(file_obj, sample_path: str | None) -> str | None:
     return getattr(file_obj, "name", None) or str(file_obj)
 
 
+def _proxy_dn(dn: DigitalNegative, max_side: int = LIVE_MAX_SIDE) -> DigitalNegative:
+    """Downscale image payload for responsive live preview."""
+    img = dn.image
+    h, w = img.shape[:2]
+    step = max(1, int(np.ceil(max(h, w) / max_side)))
+    if step == 1:
+        return dn
+    proxy = DigitalNegative(image=np.ascontiguousarray(img[::step, ::step]), metadata=copy.deepcopy(dn.metadata))
+    return proxy
+
+
+def _locked(state, stage: str) -> bool:
+    if not state or state.get("dn") is None:
+        return False
+    locks = state["dn"].metadata.get("ui_state", {}).get("locked_stages", [])
+    return stage in locks
+
+
 def _history_md(dn) -> str:
     hist = dn.metadata.get("history", [])
-    if not hist:
-        return "_No decisions committed yet._"
     lines = ["### Decision history"]
+    if not hist:
+        lines.append("_No locked decisions yet — explore with the sliders, then Commit._")
     for i, h in enumerate(hist, 1):
         op = h.get("op", "?")
-        if op == "develop":
+        if op == "ingest":
+            lines.append(f"{i}. **Ingest** — `{h.get('source')}` · {h.get('working_space')}")
+        elif op == "develop":
             lines.append(
                 f"{i}. **Develop** — {h.get('film_profile_id')} · {h.get('developer_id')} · "
                 f"rel={h.get('relative_time')} · contrast={h.get('contrast_modifier')}"
@@ -76,11 +100,9 @@ def _history_md(dn) -> str:
                 f"exp {h.get('overall_exposure'):+g} stops"
             )
         else:
-            lines.append(f"{i}. **{op}** — {h}")
-    stages = dn.metadata.get("ui_state", {}).get("committed_stages", [])
+            lines.append(f"{i}. **{op}**")
     locks = dn.metadata.get("ui_state", {}).get("locked_stages", [])
     lines.append("")
-    lines.append(f"**Committed:** {', '.join(stages) or '—'}  ")
     lines.append(f"**Locked:** {', '.join(locks) or '—'}  ")
     lines.append(f"**Process seed:** `{dn.metadata.get('process_seed')}`")
     return "\n".join(lines)
@@ -88,10 +110,10 @@ def _history_md(dn) -> str:
 
 def _stage_banner(stage: str) -> str:
     steps = [("ingest", "1 Ingest"), ("development", "2 Develop"), ("print", "3 Print")]
-    parts = []
-    order = {"ingest": 0, "development": 1, "print": 2}
+    order = {"ingest": 0, "development": 1, "print": 2, "": -1}
     cur = order.get(stage, -1)
-    for i, (key, label) in enumerate(steps):
+    parts = []
+    for i, (_, label) in enumerate(steps):
         if i < cur:
             parts.append(f"✓ {label}")
         elif i == cur:
@@ -123,32 +145,86 @@ def commit_ingest(sample_path, file_obj, state):
     latent = to_pil_gray(dn.to_luminance(), assume_linear=True)
     ingest = dn.metadata.get("ingest", {})
     summary = (
-        f"{_stage_banner('ingest')}\n\n"
-        f"**Ingest locked.** Digital Negative created.  \n"
-        f"Source: `{dn.metadata['source']['original_filename']}`  \n"
-        f"`{ingest.get('working_space')}` · `{ingest.get('encoding')}`  \n\n"
+        f"{_stage_banner('development')}\n\n"
+        f"**Ingest locked.** Explore Develop controls live, then **Commit Develop**.  \n"
+        f"Source: `{dn.metadata['source']['original_filename']}` · "
+        f"`{ingest.get('working_space')}`  \n\n"
         f"{_history_md(dn)}"
     )
-    state = {"dn": dn, "development": None, "stage": "ingest"}
+    state = {
+        "dn": dn,
+        "proxy": _proxy_dn(dn),
+        "development": None,
+        "development_full": None,
+        "stage": "development",
+    }
     return (
         latent,
         None,
         None,
         summary,
-        gr.update(interactive=False),  # sample
-        gr.update(interactive=False),  # file
-        gr.update(interactive=False),  # ingest btn
-        gr.update(interactive=True),  # develop btn
-        gr.update(interactive=False),  # print btn
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        gr.update(interactive=True),
+        gr.update(interactive=False),
         state,
     )
+
+
+def live_develop(film_id, developer_id, relative_time, contrast, grain, state):
+    """Live negative preview — no lock, no history."""
+    if not state or state.get("dn") is None:
+        return gr.update(), gr.update(), gr.update(), state
+    if _locked(state, "development"):
+        return gr.update(), gr.update(), gr.update(), state
+
+    proxy = state.get("proxy") or _proxy_dn(state["dn"])
+    profile = load_film_profile(_profile_path(list_film_profiles(), film_id))
+    development = develop(
+        proxy,
+        profile,
+        relative_time=float(relative_time),
+        contrast_modifier=float(contrast),
+        grain_strength=float(grain),
+        developer_id=developer_id,
+        process_variation=0.35,
+        commit=False,
+    )
+    negative = to_pil_gray(negative_lightbox_preview(development.transmittance))
+    summary = (
+        f"{_stage_banner('development')}\n\n"
+        f"**Live preview** (not locked) — {profile.name} · {developer_id} · "
+        f"rel={float(relative_time):.2f} · contrast={float(contrast):+.2f} · "
+        f"grain={float(grain):.2f}  \n"
+        f"_Commit Develop to lock and open the enlarger._  \n\n"
+        f"{_history_md(state['dn'])}"
+    )
+    state = {
+        **state,
+        "proxy": proxy,
+        "development": development,
+        "stage": "development",
+        "draft_develop": {
+            "film_id": film_id,
+            "developer_id": developer_id,
+            "relative_time": float(relative_time),
+            "contrast": float(contrast),
+            "grain": float(grain),
+        },
+    }
+    return gr.update(), negative, summary, state
 
 
 def commit_develop(film_id, developer_id, relative_time, contrast, grain, state):
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
+    if _locked(state, "development"):
+        raise gr.Error("Develop is already locked. Start a New negative to change it.")
+
     dn = state["dn"]
     profile = load_film_profile(_profile_path(list_film_profiles(), film_id))
+    # Full-resolution commit
     development = develop(
         dn,
         profile,
@@ -157,43 +233,94 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
         grain_strength=float(grain),
         developer_id=developer_id,
         process_variation=1.0,
+        commit=True,
     )
     locks = dn.metadata["ui_state"].setdefault("locked_stages", [])
     if "development" not in locks:
         locks.append("development")
 
+    # Proxy of the locked negative for fast print live preview
+    step = max(1, int(np.ceil(max(development.transmittance.shape) / LIVE_MAX_SIDE)))
+    t_proxy = np.ascontiguousarray(development.transmittance[::step, ::step])
+
     latent = to_pil_gray(dn.to_luminance(), assume_linear=True)
     negative = to_pil_gray(negative_lightbox_preview(development.transmittance))
     summary = (
-        f"{_stage_banner('development')}\n\n"
-        f"**Develop locked.** Negative is on the lightbox.  \n"
+        f"{_stage_banner('print')}\n\n"
+        f"**Develop locked.** Explore Print controls live, then **Commit Print**.  \n"
         f"{profile.name} · {developer_id} · rel={float(relative_time):.2f} · "
-        f"contrast={float(contrast):+.2f} · grain={float(grain):.2f}  \n"
-        f"Density mean {float(development.density.mean()):.2f}  \n\n"
+        f"density mean {float(development.density.mean()):.2f}  \n\n"
         f"{_history_md(dn)}"
     )
-    state = {"dn": dn, "development": development, "stage": "development"}
+    state = {
+        "dn": dn,
+        "proxy": state.get("proxy"),
+        "development": development,
+        "development_full": development,
+        "transmittance_proxy": t_proxy,
+        "stage": "print",
+    }
     return (
         latent,
         negative,
         None,
         summary,
-        gr.update(interactive=False),  # film
         gr.update(interactive=False),
         gr.update(interactive=False),
         gr.update(interactive=False),
         gr.update(interactive=False),
-        gr.update(interactive=False),  # develop btn
-        gr.update(interactive=True),  # print btn
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        gr.update(interactive=True),
         state,
     )
 
 
+def live_print(paper_id, print_exposure, print_grade, print_contrast, state):
+    """Live print preview — no lock, no history."""
+    if not state or state.get("development_full") is None and state.get("development") is None:
+        return gr.update(), gr.update(), state
+    if not _locked(state, "development"):
+        # Need a committed (or at least previewed) negative; prefer full if locked
+        return gr.update(), gr.update(), state
+    if _locked(state, "print"):
+        return gr.update(), gr.update(), state
+
+    t = state.get("transmittance_proxy")
+    if t is None:
+        t = state["development_full"].transmittance
+    paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
+    result = print_negative(
+        t,
+        state["dn"],
+        paper,
+        overall_exposure=float(print_exposure),
+        grade=float(print_grade),
+        contrast=float(print_contrast),
+        commit=False,
+    )
+    printed = to_pil_gray(result.preview)
+    speed = state["dn"].metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
+    summary = (
+        f"{_stage_banner('print')}\n\n"
+        f"**Live print preview** (not locked) — {paper.name} · "
+        f"grade {float(print_grade):.1f} · exp {float(print_exposure):+.2f} stops · "
+        f"filter ×{float(speed):.2f}  \n"
+        f"_Commit Print to finalize._  \n\n"
+        f"{_history_md(state['dn'])}"
+    )
+    state = {**state, "print_draft": result, "stage": "print"}
+    return printed, summary, state
+
+
 def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
-    if not state or state.get("development") is None:
+    if not state or state.get("development_full") is None:
         raise gr.Error("Commit Develop first.")
+    if _locked(state, "print"):
+        raise gr.Error("Print is already locked. Start a New negative for another print.")
+
     dn = state["dn"]
-    development = state["development"]
+    development = state["development_full"]
     paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
     result = print_negative(
         development.transmittance,
@@ -202,6 +329,7 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         overall_exposure=float(print_exposure),
         grade=float(print_grade),
         contrast=float(print_contrast),
+        commit=True,
     )
     stages = dn.metadata["ui_state"].setdefault("committed_stages", [])
     locks = dn.metadata["ui_state"].setdefault("locked_stages", [])
@@ -213,15 +341,15 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
     latent = to_pil_gray(dn.to_luminance(), assume_linear=True)
     negative = to_pil_gray(negative_lightbox_preview(development.transmittance))
     printed = to_pil_gray(result.preview)
-    speed = result and dn.metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
+    speed = dn.metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
     summary = (
         f"{_stage_banner('print')}\n\n"
         f"**Print locked.**  \n"
         f"{paper.name} · grade {float(print_grade):.1f} · "
-        f"exp {float(print_exposure):+.2f} stops · filter speed ×{float(speed):.2f}  \n\n"
+        f"exp {float(print_exposure):+.2f} stops · filter ×{float(speed):.2f}  \n\n"
         f"{_history_md(dn)}"
     )
-    state = {"dn": dn, "development": development, "print": result, "stage": "print"}
+    state = {**state, "print": result, "stage": "print"}
     return (
         latent,
         negative,
@@ -231,39 +359,37 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         gr.update(interactive=False),
         gr.update(interactive=False),
         gr.update(interactive=False),
-        gr.update(interactive=False),  # print btn locked after commit
+        gr.update(interactive=False),
         state,
     )
 
 
 def reset_session():
-    """Start a new negative — ritual begins again."""
     summary = (
         "1 Ingest · 2 Develop · 3 Print\n\n"
-        "*New session. Commit Ingest to create a Digital Negative.*"
+        "*New session. Commit Ingest, then explore Develop/Print live before locking.*"
     )
-    on = gr.update(interactive=True)
-    off = gr.update(interactive=False)
+    on, off = gr.update(interactive=True), gr.update(interactive=False)
     return (
         None,
         None,
         None,
         summary,
-        on,  # sample
-        on,  # file
-        on,  # ingest btn
-        on,  # film
-        on,  # developer
-        on,  # relative
-        on,  # contrast
-        on,  # grain
-        off,  # develop btn
-        on,  # paper
-        on,  # exp
-        on,  # grade
-        on,  # print contrast
+        on,
+        on,
+        on,  # ingest controls
+        on,
+        on,
+        on,
+        on,
+        on,
+        off,  # develop btn until ingest
+        on,
+        on,
+        on,
+        on,
         off,  # print btn
-        None,  # state
+        None,
     )
 
 
@@ -274,8 +400,9 @@ def build_ui() -> gr.Blocks:
         gr.Markdown(
             """
             # Digital Negative Darkroom
-            Work in order. Each **Commit** locks that stage — decisions stay visible in the history.
-            Start a **New negative** to begin again. Mild process variation is seed-controlled.
+            **Ingest** creates the Digital Negative.  
+            **Develop** and **Print** update the image **live** as you move controls.  
+            **Commit** locks that stage and records the decision — then move on.
             """
         )
         with gr.Row():
@@ -291,7 +418,7 @@ def build_ui() -> gr.Blocks:
                     )
                     ingest_btn = gr.Button("Commit Ingest", variant="primary")
 
-                with gr.Accordion("2 · Develop", open=True):
+                with gr.Accordion("2 · Develop (live)", open=True):
                     film = gr.Dropdown(
                         choices=FILM_CHOICES,
                         value=FILM_CHOICES[0][1] if FILM_CHOICES else None,
@@ -305,7 +432,7 @@ def build_ui() -> gr.Blocks:
                     grain = gr.Slider(0.0, 2.5, value=1.0, step=0.05, label="Grain strength")
                     develop_btn = gr.Button("Commit Develop", interactive=False)
 
-                with gr.Accordion("3 · Print", open=True):
+                with gr.Accordion("3 · Print (live)", open=True):
                     paper = gr.Dropdown(
                         choices=PAPER_CHOICES,
                         value=PAPER_CHOICES[0][1] if PAPER_CHOICES else None,
@@ -321,9 +448,12 @@ def build_ui() -> gr.Blocks:
             with gr.Column(scale=2):
                 with gr.Row():
                     latent_out = gr.Image(label="Digital Negative (latent)", type="pil")
-                    negative_out = gr.Image(label="Developed negative (lightbox)", type="pil")
-                    printed_out = gr.Image(label="Print", type="pil")
+                    negative_out = gr.Image(label="Developed negative (live)", type="pil")
+                    printed_out = gr.Image(label="Print (live)", type="pil")
                 summary = gr.Markdown("*Commit Ingest to begin.*")
+
+        develop_inputs = [film, developer, relative_time, contrast, grain, state]
+        print_inputs = [paper, print_exposure, print_grade, print_contrast, state]
 
         ingest_btn.click(
             fn=commit_ingest,
@@ -332,7 +462,20 @@ def build_ui() -> gr.Blocks:
                 latent_out, negative_out, printed_out, summary,
                 sample, file_in, ingest_btn, develop_btn, print_btn, state,
             ],
+        ).then(
+            fn=live_develop,
+            inputs=develop_inputs,
+            outputs=[latent_out, negative_out, summary, state],
         )
+
+        # Live develop: any control change refreshes the lightbox negative
+        for ctrl in (film, developer, relative_time, contrast, grain):
+            ctrl.change(
+                fn=live_develop,
+                inputs=develop_inputs,
+                outputs=[latent_out, negative_out, summary, state],
+            )
+
         develop_btn.click(
             fn=commit_develop,
             inputs=[film, developer, relative_time, contrast, grain, state],
@@ -340,7 +483,19 @@ def build_ui() -> gr.Blocks:
                 latent_out, negative_out, printed_out, summary,
                 film, developer, relative_time, contrast, grain, develop_btn, print_btn, state,
             ],
+        ).then(
+            fn=live_print,
+            inputs=print_inputs,
+            outputs=[printed_out, summary, state],
         )
+
+        for ctrl in (paper, print_exposure, print_grade, print_contrast):
+            ctrl.change(
+                fn=live_print,
+                inputs=print_inputs,
+                outputs=[printed_out, summary, state],
+            )
+
         print_btn.click(
             fn=commit_print,
             inputs=[paper, print_exposure, print_grade, print_contrast, state],
@@ -349,6 +504,7 @@ def build_ui() -> gr.Blocks:
                 paper, print_exposure, print_grade, print_contrast, print_btn, state,
             ],
         )
+
         reset_btn.click(
             fn=reset_session,
             inputs=[],

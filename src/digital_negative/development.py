@@ -65,8 +65,12 @@ def develop(
     developer_id: str | None = None,
     mid_log_e: float = 2.2,
     process_variation: float = 1.0,
+    commit: bool = True,
 ) -> DevelopmentResult:
-    """Apply film characteristic curve development to a Digital Negative."""
+    """Apply film characteristic curve development to a Digital Negative.
+
+    commit=False: live preview only — updates working params, no history/lock.
+    """
     dev = dn.metadata.setdefault("development", {})
     rel = float(relative_time if relative_time is not None else dev.get("relative_time", 1.0))
     contrast = float(
@@ -110,6 +114,12 @@ def develop(
         d_max=max(1.55, float(np.percentile(density, 99.5))),
     )
 
+    user_grain = float(
+        grain_strength
+        if grain_strength is not None
+        else dev.get("grain_strength", profile.defaults.get("grain_strength", 1.0))
+    )
+    # Always keep working parameters current for the UI
     dn.metadata["film_profile"] = {
         "id": profile.id,
         "name": profile.name,
@@ -117,11 +127,6 @@ def develop(
         "version": profile.version,
         "iso": profile.iso,
     }
-    user_grain = float(
-        grain_strength
-        if grain_strength is not None
-        else dev.get("grain_strength", profile.defaults.get("grain_strength", 1.0))
-    )
     dn.metadata["development"].update(
         {
             "enabled": True,
@@ -133,22 +138,24 @@ def develop(
             "process_variation": float(process_variation),
         }
     )
-    stages = dn.metadata.setdefault("ui_state", {}).setdefault("committed_stages", [])
-    if "development" not in stages:
-        stages.append("development")
-    dn.metadata["ui_state"]["current_stage"] = "development"
-    dn.touch()
-    dn.metadata.setdefault("history", []).append(
-        {
-            "op": "develop",
-            "film_profile_id": profile.id,
-            "developer_id": developer,
-            "relative_time": rel,
-            "contrast_modifier": contrast,
-            "grain_strength": user_grain,
-            "process_variation": float(process_variation),
-        }
-    )
+    dn.metadata.setdefault("ui_state", {})["current_stage"] = "development"
+
+    if commit:
+        stages = dn.metadata.setdefault("ui_state", {}).setdefault("committed_stages", [])
+        if "development" not in stages:
+            stages.append("development")
+        dn.touch()
+        dn.metadata.setdefault("history", []).append(
+            {
+                "op": "develop",
+                "film_profile_id": profile.id,
+                "developer_id": developer,
+                "relative_time": rel,
+                "contrast_modifier": contrast,
+                "grain_strength": user_grain,
+                "process_variation": float(process_variation),
+            }
+        )
 
     return DevelopmentResult(
         density=density,
