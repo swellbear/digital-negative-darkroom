@@ -356,6 +356,12 @@ body.drawer-collapsed #drawer_host {
 .drawer-panel .gr-accordion > .label-wrap {
   display: none !important; /* rail is the chrome */
 }
+/* Because that header is hidden, a collapsed accordion is a dead end: the
+   drawer renders as an empty box with no way to reopen it. The ritual still
+   sends open=False as stages lock, so pin drawer content open regardless. */
+.drawer-panel [data-testid="accordion-content"] {
+  display: block !important;
+}
 .drawer-panel .gr-accordion {
   margin: 0 !important;
   border: none !important;
