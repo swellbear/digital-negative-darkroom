@@ -30,6 +30,7 @@ from digital_negative.display import (
     negative_lightbox_preview,
     original_photo_preview,
     rotate_image,
+    straighten_image,
     to_u8_gray,
 )
 from digital_negative.dodge_burn import (
@@ -59,6 +60,22 @@ LIVE_MAX_SIDE = 2000
 DRAG_MAX_SIDE = 1280  # high enough for critical judgment while dragging
 INSPECT_MAX_SIDE = 3600  # high-res for zoom / inspect panel
 REF_MAX_SIDE = 420
+CROP_STAGE_MAX_SIDE = 1400
+
+CROP_RATIO_CHOICES = [
+    ("Free", "free"),
+    ("Original", "original"),
+    ("1:1", "1:1"),
+    ("3:2", "3:2"),
+    ("2:3", "2:3"),
+    ("4:3", "4:3"),
+    ("3:4", "3:4"),
+    ("5:4", "5:4"),
+    ("4:5", "4:5"),
+    ("16:9", "16:9"),
+    ("9:16", "9:16"),
+]
+DEFAULT_CROP_RECT = "0.00000,0.00000,1.00000,1.00000"
 
 FILM_CHOICES = []
 for path in list_film_profiles():
@@ -458,6 +475,83 @@ body.db-exposing #live_preview *,
 @keyframes db-card-breathe {
   0%, 100% { opacity: 0.34; transform: translate(-50%, -50%) scale(0.96); }
   50% { opacity: 0.55; transform: translate(-50%, -50%) scale(1.02); }
+}
+/* Interactive crop stage — drag box on the picture */
+#crop_stage {
+  position: relative !important;
+  user-select: none;
+}
+#crop_stage .image-container,
+#crop_stage .image-frame {
+  position: relative !important;
+}
+#crop_overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+#crop_overlay .crop-shade {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+#crop_overlay .crop-box {
+  position: absolute;
+  border: 2px solid #f2d28a;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.55);
+  pointer-events: auto;
+  cursor: move;
+  box-sizing: border-box;
+}
+#crop_overlay .crop-box::before,
+#crop_overlay .crop-box::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+#crop_overlay .crop-box::before {
+  background:
+    linear-gradient(to right, transparent 33.33%, rgba(242,210,138,0.35) 33.33%, rgba(242,210,138,0.35) 33.66%, transparent 33.66%, transparent 66.66%, rgba(242,210,138,0.35) 66.66%, rgba(242,210,138,0.35) 67%, transparent 67%),
+    linear-gradient(to bottom, transparent 33.33%, rgba(242,210,138,0.35) 33.33%, rgba(242,210,138,0.35) 33.66%, transparent 33.66%, transparent 66.66%, rgba(242,210,138,0.35) 66.66%, rgba(242,210,138,0.35) 67%, transparent 67%);
+}
+#crop_overlay .crop-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #f2d28a;
+  border: 1px solid #1a1a1a;
+  border-radius: 2px;
+  box-sizing: border-box;
+  pointer-events: auto;
+  z-index: 2;
+}
+#crop_overlay .crop-handle.nw { left: -6px; top: -6px; cursor: nwse-resize; }
+#crop_overlay .crop-handle.ne { right: -6px; top: -6px; cursor: nesw-resize; }
+#crop_overlay .crop-handle.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+#crop_overlay .crop-handle.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+#crop_overlay .crop-handle.n { left: 50%; top: -6px; margin-left: -6px; cursor: ns-resize; }
+#crop_overlay .crop-handle.s { left: 50%; bottom: -6px; margin-left: -6px; cursor: ns-resize; }
+#crop_overlay .crop-handle.w { left: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
+#crop_overlay .crop-handle.e { right: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
+#crop_stage.crop-armed {
+  cursor: crosshair;
+}
+#crop_stage.crop-armed img {
+  cursor: crosshair;
+}
+#crop_ratio_row {
+  gap: 6px !important;
+}
+#crop_rect {
+  position: absolute !important;
+  left: -9999px !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
 }
 @media (max-width: 900px) {
   #main_workspace { flex-wrap: wrap !important; }
@@ -876,6 +970,336 @@ UI_JS = """
   };
   observeRoots();
   setInterval(observeRoots, 2000);
+
+  // ——— Interactive crop box on #crop_stage ———
+  const CROP_MIN = 0.04; // minimum normalized side
+  window.__cropBox = window.__cropBox || { x: 0, y: 0, w: 1, h: 1 };
+
+  const readCropRatio = () => {
+    const root = document.querySelector('#crop_ratio');
+    if (!root) return 'free';
+    const checked = root.querySelector('input[type="radio"]:checked');
+    if (checked && checked.value) return checked.value;
+    // Dropdown / radio group fallbacks
+    const sel = root.querySelector('select');
+    if (sel && sel.value) return sel.value;
+    return 'free';
+  };
+
+  const parseRatio = (key, imgAspect) => {
+    const k = (key || 'free').toLowerCase();
+    if (!k || k === 'free') return null;
+    if (k === 'original') return imgAspect > 0 ? imgAspect : null;
+    const m = k.match(/^(\\d+(?:\\.\\d+)?):(\\d+(?:\\.\\d+)?)$/);
+    if (!m) return null;
+    const a = parseFloat(m[1]), b = parseFloat(m[2]);
+    if (!(a > 0 && b > 0)) return null;
+    return a / b;
+  };
+
+  const writeCropRectBox = () => {
+    const b = window.__cropBox;
+    const text = [b.x, b.y, b.w, b.h].map((v) => Number(v).toFixed(5)).join(',');
+    window.__cropRect = text;
+    const root = document.querySelector('#crop_rect');
+    if (!root) return;
+    const box = root.querySelector('textarea') || root.querySelector('input');
+    if (!box) return;
+    if (box.value === text) return;
+    box.value = text;
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  const largestBoxForRatio = (ratio) => {
+    if (!ratio || !(ratio > 0)) return { x: 0, y: 0, w: 1, h: 1 };
+    // Image space is 1×1; fit largest ratio-locked rect.
+    if (ratio >= 1) {
+      const h = Math.min(1, 1 / ratio);
+      return { x: 0, y: (1 - h) / 2, w: 1, h };
+    }
+    const w = Math.min(1, ratio);
+    return { x: (1 - w) / 2, y: 0, w, h: 1 };
+  };
+
+  const clampBox = (box) => {
+    let { x, y, w, h } = box;
+    w = Math.max(CROP_MIN, Math.min(1, w));
+    h = Math.max(CROP_MIN, Math.min(1, h));
+    x = Math.max(0, Math.min(1 - w, x));
+    y = Math.max(0, Math.min(1 - h, y));
+    return { x, y, w, h };
+  };
+
+  const applyAspectToBox = (box, ratio, anchor) => {
+    if (!ratio || !(ratio > 0)) return clampBox(box);
+    let { x, y, w, h } = box;
+    // Keep width, adjust height — then clamp; if height hits edge, shrink width.
+    const fromW = () => {
+      h = w / ratio;
+      if (anchor === 'n' || anchor === 'ne' || anchor === 'nw') {
+        /* top fixed */
+      } else if (anchor === 's' || anchor === 'se' || anchor === 'sw') {
+        y = box.y + box.h - h;
+      } else {
+        y = box.y + (box.h - h) / 2;
+      }
+    };
+    const fromH = () => {
+      w = h * ratio;
+      if (anchor === 'w' || anchor === 'nw' || anchor === 'sw') {
+        /* left fixed */
+      } else if (anchor === 'e' || anchor === 'ne' || anchor === 'se') {
+        x = box.x + box.w - w;
+      } else {
+        x = box.x + (box.w - w) / 2;
+      }
+    };
+    // Prefer adjusting the dimension that the handle primarily changes.
+    if (anchor === 'n' || anchor === 's') fromH();
+    else if (anchor === 'e' || anchor === 'w') fromW();
+    else fromW();
+    let out = clampBox({ x, y, w, h });
+    // If clamping broke the ratio, shrink to fit.
+    const cur = out.w / Math.max(out.h, 1e-9);
+    if (Math.abs(cur - ratio) > 0.01) {
+      out = clampBox(largestBoxForRatio(ratio));
+      // Keep near previous center
+      const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+      out.x = Math.max(0, Math.min(1 - out.w, cx - out.w / 2));
+      out.y = Math.max(0, Math.min(1 - out.h, cy - out.h / 2));
+    }
+    return out;
+  };
+
+  const syncOverlay = () => {
+    const stage = document.querySelector('#crop_stage');
+    if (!stage) return;
+    const img = stage.querySelector('img');
+    let overlay = document.getElementById('crop_overlay');
+    if (!img || img.naturalWidth < 2) {
+      if (overlay) overlay.style.display = 'none';
+      return;
+    }
+    const host = img.parentElement || stage;
+    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'crop_overlay';
+      overlay.innerHTML = `
+        <div class="crop-shade" data-side="top"></div>
+        <div class="crop-shade" data-side="left"></div>
+        <div class="crop-shade" data-side="right"></div>
+        <div class="crop-shade" data-side="bottom"></div>
+        <div class="crop-box">
+          <div class="crop-handle nw" data-h="nw"></div>
+          <div class="crop-handle n" data-h="n"></div>
+          <div class="crop-handle ne" data-h="ne"></div>
+          <div class="crop-handle e" data-h="e"></div>
+          <div class="crop-handle se" data-h="se"></div>
+          <div class="crop-handle s" data-h="s"></div>
+          <div class="crop-handle sw" data-h="sw"></div>
+          <div class="crop-handle w" data-h="w"></div>
+        </div>`;
+      host.appendChild(overlay);
+    }
+    // Position overlay exactly over the displayed image box inside host
+    const hr = host.getBoundingClientRect();
+    const ir = img.getBoundingClientRect();
+    overlay.style.display = 'block';
+    overlay.style.left = (ir.left - hr.left) + 'px';
+    overlay.style.top = (ir.top - hr.top) + 'px';
+    overlay.style.width = ir.width + 'px';
+    overlay.style.height = ir.height + 'px';
+
+    const b = window.__cropBox;
+    const box = overlay.querySelector('.crop-box');
+    box.style.left = (b.x * 100) + '%';
+    box.style.top = (b.y * 100) + '%';
+    box.style.width = (b.w * 100) + '%';
+    box.style.height = (b.h * 100) + '%';
+
+    const setShade = (side, style) => {
+      const el = overlay.querySelector('.crop-shade[data-side="' + side + '"]');
+      if (!el) return;
+      Object.assign(el.style, style);
+    };
+    setShade('top', { left: '0', top: '0', width: '100%', height: (b.y * 100) + '%' });
+    setShade('bottom', { left: '0', top: ((b.y + b.h) * 100) + '%', width: '100%', height: ((1 - b.y - b.h) * 100) + '%' });
+    setShade('left', { left: '0', top: (b.y * 100) + '%', width: (b.x * 100) + '%', height: (b.h * 100) + '%' });
+    setShade('right', { left: ((b.x + b.w) * 100) + '%', top: (b.y * 100) + '%', width: ((1 - b.x - b.w) * 100) + '%', height: (b.h * 100) + '%' });
+  };
+
+  const readBoxFromInput = () => {
+    const root = document.querySelector('#crop_rect');
+    const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+    if (!box || !box.value) return;
+    const parts = box.value.split(',').map(parseFloat);
+    if (parts.length >= 4 && parts.every((n) => Number.isFinite(n))) {
+      window.__cropBox = clampBox({ x: parts[0], y: parts[1], w: parts[2], h: parts[3] });
+    }
+  };
+
+  const setupCropTool = () => {
+    const stage = document.querySelector('#crop_stage');
+    if (!stage) return;
+    stage.classList.add('crop-armed');
+    if (stage.dataset.cropReady === '1') {
+      syncOverlay();
+      return;
+    }
+    stage.dataset.cropReady = '1';
+    readBoxFromInput();
+    writeCropRectBox();
+    syncOverlay();
+
+    let mode = null; // 'move' | 'resize' | 'create'
+    let handle = null;
+    let start = null;
+    let startBox = null;
+
+    const imgAspect = () => {
+      const img = stage.querySelector('img');
+      if (!img || !img.clientWidth) return 1;
+      return img.clientWidth / Math.max(img.clientHeight, 1);
+    };
+
+    const normFromEvent = (e) => {
+      const overlay = document.getElementById('crop_overlay');
+      if (!overlay || overlay.style.display === 'none') return null;
+      const r = overlay.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) return null;
+      return [
+        Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+        Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+      ];
+    };
+
+    stage.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      const h = t.getAttribute && t.getAttribute('data-h');
+      const onBox = t.classList && (t.classList.contains('crop-box') || t.closest('.crop-box'));
+      const n = normFromEvent(e);
+      if (!n) return;
+      e.preventDefault();
+      stage.setPointerCapture?.(e.pointerId);
+      start = n;
+      startBox = { ...window.__cropBox };
+      if (h) {
+        mode = 'resize';
+        handle = h;
+      } else if (onBox && t.closest && t.closest('.crop-box') && !h) {
+        // click on box interior (not handle)
+        if (t.classList.contains('crop-handle')) {
+          mode = 'resize';
+          handle = t.getAttribute('data-h');
+        } else {
+          mode = 'move';
+          handle = null;
+        }
+      } else {
+        mode = 'create';
+        handle = 'se';
+        window.__cropBox = { x: n[0], y: n[1], w: CROP_MIN, h: CROP_MIN };
+        syncOverlay();
+      }
+    });
+
+    stage.addEventListener('pointermove', (e) => {
+      if (!mode || !start || !startBox) return;
+      const n = normFromEvent(e);
+      if (!n) return;
+      const dx = n[0] - start[0];
+      const dy = n[1] - start[1];
+      const ratio = parseRatio(readCropRatio(), imgAspect());
+
+      if (mode === 'move') {
+        window.__cropBox = clampBox({
+          x: startBox.x + dx,
+          y: startBox.y + dy,
+          w: startBox.w,
+          h: startBox.h,
+        });
+      } else if (mode === 'create') {
+        const x0 = Math.min(start[0], n[0]);
+        const y0 = Math.min(start[1], n[1]);
+        const x1 = Math.max(start[0], n[0]);
+        const y1 = Math.max(start[1], n[1]);
+        let box = { x: x0, y: y0, w: Math.max(CROP_MIN, x1 - x0), h: Math.max(CROP_MIN, y1 - y0) };
+        if (ratio) {
+          // Expand from the drag start corner toward pointer, locked.
+          const aw = Math.abs(n[0] - start[0]);
+          const ah = Math.abs(n[1] - start[1]);
+          let w = aw, h = ah;
+          if (w / Math.max(h, 1e-9) > ratio) h = w / ratio;
+          else w = h * ratio;
+          const sx = n[0] >= start[0] ? 1 : -1;
+          const sy = n[1] >= start[1] ? 1 : -1;
+          box = {
+            x: sx > 0 ? start[0] : start[0] - w,
+            y: sy > 0 ? start[1] : start[1] - h,
+            w, h,
+          };
+        }
+        window.__cropBox = clampBox(box);
+      } else if (mode === 'resize') {
+        let box = { ...startBox };
+        const H = handle;
+        if (H.includes('e')) box.w = startBox.w + dx;
+        if (H.includes('s')) box.h = startBox.h + dy;
+        if (H.includes('w')) { box.x = startBox.x + dx; box.w = startBox.w - dx; }
+        if (H.includes('n')) { box.y = startBox.y + dy; box.h = startBox.h - dy; }
+        if (box.w < CROP_MIN) { if (H.includes('w')) box.x = startBox.x + startBox.w - CROP_MIN; box.w = CROP_MIN; }
+        if (box.h < CROP_MIN) { if (H.includes('n')) box.y = startBox.y + startBox.h - CROP_MIN; box.h = CROP_MIN; }
+        window.__cropBox = applyAspectToBox(box, ratio, H);
+      }
+      syncOverlay();
+      writeCropRectBox();
+    });
+
+    const end = () => {
+      if (!mode) return;
+      mode = null; handle = null; start = null; startBox = null;
+      writeCropRectBox();
+      syncOverlay();
+    };
+    stage.addEventListener('pointerup', end);
+    stage.addEventListener('pointercancel', end);
+
+    // Keep overlay aligned when Gradio swaps the image src / layout
+    new MutationObserver(() => {
+      readBoxFromInput();
+      syncOverlay();
+    }).observe(stage, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+    window.addEventListener('resize', syncOverlay);
+  };
+
+  // Ratio preset: reshape box to largest centered rect for that ratio
+  document.addEventListener('change', (e) => {
+    const t = e.target;
+    if (!(t instanceof Element)) return;
+    if (!t.closest || !t.closest('#crop_ratio')) return;
+    const stage = document.querySelector('#crop_stage');
+    const img = stage && stage.querySelector('img');
+    const aspect = img && img.clientWidth ? img.clientWidth / Math.max(img.clientHeight, 1) : 1;
+    const ratio = parseRatio(readCropRatio(), aspect);
+    if (!ratio) return; // free — keep current box
+    const next = largestBoxForRatio(ratio);
+    // Center on previous center if possible
+    const cx = window.__cropBox.x + window.__cropBox.w / 2;
+    const cy = window.__cropBox.y + window.__cropBox.h / 2;
+    next.x = Math.max(0, Math.min(1 - next.w, cx - next.w / 2));
+    next.y = Math.max(0, Math.min(1 - next.h, cy - next.h / 2));
+    window.__cropBox = clampBox(next);
+    writeCropRectBox();
+    syncOverlay();
+  });
+
+  const bootCrop = () => { try { setupCropTool(); } catch (_) {} };
+  bootCrop();
+  setInterval(bootCrop, 1500);
 })();
 """
 
@@ -974,6 +1398,59 @@ def _downscale_rgb(rgb: np.ndarray, max_side: int) -> np.ndarray:
     return np.ascontiguousarray(rgb[::step, ::step])
 
 
+def parse_crop_rect(text) -> tuple[float, float, float, float]:
+    """Parse 'x,y,w,h' normalized crop box → (left, top, right, bottom) trim fractions."""
+    raw = str(text or "").strip() or DEFAULT_CROP_RECT
+    parts = [p.strip() for p in raw.replace(";", ",").split(",") if p.strip()]
+    if len(parts) < 4:
+        raise ValueError("crop rect needs x,y,w,h")
+    x, y, w, h = (float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3]))
+    x = float(np.clip(x, 0.0, 1.0))
+    y = float(np.clip(y, 0.0, 1.0))
+    w = float(np.clip(w, 0.02, 1.0))
+    h = float(np.clip(h, 0.02, 1.0))
+    if x + w > 1.0:
+        w = 1.0 - x
+    if y + h > 1.0:
+        h = 1.0 - y
+    left = x
+    top = y
+    right = max(0.0, 1.0 - (x + w))
+    bottom = max(0.0, 1.0 - (y + h))
+    return left, top, right, bottom
+
+
+def _framing_stage_preview(state, straighten_deg: float = 0.0):
+    """RGB preview for the interactive crop stage (prefer original photo base)."""
+    if not state:
+        return None
+    deg = float(straighten_deg or 0.0)
+    orig = state.get("original_base")
+    if orig is not None:
+        src = np.asarray(orig)
+        if abs(deg) >= 1e-6:
+            src = straighten_image(src.astype(np.float32), deg, fill=0.0)
+            src = np.clip(src, 0, 255).astype(np.uint8)
+        elif src.dtype != np.uint8:
+            src = np.clip(src, 0, 255).astype(np.uint8)
+        if src.ndim == 2:
+            src = np.stack([src, src, src], axis=-1)
+        return _downscale_rgb(src, CROP_STAGE_MAX_SIDE)
+    base = state.get("geometry_base")
+    if base is None and state.get("dn") is not None:
+        base = state["dn"].image
+    if base is None:
+        return None
+    img = np.asarray(base)
+    if abs(deg) >= 1e-6:
+        img = straighten_image(img, deg, fill=0.0)
+    return _downscale_rgb(_to_rgb_u8(img, assume_linear=True), CROP_STAGE_MAX_SIDE)
+
+
+def _crop_control_echo(straighten: float = 0.0, crop_rect: str = DEFAULT_CROP_RECT, ratio: str = "free"):
+    return float(straighten), str(crop_rect), str(ratio or "free")
+
+
 def _proxy_dn(dn: DigitalNegative, max_side: int = LIVE_MAX_SIDE) -> DigitalNegative:
     img = dn.image
     h, w = img.shape[:2]
@@ -1053,9 +1530,11 @@ def _history_md(dn) -> str:
                 f"(total {h.get('total_degrees')}° CW)"
             )
         elif op == "frame":
+            ratio = h.get("ratio") or "free"
             lines.append(
                 f"{i}. **Crop & straighten** — "
                 f"straighten {float(h.get('straighten_degrees', 0)):+.2f}° · "
+                f"ratio `{ratio}` · "
                 f"trim L{float(h.get('crop_left', 0))*100:.0f}% "
                 f"T{float(h.get('crop_top', 0))*100:.0f}% "
                 f"R{float(h.get('crop_right', 0))*100:.0f}% "
@@ -1371,17 +1850,15 @@ def rotate_working(turns_cw: int, state):
         gr.update(open=True),
         gr.update(open=True),
         state,
-        # Clear fine-framing sliders after a coarse rotate
         0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        DEFAULT_CROP_RECT,
+        "free",
+        _framing_stage_preview(state, 0.0),
     )
 
 
-def apply_crop_straighten(straighten_deg, crop_left, crop_top, crop_right, crop_bottom, state):
-    """Apply fine straighten + edge crop from the geometry base."""
+def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
+    """Apply fine straighten + interactive crop box from the geometry base."""
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
     state = _ensure_geometry_bases(state)
@@ -1389,11 +1866,12 @@ def apply_crop_straighten(straighten_deg, crop_left, crop_top, crop_right, crop_
     if base is None:
         raise gr.Error("No framing base — Commit Ingest again.")
 
-    left = float(crop_left) / 100.0
-    top = float(crop_top) / 100.0
-    right = float(crop_right) / 100.0
-    bottom = float(crop_bottom) / 100.0
-    deg = float(straighten_deg)
+    try:
+        left, top, right, bottom = parse_crop_rect(crop_rect)
+    except ValueError as exc:
+        raise gr.Error(f"Invalid crop box: {exc}") from exc
+    deg = float(straighten_deg or 0.0)
+    ratio = str(crop_ratio or "free")
     if left + right >= 0.92 or top + bottom >= 0.92:
         raise gr.Error("Crop is too aggressive — leave more of the frame.")
 
@@ -1418,6 +1896,8 @@ def apply_crop_straighten(straighten_deg, crop_left, crop_top, crop_right, crop_
         "top": top,
         "right": right,
         "bottom": bottom,
+        "ratio": ratio,
+        "rect": str(crop_rect or DEFAULT_CROP_RECT),
     }
 
     orig_base = state.get("original_base")
@@ -1445,6 +1925,7 @@ def apply_crop_straighten(straighten_deg, crop_left, crop_top, crop_right, crop_
             "crop_top": top,
             "crop_right": right,
             "crop_bottom": bottom,
+            "ratio": ratio,
         }
     )
     dn.touch()
@@ -1464,12 +1945,13 @@ def apply_crop_straighten(straighten_deg, crop_left, crop_top, crop_right, crop_
     )
     summary = (
         f"{_stage_banner('development', _locks(state))}\n\n"
-        f"**Framed** — straighten {deg:+.2f}° · "
+        f"**Framed** — straighten {deg:+.2f}° · ratio `{ratio}` · "
         f"trim L{left*100:.0f}% T{top*100:.0f}% R{right*100:.0f}% B{bottom*100:.0f}%.  \n"
         f"_Develop/Print unlocked — Commit Develop when the crop looks right._\n\n"
         f"{_history_md(dn)}"
     )
     state["summary_cache"] = summary
+    rect_echo = str(crop_rect or DEFAULT_CROP_RECT)
     return (
         _viewer_frame(state, live=state.get("live_rgb")),
         state.get("original_ref"),
@@ -1483,12 +1965,10 @@ def apply_crop_straighten(straighten_deg, crop_left, crop_top, crop_right, crop_
         gr.update(open=True),
         gr.update(open=True),
         state,
-        # Echo sliders (unchanged)
         deg,
-        float(crop_left),
-        float(crop_top),
-        float(crop_right),
-        float(crop_bottom),
+        rect_echo,
+        ratio,
+        _framing_stage_preview(state, deg),
     )
 
 
@@ -1505,10 +1985,9 @@ def reset_crop_straighten(state):
     dn.image = np.asarray(base).copy()
     ingest = dn.metadata.setdefault("ingest", {})
     ingest["straighten_degrees"] = 0.0
-    ingest["crop"] = {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+    ingest["crop"] = {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0, "ratio": "free"}
 
-    orig_base = state.get("original_base")
-    if orig_base is not None:
+    if state.get("original_base") is not None:
         state = _set_original_previews_from_base(state)
 
     _unlock_develop_print(dn)
@@ -1549,11 +2028,17 @@ def reset_crop_straighten(state):
         gr.update(open=True),
         state,
         0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        DEFAULT_CROP_RECT,
+        "free",
+        _framing_stage_preview(state, 0.0),
     )
+
+
+def refresh_crop_stage(straighten_deg, state):
+    """Update the crop-stage picture when straighten changes (box stays normalized)."""
+    if not state or state.get("dn") is None:
+        return None
+    return _framing_stage_preview(state, float(straighten_deg or 0.0))
 
 
 def rotate_cw(state):
@@ -1645,10 +2130,9 @@ def commit_ingest(sample_path, file_obj, state):
         gr.update(interactive=True),  # apply framing
         gr.update(interactive=True),  # reset framing
         0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        DEFAULT_CROP_RECT,
+        "free",
+        _framing_stage_preview(state, 0.0),
         _inspect_frame(state, live=latent_inspect),
         gr.update(open=True),
         state,
@@ -2587,10 +3071,9 @@ def guided_first_print(
             apply_frame_u,
             reset_frame_u,
             straighten_u,
-            crop_left_u,
-            crop_top_u,
-            crop_right_u,
-            crop_bottom_u,
+            crop_rect_u,
+            crop_ratio_u,
+            crop_stage_u,
             inspect_out,
             inspect_acc_u,
             state,
@@ -2615,10 +3098,9 @@ def guided_first_print(
         apply_frame_u = gr.update(interactive=True)
         reset_frame_u = gr.update(interactive=True)
         straighten_u = gr.skip()
-        crop_left_u = gr.skip()
-        crop_top_u = gr.skip()
-        crop_right_u = gr.skip()
-        crop_bottom_u = gr.skip()
+        crop_rect_u = gr.skip()
+        crop_ratio_u = gr.skip()
+        crop_stage_u = gr.skip()
         inspect_out = state.get("live_inspect") or live_rgb
         inspect_acc_u = gr.update(open=True)
 
@@ -2719,10 +3201,9 @@ def guided_first_print(
         apply_frame_u,
         reset_frame_u,
         straighten_u,
-        crop_left_u,
-        crop_top_u,
-        crop_right_u,
-        crop_bottom_u,
+        crop_rect_u,
+        crop_ratio_u,
+        crop_stage_u,
         inspect_out,
         inspect_acc_u,
         state,
@@ -2804,10 +3285,9 @@ def reset_session():
         off,
         off,
         0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        DEFAULT_CROP_RECT,
+        "free",
+        None,
         None,
     )
 
@@ -3002,8 +3482,15 @@ def build_ui() -> gr.Blocks:
                     rotate_cw_btn = gr.Button("Rotate 90° ⟳", size="sm", interactive=False)
                 with gr.Accordion("Crop & straighten", open=True):
                     gr.Markdown(
-                        "Fine straighten and edge crop from the last ingest / 90° base "
-                        "(not cumulative). Apply when the frame looks right."
+                        "Drag on the picture to draw a crop box · drag handles to resize · "
+                        "pick a ratio to lock · straighten tilts the easel first. "
+                        "Applies from the last ingest / 90° base (not cumulative)."
+                    )
+                    crop_ratio = gr.Radio(
+                        choices=CROP_RATIO_CHOICES,
+                        value="free",
+                        label="Aspect ratio",
+                        elem_id="crop_ratio",
                     )
                     straighten_deg = gr.Slider(
                         -15.0,
@@ -3012,12 +3499,20 @@ def build_ui() -> gr.Blocks:
                         step=0.1,
                         label="Straighten (° CW)",
                     )
-                    with gr.Row():
-                        crop_left = gr.Slider(0.0, 40.0, value=0.0, step=0.5, label="Crop left %")
-                        crop_right = gr.Slider(0.0, 40.0, value=0.0, step=0.5, label="Crop right %")
-                    with gr.Row():
-                        crop_top = gr.Slider(0.0, 40.0, value=0.0, step=0.5, label="Crop top %")
-                        crop_bottom = gr.Slider(0.0, 40.0, value=0.0, step=0.5, label="Crop bottom %")
+                    crop_stage = gr.Image(
+                        label="Crop stage — click & drag on the picture",
+                        type="numpy",
+                        elem_id="crop_stage",
+                        height=420,
+                        interactive=False,
+                        buttons=[],
+                    )
+                    crop_rect = gr.Textbox(
+                        value=DEFAULT_CROP_RECT,
+                        label="crop_rect",
+                        elem_id="crop_rect",
+                        show_label=False,
+                    )
                     with gr.Row():
                         apply_framing_btn = gr.Button(
                             "Apply framing", interactive=False, variant="secondary", size="sm"
@@ -3088,7 +3583,7 @@ def build_ui() -> gr.Blocks:
                 ingest_acc, develop_acc, print_acc,
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
                 apply_framing_btn, reset_framing_btn,
-                straighten_deg, crop_left, crop_top, crop_right, crop_bottom,
+                straighten_deg, crop_rect, crop_ratio, crop_stage,
                 inspect_out, inspect_acc, state,
             ],
         ).then(
@@ -3303,10 +3798,9 @@ def build_ui() -> gr.Blocks:
                 apply_framing_btn,
                 reset_framing_btn,
                 straighten_deg,
-                crop_left,
-                crop_top,
-                crop_right,
-                crop_bottom,
+                crop_rect,
+                crop_ratio,
+                crop_stage,
                 inspect_out,
                 inspect_acc,
                 state,
@@ -3372,7 +3866,7 @@ def build_ui() -> gr.Blocks:
                 ingest_acc, develop_acc, print_acc,
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
                 apply_framing_btn, reset_framing_btn,
-                straighten_deg, crop_left, crop_top, crop_right, crop_bottom,
+                straighten_deg, crop_rect, crop_ratio, crop_stage,
                 state,
             ],
         )
@@ -3381,7 +3875,7 @@ def build_ui() -> gr.Blocks:
             live_out, original_out, latent_out, neg_out, status, history,
             develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
             develop_acc, print_acc, state,
-            straighten_deg, crop_left, crop_top, crop_right, crop_bottom,
+            straighten_deg, crop_rect, crop_ratio, crop_stage,
         ]
         rotate_ccw_btn.click(fn=rotate_ccw, inputs=[state], outputs=rotate_outputs).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
@@ -3397,11 +3891,11 @@ def build_ui() -> gr.Blocks:
             live_out, original_out, latent_out, neg_out, status, history,
             develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
             develop_acc, print_acc, state,
-            straighten_deg, crop_left, crop_top, crop_right, crop_bottom,
+            straighten_deg, crop_rect, crop_ratio, crop_stage,
         ]
         apply_framing_btn.click(
             fn=apply_crop_straighten,
-            inputs=[straighten_deg, crop_left, crop_top, crop_right, crop_bottom, state],
+            inputs=[straighten_deg, crop_rect, crop_ratio, state],
             outputs=frame_outputs,
         ).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
@@ -3412,6 +3906,16 @@ def build_ui() -> gr.Blocks:
             outputs=frame_outputs,
         ).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
+        )
+        straighten_deg.release(
+            fn=refresh_crop_stage,
+            inputs=[straighten_deg, state],
+            outputs=[crop_stage],
+        )
+        straighten_deg.change(
+            fn=refresh_crop_stage,
+            inputs=[straighten_deg, state],
+            outputs=[crop_stage],
         )
 
         # Thumbnail / button → enlarge in main preview + open inspect/zoom
