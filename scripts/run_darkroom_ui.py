@@ -36,6 +36,7 @@ from digital_negative.dodge_burn import (
     TICK_SECONDS,
     apply_exposure_tick,
     base_seconds_to_stops,
+    ensure_accum,
     extract_tool_stamp,
     local_stops_from_state,
     parse_pointer,
@@ -389,6 +390,19 @@ UI_JS = """
   window.__dbPos = '';
   window.__dbGetPos = () => window.__dbPos || '';
 
+  const writePosBox = (text) => {
+    window.__dbPos = text || '';
+    const root = document.querySelector('#db_pos');
+    if (!root) return;
+    const box = root.querySelector('textarea') || root.querySelector('input');
+    if (!box) return;
+    if (box.value === window.__dbPos) return;
+    box.value = window.__dbPos;
+    // Keep Gradio's Textbox value in sync for Timer.tick inputs.
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
   function enhance(sel) {
     const root = document.querySelector(sel);
     if (!root || root.dataset.zoomReady === '1') return;
@@ -516,6 +530,8 @@ UI_JS = """
     cursor.style.top = (r.top + r.height / 2) + 'px';
     cursor.classList.add('db-card-resting');
     cursor.style.display = 'block';
+    // Resting card still counts — expose under the card until the user moves it.
+    if (!window.__dbPos) writePosBox('0.5000,0.5000');
   };
 
   const syncWave = () => {
@@ -532,7 +548,7 @@ UI_JS = """
     const cursor = ensureCursor();
     document.body.classList.toggle('db-exposing', !!exposing);
     if (!exposing) {
-      window.__dbPos = '';
+      writePosBox('');
       window.__dbScrolled = false;
       if (live) live.classList.remove('db-waving');
       cursor.classList.remove('db-card-resting');
@@ -560,7 +576,7 @@ UI_JS = """
           : flagRoot.querySelector('[data-exposing="1"]'))
       : null;
     if (!flag) {
-      window.__dbPos = '';
+      writePosBox('');
       const c = document.getElementById('db_card_cursor');
       if (c) {
         c.classList.remove('db-card-resting');
@@ -574,13 +590,13 @@ UI_JS = """
     const n = normOverImg(img, e.clientX, e.clientY);
     const cursor = ensureCursor();
     if (!n) {
-      window.__dbPos = '';
+      // Keep last position so a held card still exposes after leaving briefly.
       const stamp = flag.getAttribute('data-stamp') || '';
       const frac = parseFloat(flag.getAttribute('data-stamp-fw') || '0.25');
-      placeRestingCard(live, stamp, frac);
+      if (!window.__dbPos) placeRestingCard(live, stamp, frac);
       return;
     }
-    window.__dbPos = n[0].toFixed(4) + ',' + n[1].toFixed(4);
+    writePosBox(n[0].toFixed(4) + ',' + n[1].toFixed(4));
     const stamp = flag.getAttribute('data-stamp') || '';
     const frac = parseFloat(flag.getAttribute('data-stamp-fw') || '0.25');
     if (stamp && cursor.getAttribute('src') !== stamp) cursor.setAttribute('src', stamp);
@@ -607,9 +623,10 @@ UI_JS = """
 """
 
 DB_TICK_JS = """
-(paper, pe, pg, pc, pos, state) => {
+(paper, pe, pg, pc, pos) => {
+  // Gradio does not pass State into js — only transform the visible inputs.
   const p = (window.__dbGetPos && window.__dbGetPos()) || pos || '';
-  return [paper, pe, pg, pc, p, state];
+  return [paper, pe, pg, pc, p];
 }
 """
 
@@ -1657,6 +1674,10 @@ def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print
         cursor = _resize_mask(stamp, nh, nw)
     state["db_stamp_url"] = stamp_to_png_data_url(cursor, tint=tint)
     state["db_stamp_frac"] = float(stamp.shape[1]) / float(max(w, 1))
+    # Seed center so a resting card still burns/dodges until waved.
+    state["db_last_pos"] = [0.5, 0.5]
+    state["db_applied_ticks"] = 0
+    ensure_accum(state, h, w)
 
     verb = "Dodging" if mode == "dodge" else "Burning"
     total_stops = relative_pass_stops(seconds, base_seconds, mode)
@@ -1682,7 +1703,7 @@ def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print
         state,
         gr.update(active=True),
         _db_flag_html(state),
-        "",
+        "0.5000,0.5000",
         _wave_banner_html(state),
     )
 
@@ -1764,12 +1785,12 @@ def tick_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, pos, 
     left = float(state.get("db_seconds_left", 0.0))
     still = bool(state.get("db_exposing"))
     secs = max(0, int(np.ceil(left)))
+    applied = int(state.get("db_applied_ticks", 0))
 
     if still:
         verb = "Dodging" if state.get("db_mode") == "dodge" else "Burning"
-        timer_md = (
-            f"**{verb}… {secs}s** — keep waving over the highlighted print on the right"
-        )
+        contact = "card on print" if applied else "move onto the print"
+        timer_md = f"**{verb}… {secs}s** — {contact}"
         return (
             gr.update(label=LIVE_WAVE_LABEL),
             timer_md,
@@ -1781,7 +1802,25 @@ def tick_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, pos, 
             _wave_banner_html(state),
         )
 
-    status = "**Exposure done** — inspect the print. Start again for another pass, or Reset."
+    ls = local_stops_from_state(state)
+    peak = float(np.max(np.abs(ls))) if ls is not None else 0.0
+    if peak < 1e-4:
+        status = (
+            "**No local exposure recorded** — the card never registered over the print. "
+            "Start again and keep the pointer on the highlighted print while it counts."
+        )
+        # Drop empty stroke noise
+        strokes = state.get("db_strokes") or []
+        if strokes and int(strokes[-1].get("applied_ticks", 0) or 0) == 0:
+            state["db_strokes"] = strokes[:-1]
+    else:
+        mode = state.get("db_mode", "burn")
+        verb = "Dodge" if mode == "dodge" else "Burn"
+        status = (
+            f"**Exposure done** — {verb} peak {peak:.2f} stops on the print. "
+            "Inspect below. Start again for another pass, or Reset."
+        )
+
     live, timer_md, st, hi, state = _db_refresh_print(
         paper_id, print_exposure, print_grade, print_contrast, state, status_md=status
     )
@@ -2090,7 +2129,8 @@ def build_ui() -> gr.Blocks:
                             )
                             db_reset_btn = gr.Button("Reset local work", size="sm")
                         db_flag = gr.HTML(_db_flag_html(None), elem_id="db_flag")
-                        db_pos = gr.Textbox(value="", elem_id="db_pos", visible=False)
+                        # Keep in the DOM (CSS-hidden) so Timer.tick + pointer JS can sync it.
+                        db_pos = gr.Textbox(value="0.5000,0.5000", elem_id="db_pos", show_label=False)
                         # Off-screen tick source — samples the waved card ~4×/sec.
                         with gr.Column(elem_classes=["db_clock_hidden"]):
                             db_clock = gr.Timer(value=TICK_SECONDS, active=False)

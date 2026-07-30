@@ -493,6 +493,40 @@ def test_dodge_burn_timer_darkens_and_lightens():
     assert float(placed[50, 50]) > 0.5
 
 
+def test_dodge_burn_list_stamp_and_last_pos_still_apply():
+    """Gradio may round-trip ndarray masks as lists; pointer may briefly drop."""
+    from digital_negative.dodge_burn import (
+        TICK_SECONDS,
+        apply_exposure_tick,
+        ensure_accum,
+        local_stops_from_state,
+    )
+
+    stamp = np.ones((16, 16), dtype=np.float32)
+    st = {
+        "db_exposing": True,
+        "db_mode": "burn",
+        "db_seconds_left": 1.0,
+        "db_total_seconds": 1,
+        "db_tick_seconds": TICK_SECONDS,
+        "db_base_seconds": 8.0,
+        "print_base_seconds": 8.0,
+        "db_strokes": [],
+        "db_stamp": stamp.tolist(),
+        "db_last_pos": [0.5, 0.5],
+        "db_applied_ticks": 0,
+    }
+    ensure_accum(st, 64, 64)
+    ticks = int(round(1.0 / TICK_SECONDS))
+    for _ in range(ticks):
+        # No explicit pointer — should reuse db_last_pos and list stamp.
+        apply_exposure_tick(st, None, height=64, width=64, position=None)
+    ls = local_stops_from_state(st)
+    assert ls is not None
+    assert float(np.max(np.abs(ls))) > 0.05
+    assert int(st.get("db_applied_ticks", 0)) > 0
+
+
 def test_print_base_seconds_maps_to_stops():
     from digital_negative.dodge_burn import (
         REFERENCE_BASE_SECONDS,
