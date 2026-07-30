@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -3824,6 +3825,26 @@ def commit_develop(film_id, developer_id, development_minutes, contrast, grain, 
     )
 
 
+def _write_print_file(print_rgb, dn, paper, grade, exposure) -> str:
+    """Save the committed print at full resolution for download."""
+    from PIL import Image
+
+    source = dn.metadata.get("source", {}).get("original_filename") or "print"
+    stem = Path(str(source)).stem or "print"
+    safe_paper = "".join(
+        ch if ch.isalnum() or ch in "-_" else "-" for ch in str(paper.name)
+    ).strip("-")
+    name = f"{stem}__{safe_paper}_g{float(grade):.1f}_{float(exposure):g}s.png"
+
+    out_dir = Path(tempfile.gettempdir()) / "darkroom_prints"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / name
+    # optimize=True buys almost nothing on photographic data and costs time on
+    # a full-res frame, so stay on the default compression.
+    Image.fromarray(np.asarray(print_rgb).astype(np.uint8)).save(path, format="PNG")
+    return str(path)
+
+
 def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
     if not state or state.get("development_full") is None:
         raise gr.Error("Commit Develop first.")
@@ -3854,7 +3875,8 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
     if "print" not in locks:
         locks.append("print")
 
-    live_rgb = _downscale_rgb(_to_rgb_u8(result.preview), LIVE_MAX_SIDE)
+    print_full = _to_rgb_u8(result.preview)
+    live_rgb = _downscale_rgb(print_full, LIVE_MAX_SIDE)
     speed = dn.metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
     db_note = f" · {len(strokes)} dodge/burn pass(es)" if strokes else ""
     summary = (
@@ -3862,6 +3884,7 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         f"**Print locked** — {paper.name} · g{float(print_grade):.1f} · "
         f"{_print_timer_label(print_exposure)}{db_note}\n\n{_history_md(dn)}"
     )
+    download_path = _write_print_file(print_full, dn, paper, print_grade, print_exposure)
     state = {**state, "print": result, "live_rgb": live_rgb, "summary_cache": summary}
     return (
         live_rgb,
@@ -3875,6 +3898,7 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         gr.update(interactive=False),
         gr.update(interactive=False),
         gr.update(interactive=True),
+        gr.update(value=download_path, visible=True),
         state,
     )
 
@@ -4591,6 +4615,7 @@ def unlock_print(state):
         on,
         off,
         gr.update(open=True),
+        gr.update(visible=False),
         state,
     )
 
@@ -4635,6 +4660,7 @@ def reset_session():
         0.0,
         DEFAULT_CROP_RECT,
         "free",
+        gr.update(visible=False),
         None,
         "ingest",
     )
@@ -4735,6 +4761,12 @@ def build_ui() -> gr.Blocks:
                                 "Commit Print", interactive=False, variant="primary", size="sm"
                             )
                             unlock_print_btn = gr.Button("Unlock", interactive=False, size="sm")
+                        download_print_btn = gr.DownloadButton(
+                            "⇣ Download print",
+                            visible=False,
+                            size="sm",
+                            elem_id="download_print",
+                        )
                         gr.Markdown(
                             "_Dodge / burn: **right-click the print** → Dodge or Burn._",
                             elem_id="db_hint",
@@ -4936,18 +4968,32 @@ def build_ui() -> gr.Blocks:
             live_out, original_out, latent_out, neg_out, status, history, inspect_out, state
         ]
 
+        ingest_outputs = [
+            live_out, original_out, latent_out, neg_out, status, history,
+            sample, file_in, ingest_btn, develop_btn, print_btn,
+            ingest_acc, develop_acc, print_acc,
+            rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
+            apply_framing_btn, reset_framing_btn, auto_crop_btn,
+            straighten_deg, crop_rect, crop_ratio,
+            inspect_out, state, active_drawer,
+        ]
+
         ingest_btn.click(
             fn=commit_ingest,
             inputs=[sample, file_in, state],
-            outputs=[
-                live_out, original_out, latent_out, neg_out, status, history,
-                sample, file_in, ingest_btn, develop_btn, print_btn,
-                ingest_acc, develop_acc, print_acc,
-                rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
-                apply_framing_btn, reset_framing_btn, auto_crop_btn,
-                straighten_deg, crop_rect, crop_ratio,
-                inspect_out, state, active_drawer,
-            ],
+            outputs=ingest_outputs,
+        ).then(
+            fn=live_preview_high,
+            inputs=preview_inputs,
+            outputs=preview_outputs,
+        )
+
+        # Uploading a frame is the intent — commit it straight away instead of
+        # making the button a second, redundant step.
+        file_in.upload(
+            fn=commit_ingest,
+            inputs=[sample, file_in, state],
+            outputs=ingest_outputs,
         ).then(
             fn=live_preview_high,
             inputs=preview_inputs,
@@ -5139,7 +5185,7 @@ def build_ui() -> gr.Blocks:
             outputs=[
                 live_out, original_out, latent_out, neg_out, status, history,
                 paper, print_exposure, print_grade, print_contrast,
-                print_btn, unlock_print_btn, state,
+                print_btn, unlock_print_btn, download_print_btn, state,
             ],
         )
 
@@ -5149,7 +5195,7 @@ def build_ui() -> gr.Blocks:
             outputs=[
                 live_out, status, history,
                 paper, print_exposure, print_grade, print_contrast,
-                print_btn, unlock_print_btn, print_acc, state,
+                print_btn, unlock_print_btn, print_acc, download_print_btn, state,
             ],
         ).then(
             fn=live_preview_high,
@@ -5171,6 +5217,7 @@ def build_ui() -> gr.Blocks:
                 rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
                 apply_framing_btn, reset_framing_btn, auto_crop_btn,
                 straighten_deg, crop_rect, crop_ratio,
+                download_print_btn,
                 state, active_drawer,
             ],
         )
