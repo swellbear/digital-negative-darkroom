@@ -53,43 +53,118 @@ if SAMPLE_DIR.exists():
             SAMPLE_CHOICES.append((path.name, str(path)))
 
 UI_CSS = """
-.gradio-container { max-width: 1700px !important; }
+.gradio-container {
+  max-width: 100% !important;
+  padding: 8px 12px !important;
+}
+/* Force controls | preview side-by-side; do not stack on typical laptop widths */
+#main_workspace {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: flex-start !important;
+  gap: 12px !important;
+}
+#main_workspace > div {
+  min-width: 0 !important;
+}
 #controls_col {
-  max-height: 92vh;
+  flex: 0 0 320px !important;
+  width: 320px !important;
+  max-width: 320px !important;
+  position: sticky !important;
+  top: 6px !important;
+  max-height: calc(100vh - 16px) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding-right: 6px !important;
+  align-self: flex-start !important;
+}
+#preview_col {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+/* Compact control density */
+#controls_col .block {
+  margin-top: 2px !important;
+  margin-bottom: 2px !important;
+  padding: 0 !important;
+}
+#controls_col .label-wrap,
+#controls_col label,
+#controls_col .svelte-1b6s6s {
+  margin-bottom: 0 !important;
+  font-size: 0.82rem !important;
+}
+#controls_col .form {
+  gap: 4px !important;
+}
+#controls_col button {
+  min-height: 34px !important;
+  font-size: 0.9rem !important;
+}
+#controls_col .accordion {
+  margin-bottom: 4px !important;
+}
+#controls_col .accordion > .label-wrap {
+  padding: 6px 8px !important;
+  font-size: 0.9rem !important;
+}
+#app_header h1 {
+  font-size: 1.35rem !important;
+  margin: 0 0 2px 0 !important;
+}
+#app_header p, #app_header {
+  margin: 0 0 6px 0 !important;
+  font-size: 0.88rem !important;
+  line-height: 1.35 !important;
+}
+#ritual_status {
+  padding: 6px 8px !important;
+  margin-bottom: 6px !important;
+  border-left: 3px solid #c45c26;
+  background: linear-gradient(90deg, rgba(196,92,38,0.12), transparent);
+  font-size: 0.82rem !important;
+  line-height: 1.3 !important;
+}
+#history_box {
+  margin-top: 4px !important;
+  padding: 6px 8px !important;
+  border: 1px solid rgba(128,128,128,0.25);
+  background: rgba(0,0,0,0.08);
+  font-size: 0.8rem !important;
+  max-height: 140px;
   overflow-y: auto;
-  padding-right: 8px;
 }
 #live_preview {
-  min-height: 72vh;
+  min-height: 0 !important;
 }
 #live_preview img,
-#live_preview .image-container img {
-  max-height: 72vh !important;
+#live_preview .image-container img,
+#live_preview .image-frame img {
+  max-height: calc(100vh - 160px) !important;
   width: 100% !important;
   object-fit: contain !important;
   background: #0c0c0c !important;
 }
+#ref_row {
+  gap: 6px !important;
+  margin-top: 6px !important;
+}
 #ref_row img {
-  max-height: 140px !important;
+  max-height: 88px !important;
   object-fit: contain !important;
   background: #0c0c0c !important;
 }
-#ref_row {
-  gap: 8px;
-}
-#ritual_status {
-  padding: 10px 12px;
-  margin-bottom: 8px;
-  border-left: 3px solid #c45c26;
-  background: linear-gradient(90deg, rgba(196,92,38,0.12), transparent);
-  font-size: 0.95rem;
-}
-#history_box {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(0,0,0,0.25);
-  font-size: 0.9rem;
+@media (max-width: 900px) {
+  #main_workspace { flex-wrap: wrap !important; }
+  #controls_col {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    position: relative !important;
+    max-height: none !important;
+  }
 }
 """
 
@@ -795,48 +870,51 @@ def build_ui() -> gr.Blocks:
         gr.Markdown(
             """
             # Digital Negative Darkroom
-            Work **one stage at a time**: Ingest → Develop → Print. Explore freely; **Commit** locks a decision; **Unlock** revises.  
-            Large image = theoretical print (finish). References = Original → Latent DN → developed negative (start → process).
-            """
+            **Ingest → Develop → Print** · Commit locks · Unlock revises · Large image = theoretical print
+            """,
+            elem_id="app_header",
         )
 
-        with gr.Row():
-            with gr.Column(scale=1, elem_id="controls_col", min_width=320):
+        with gr.Row(elem_id="main_workspace", equal_height=False):
+            with gr.Column(scale=0, elem_id="controls_col", min_width=300):
                 status = gr.Markdown(
-                    "*1. Ingest — working* → 2. Develop → 3. Print  \n"
-                    "_Commit Ingest to load a Digital Negative and begin._",
+                    "**1. Ingest — working** → 2. Develop → 3. Print  \n"
+                    "_Commit Ingest to begin._",
                     elem_id="ritual_status",
                 )
                 with gr.Accordion("1 · Ingest", open=True):
                     sample = gr.Dropdown(
                         choices=SAMPLE_CHOICES,
                         value=default_sample,
-                        label="Sample raw (used if no upload)",
+                        label="Sample (if no upload)",
                     )
                     file_in = gr.File(
-                        label="Upload your file (overrides sample)",
+                        label="Upload (overrides sample)",
                         file_types=[
                             ".arw", ".cr2", ".cr3", ".nef", ".dng", ".raf", ".orf", ".rw2",
                             ".tif", ".tiff", ".jpg", ".jpeg", ".png",
                         ],
+                        height=80,
                     )
-                    ingest_btn = gr.Button("Commit Ingest", variant="primary")
+                    ingest_btn = gr.Button("Commit Ingest", variant="primary", size="sm")
 
                 with gr.Accordion("2 · Develop", open=True):
                     film = gr.Dropdown(
                         choices=FILM_CHOICES,
                         value=FILM_CHOICES[0][1] if FILM_CHOICES else None,
-                        label="Film stock",
+                        label="Film",
                     )
                     developer = gr.Dropdown(
-                        choices=DEVELOPER_CHOICES, value="standard", label="Developer style"
+                        choices=DEVELOPER_CHOICES, value="standard", label="Developer"
                     )
-                    relative_time = gr.Slider(0.5, 2.0, value=1.0, step=0.05, label="Relative development")
-                    contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Contrast (N− / N+)")
-                    grain = gr.Slider(0.0, 2.5, value=1.0, step=0.05, label="Grain strength")
+                    relative_time = gr.Slider(0.5, 2.0, value=1.0, step=0.05, label="Rel. development")
+                    contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Contrast N− / N+")
+                    grain = gr.Slider(0.0, 2.5, value=1.0, step=0.05, label="Grain")
                     with gr.Row():
-                        develop_btn = gr.Button("Commit Develop", interactive=False, variant="primary")
-                        unlock_develop_btn = gr.Button("Unlock Develop", interactive=False)
+                        develop_btn = gr.Button(
+                            "Commit Develop", interactive=False, variant="primary", size="sm"
+                        )
+                        unlock_develop_btn = gr.Button("Unlock", interactive=False, size="sm")
 
                 with gr.Accordion("3 · Print", open=True):
                     paper = gr.Dropdown(
@@ -845,30 +923,32 @@ def build_ui() -> gr.Blocks:
                         label="Paper",
                     )
                     print_exposure = gr.Slider(-2.0, 2.0, value=0.0, step=0.05, label="Exposure (stops)")
-                    print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="Multigrade filtration")
-                    print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Between-filter nudge")
+                    print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="MG filtration")
+                    print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter nudge")
                     with gr.Row():
-                        print_btn = gr.Button("Commit Print", interactive=False, variant="primary")
-                        unlock_print_btn = gr.Button("Unlock Print", interactive=False)
+                        print_btn = gr.Button(
+                            "Commit Print", interactive=False, variant="primary", size="sm"
+                        )
+                        unlock_print_btn = gr.Button("Unlock", interactive=False, size="sm")
 
-                reset_btn = gr.Button("New negative")
-                history = gr.Markdown(
-                    "### Decision log\n_Locked decisions only — exploring does not write here._",
-                    elem_id="history_box",
-                )
+                reset_btn = gr.Button("New negative", size="sm")
+                with gr.Accordion("Decision log", open=False):
+                    history = gr.Markdown(
+                        "_Locked decisions only — exploring does not write here._",
+                        elem_id="history_box",
+                    )
 
-            with gr.Column(scale=4, min_width=900):
+            with gr.Column(scale=1, elem_id="preview_col", min_width=480):
                 live_out = gr.Image(
-                    label="Commit preview (live) — theoretical print / what locking will look like",
+                    label="Commit preview (live)",
                     type="numpy",
                     elem_id="live_preview",
+                    height=620,
                 )
                 with gr.Row(elem_id="ref_row"):
-                    original_out = gr.Image(
-                        label="Original photo (reference)", type="numpy", height=140
-                    )
-                    latent_out = gr.Image(label="Latent DN (reference)", type="numpy", height=140)
-                    neg_out = gr.Image(label="Developed negative (reference)", type="numpy", height=140)
+                    original_out = gr.Image(label="Original", type="numpy", height=96)
+                    latent_out = gr.Image(label="Latent DN", type="numpy", height=96)
+                    neg_out = gr.Image(label="Negative", type="numpy", height=96)
 
         # Always pass develop + print controls so the large viewer can show a
         # theoretical print through the working negative while developing.
