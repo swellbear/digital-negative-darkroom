@@ -590,7 +590,8 @@ body.drawer-collapsed #drawer_host {
 #seq_strip {
   flex: 0 0 auto !important;
   flex-wrap: nowrap !important;
-  gap: 4px !important;
+  justify-content: flex-start !important;
+  gap: 5px !important;
   align-items: center !important;
   height: 46px !important;
   min-height: 46px !important;
@@ -610,6 +611,12 @@ body.drawer-collapsed #drawer_host {
   height: 44px !important;
   min-height: 44px !important;
   max-height: 44px !important;
+  /* Stretched full-width they became 375px letterbox slivers of the frame;
+     a fixed thumb width keeps the whole picture readable. */
+  flex: 0 0 68px !important;
+  width: 68px !important;
+  min-width: 68px !important;
+  max-width: 68px !important;
   align-self: center !important;
 }
 #seq_strip .image-container,
@@ -674,9 +681,11 @@ body.drawer-collapsed #drawer_host {
 #seq_strip .block:hover .image-container { border-color: var(--dr-accent) !important; }
 #seq_strip img {
   max-height: 42px !important;
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover !important;
+  max-width: 100% !important;
+  width: auto !important;
+  height: auto !important;
+  /* contain, not cover — the point is to recognise the frame at a glance. */
+  object-fit: contain !important;
   border-radius: 4px !important;
 }
 #seq_strip button {
