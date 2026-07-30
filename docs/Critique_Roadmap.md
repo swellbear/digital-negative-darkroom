@@ -38,13 +38,15 @@ The live + Commit/Unlock model is good. Now refine the *experience* of the ritua
 
 ## 3. Profile Depth Before Expansion
 
-Resist the urge to add many more films/papers yet.
+Resist the urge to add many more films/papers yet. Tri-X 400 was added as one carefully chosen favorite (Kodak F-4017 approximate digitization) — still prefer deepening existing stocks over a large catalog.
 
 **Next critique focus:**
-- Take the existing three films and three papers and push their quality.
+- Side-by-side Tri-X / HP5 / FP4 / Delta against real references; refine toe/shoulder where they diverge.
 - Which profile currently feels weakest?
 - Are there specific tonal regions (toe, shoulder, midtones) that consistently feel off?
-- Would one carefully refined additional paper or film (e.g., a higher-contrast option or a different paper surface) add more value than three mediocre new ones?
+- Would one carefully refined additional paper (e.g., a different surface) add more value than three mediocre new films?
+
+**Explicit non-goal for now:** analog camera / lens catalogs at ingest. Ingest stays digital raw → linear DN; capture-character (format, vignette, flare, MTF) is a later layer once film/paper feel is strong.
 
 ---
 
