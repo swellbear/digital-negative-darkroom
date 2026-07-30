@@ -1364,7 +1364,8 @@ def build_ui() -> gr.Blocks:
                         label="Upload (overrides sample)",
                         file_types=[
                             ".arw", ".cr2", ".cr3", ".nef", ".dng", ".raf", ".orf", ".rw2",
-                            ".tif", ".tiff", ".jpg", ".jpeg", ".png",
+                            ".tif", ".tiff", ".jpg", ".jpeg", ".png", ".webp",
+                            ".heic", ".heif", ".avif",
                         ],
                         height=56,
                     )
