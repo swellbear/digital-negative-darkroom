@@ -32,6 +32,7 @@ from digital_negative.display import (
     to_u8_gray,
 )
 from digital_negative.dodge_burn import (
+    CARD_PRESETS,
     REFERENCE_BASE_SECONDS,
     TICK_SECONDS,
     apply_exposure_tick,
@@ -42,6 +43,7 @@ from digital_negative.dodge_burn import (
     parse_pointer,
     relative_pass_stops,
     reset_local_work,
+    resolve_tool_stamp,
     stamp_to_png_data_url,
     tool_workshop_canvas,
 )
@@ -1552,6 +1554,35 @@ def _print_timer_label(print_seconds) -> str:
     return f"{seconds:g}s base (≈ {stops:+.2f} stops)"
 
 
+def _pass_math_md(base_seconds, pass_seconds, mode) -> str:
+    """Light darkroom math under the dodge/burn timer."""
+    base = max(float(base_seconds), 1e-6)
+    sec = max(float(pass_seconds), 0.0)
+    mode_key = "dodge" if str(mode).lower().startswith("dodge") else "burn"
+    stops = relative_pass_stops(sec, base, mode_key)
+    if mode_key == "dodge":
+        return (
+            f"**Pass math** — dodge **{sec:g}s** of **{base:g}s** base "
+            f"≈ **{stops:+.2f} stops** if the card is held still "
+            f"(area gets {max(base - min(sec, base * 0.95), base * 0.05):.1f}s of light)."
+        )
+    return (
+        f"**Pass math** — burn **{sec:g}s** on **{base:g}s** base "
+        f"≈ **{stops:+.2f} stops** if held still "
+        f"(area gets {base + sec:.1f}s of light)."
+    )
+
+
+def _base_math_md(base_seconds) -> str:
+    seconds = float(base_seconds)
+    stops = base_seconds_to_stops(seconds)
+    return (
+        f"**Base timer** — **{seconds:g}s** enlarger clock "
+        f"(≈ **{stops:+.2f} stops** vs calibrated {REFERENCE_BASE_SECONDS:g}s). "
+        f"Dodge/burn passes are timed against this."
+    )
+
+
 def _remember_print_seconds(state, print_seconds):
     """Keep base timer on state so dodge/burn converts light-time correctly."""
     if not state:
@@ -1627,7 +1658,9 @@ LIVE_PRINT_LABEL = "Live print — theoretical enlarger print"
 LIVE_WAVE_LABEL = "→ WAVE YOUR CARD OVER THIS PRINT ←"
 
 
-def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print_contrast, editor, state):
+def start_dodge_burn(
+    mode, seconds, shape_id, paper_id, print_exposure, print_grade, print_contrast, editor, state
+):
     if not state or state.get("development_full") is None:
         raise gr.Error("Commit Develop first — dodge/burn happens on the print.")
     if _locked(state, "print"):
@@ -1640,9 +1673,13 @@ def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print
         raise gr.Error("Timer must be at least 1 second.")
 
     h, w = _db_target_shape(state)
-    stamp = extract_tool_stamp(editor, feather_px=4.0, target_height=h, target_width=w)
+    stamp = resolve_tool_stamp(
+        shape_id, editor, target_height=h, target_width=w
+    )
     if stamp is None or float(stamp.max()) < 0.12:
-        raise gr.Error("Paint a card / wand shape in the dark workshop first, then Start exposure.")
+        raise gr.Error(
+            "Pick a card shape (oval/circle/finger) or paint a custom shape, then Start."
+        )
 
     mode = "dodge" if str(mode).lower().startswith("dodge") else "burn"
     base_seconds = float(print_exposure)
@@ -1661,6 +1698,7 @@ def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print
     state["db_tick_seconds"] = TICK_SECONDS
     state["db_feather_px"] = 4.0
     state["db_stamp"] = stamp
+    state["db_shape"] = str(shape_id)
     tint = (120, 200, 255) if mode == "dodge" else (255, 200, 90)
     # Compact cursor image; full-resolution stamp stays in state for exposure.
     cursor = stamp
@@ -1684,10 +1722,11 @@ def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print
     status = (
         f"**{verb}** — {seconds}s of {base_seconds:g}s base · ~{total_stops:+.2f} stops if held still.  \n"
         f"_Move your pointer over the highlighted **live print** (right). "
-        f"The amber card follows you. Result appears when the timer ends._"
+        f"The card follows you. Result appears when the timer ends._"
     )
     timer_md = (
-        f"**{verb}… {seconds}s** — look right → wave the card over the highlighted print"
+        f"**{verb}… {seconds}s** — look right → wave the card over the highlighted print\n\n"
+        f"{_pass_math_md(base_seconds, seconds, mode)}"
     )
     if state.get("dn") is not None:
         summary = f"{_stage_banner('print', _locks(state))}\n\n{status}\n\n{_history_md(state['dn'])}"
@@ -1920,12 +1959,189 @@ def unlock_develop(state):
 
 
 def seed_dodge_burn_editor(state):
-    """After Commit Develop — open a dark workshop to cut the card shape."""
+    """After Commit Develop — prepare the enlarger-card controls."""
     rgb = state.get("live_rgb") if state else None
+    editor = _editor_from_print(rgb)
+    base = float((state or {}).get("print_base_seconds") or REFERENCE_BASE_SECONDS)
     return (
-        _editor_from_print(rgb),
-        "**Ready** — paint a card on the dark pad, then **Start — wave over print →** "
-        "(the print on the right lights up).",
+        gr.update(value=editor, visible=False),
+        "**Ready** — pick a card shape (oval is fine), set pass seconds, then "
+        "**Start — wave over print →**. The print on the right is the easel.",
+        _base_math_md(base),
+        _pass_math_md(base, 4.0, "burn"),
+        "soft_oval",
+    )
+
+
+def guided_first_print(
+    sample_path,
+    file_obj,
+    film_id,
+    developer_id,
+    development_minutes,
+    contrast,
+    grain,
+    paper_id,
+    print_exposure,
+    print_grade,
+    print_contrast,
+    state,
+):
+    """One-click path: Ingest → Develop → Print easel ready with a soft-oval card."""
+    film_u = gr.skip()
+    developer_u = gr.skip()
+    minutes_u = gr.skip()
+    contrast_u = gr.skip()
+    grain_u = gr.skip()
+    unlock_dev_u = gr.skip()
+    unlock_print_u = gr.skip()
+
+    if state is None or state.get("dn") is None or not _locked(state, "ingest"):
+        (
+            live_rgb,
+            original_ref,
+            latent_ref,
+            neg_ref,
+            status,
+            history,
+            sample_u,
+            file_u,
+            ingest_btn_u,
+            develop_btn_u,
+            print_btn_u,
+            ingest_acc_u,
+            develop_acc_u,
+            print_acc_u,
+            rot_ccw,
+            rot_180,
+            rot_cw,
+            inspect_out,
+            inspect_acc_u,
+            state,
+        ) = commit_ingest(sample_path, file_obj, state)
+    else:
+        live_rgb = state.get("live_rgb")
+        original_ref = state.get("original_ref")
+        latent_ref = state.get("latent_ref")
+        neg_ref = state.get("neg_ref")
+        status, history = _split_summary(state.get("summary_cache", ""))
+        sample_u = gr.skip()
+        file_u = gr.skip()
+        ingest_btn_u = gr.update(interactive=False)
+        develop_btn_u = gr.update(interactive=True)
+        print_btn_u = gr.update(interactive=False)
+        ingest_acc_u = gr.update(open=False)
+        develop_acc_u = gr.update(open=True)
+        print_acc_u = gr.update(open=True)
+        rot_ccw = gr.update(interactive=True)
+        rot_180 = gr.update(interactive=True)
+        rot_cw = gr.update(interactive=True)
+        inspect_out = state.get("live_inspect") or live_rgb
+        inspect_acc_u = gr.update(open=True)
+
+    if not _locked(state, "development"):
+        (
+            live_rgb,
+            original_ref,
+            latent_ref,
+            neg_ref,
+            status,
+            history,
+            film_u,
+            developer_u,
+            minutes_u,
+            contrast_u,
+            grain_u,
+            develop_btn_u,
+            unlock_dev_u,
+            print_btn_u,
+            unlock_print_u,
+            develop_acc_u,
+            print_acc_u,
+            state,
+        ) = commit_develop(
+            film_id,
+            developer_id,
+            development_minutes,
+            contrast,
+            grain,
+            state,
+        )
+    else:
+        develop_btn_u = gr.update(interactive=False)
+        unlock_dev_u = gr.update(interactive=True)
+        print_btn_u = gr.update(interactive=True)
+        unlock_print_u = gr.update(interactive=_locked(state, "print"))
+        develop_acc_u = gr.update(open=False)
+        print_acc_u = gr.update(open=True)
+
+    packed = live_preview_high(
+        film_id,
+        developer_id,
+        development_minutes,
+        contrast,
+        grain,
+        paper_id,
+        print_exposure,
+        print_grade,
+        print_contrast,
+        state,
+    )
+    live_rgb, original_ref, latent_ref, neg_ref, status, history, inspect_out, state = packed
+    state = _remember_print_seconds(state, print_exposure)
+    if not state.get("db_exposing"):
+        state = reset_local_work({**state})
+
+    guide = (
+        f"{_stage_banner('print', _locks(state))}\n\n"
+        f"**First-print guide ready**  \n"
+        f"1. Base timer is **{float(print_exposure):g}s**  \n"
+        f"2. Card shape is **soft oval** — change it if you want  \n"
+        f"3. Click **Start — wave over print →**  \n"
+        f"4. Move over the **highlighted print on the right** until the timer ends  \n"
+        f"5. Inspect the change · Reset local work if you don’t like it\n\n"
+        f"{_history_md(state['dn'])}"
+    )
+    state["summary_cache"] = guide
+    st, hi = _split_summary(guide)
+    timer_md = (
+        "**Ready for the easel** — soft oval card loaded.\n\n"
+        f"{_pass_math_md(print_exposure, 4.0, 'burn')}"
+    )
+    return (
+        live_rgb,
+        original_ref,
+        latent_ref,
+        neg_ref,
+        st,
+        hi,
+        sample_u,
+        file_u,
+        ingest_btn_u,
+        film_u,
+        developer_u,
+        minutes_u,
+        contrast_u,
+        grain_u,
+        develop_btn_u,
+        unlock_dev_u,
+        print_btn_u,
+        unlock_print_u,
+        ingest_acc_u,
+        develop_acc_u,
+        print_acc_u,
+        rot_ccw,
+        rot_180,
+        rot_cw,
+        inspect_out,
+        inspect_acc_u,
+        state,
+        gr.update(value=_editor_from_print(live_rgb), visible=False),
+        timer_md,
+        _base_math_md(print_exposure),
+        _pass_math_md(print_exposure, 4.0, "burn"),
+        "soft_oval",
+        _wave_banner_html(state),
     )
 
 
@@ -2006,10 +2222,17 @@ def build_ui() -> gr.Blocks:
         gr.Markdown(
             """
             # Digital Negative Darkroom
-            **Ingest → Develop → Print** · Commit locks · Unlock revises · Large image = theoretical print
+            **Ingest → Develop → Print** · Commit locks · Unlock revises · Right image = enlarger easel / theoretical print
             """,
             elem_id="app_header",
         )
+        with gr.Accordion("First print (≈2 min)", open=True, elem_id="first_print_guide"):
+            gr.Markdown(
+                "New here? Click **Run first-print guide** — it locks Ingest + Develop with the "
+                "current sample/settings, opens Print, and loads a soft-oval card. Then "
+                "**Start — wave over print →** and move on the print at right."
+            )
+            guide_btn = gr.Button("Run first-print guide", variant="secondary", size="sm")
 
         with gr.Row(elem_id="main_workspace", equal_height=False):
             with gr.Column(scale=0, elem_id="controls_col", min_width=300):
@@ -2075,22 +2298,25 @@ def build_ui() -> gr.Blocks:
                         label="Base exposure (seconds)",
                         info="Enlarger timer — dodge/burn is relative to this base",
                     )
+                    base_math_md = gr.Markdown(_base_math_md(8.0), elem_id="base_math")
                     print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="MG filtration")
                     print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter nudge")
-                    with gr.Accordion("Dodge & burn (enlarger card)", open=True):
+                    with gr.Accordion("Dodge & burn · enlarger easel", open=True):
                         gr.Markdown(
-                            "Set the **base exposure** timer above first. Then:  \n"
-                            "1) Paint a **card / wand** on the dark pad  \n"
-                            "2) Click **Start — wave over print**  \n"
-                            "3) Move your pointer over the **highlighted print on the right**  \n"
-                            "4) When the timer stops, inspect. Reset clears local work only.",
+                            "The **print on the right** is the easel. Pick a card shape, set the pass "
+                            "time, Start, then wave over that print. Reset clears local work only.",
                             elem_id="db_hint",
                         )
+                        db_shape = gr.Radio(
+                            choices=[(label, key) for key, label in CARD_PRESETS],
+                            value="soft_oval",
+                            label="Card / wand shape",
+                        )
                         db_editor = gr.ImageEditor(
-                            label="Cut card / wand (dark workshop — not the print)",
+                            label="Custom card (paint only if shape = Custom)",
                             type="numpy",
                             image_mode="RGBA",
-                            height=360,
+                            height=220,
                             value=tool_workshop_canvas(),
                             brush=gr.Brush(
                                 default_size=48,
@@ -2103,6 +2329,7 @@ def build_ui() -> gr.Blocks:
                             transforms=(),
                             sources=(),
                             buttons=["fullscreen"],
+                            visible=False,
                         )
                         db_mode = gr.Radio(
                             choices=[("Dodge (hold back light)", "dodge"), ("Burn (add light)", "burn")],
@@ -2117,9 +2344,9 @@ def build_ui() -> gr.Blocks:
                             label="Dodge/burn pass (seconds)",
                             info="Relative to the base exposure timer above",
                         )
+                        pass_math_md = gr.Markdown(_pass_math_md(8.0, 4.0, "burn"), elem_id="pass_math")
                         db_timer_md = gr.Markdown(
-                            "**Ready** — cut a card on the dark pad, then "
-                            "**Start — wave over print** (right side)."
+                            "**Ready** — pick a shape, then **Start — wave over print →**"
                         )
                         with gr.Row(elem_id="db_actions"):
                             db_start_btn = gr.Button(
@@ -2250,20 +2477,38 @@ def build_ui() -> gr.Blocks:
             cur = int(round(float(current_pass)))
             if str(mode).lower().startswith("dodge"):
                 mx = max(1, int(round(base)))
-                return gr.update(maximum=mx, value=min(cur, mx))
-            mx = max(1, int(round(base * 2)))
-            return gr.update(maximum=mx, value=min(cur, mx))
+                value = min(cur, mx)
+            else:
+                mx = max(1, int(round(base * 2)))
+                value = min(cur, mx)
+            return (
+                gr.update(maximum=mx, value=value),
+                _base_math_md(base),
+                _pass_math_md(base, value, mode),
+            )
+
+        def _sync_pass_math_only(base_seconds, mode, current_pass):
+            return _pass_math_md(base_seconds, current_pass, mode)
+
+        def _toggle_custom_editor(shape_id):
+            return gr.update(visible=str(shape_id).lower() == "custom")
 
         print_exposure.change(
             fn=_sync_db_pass_timer,
             inputs=[print_exposure, db_mode, db_seconds],
-            outputs=[db_seconds],
+            outputs=[db_seconds, base_math_md, pass_math_md],
         )
         db_mode.change(
             fn=_sync_db_pass_timer,
             inputs=[print_exposure, db_mode, db_seconds],
-            outputs=[db_seconds],
+            outputs=[db_seconds, base_math_md, pass_math_md],
         )
+        db_seconds.change(
+            fn=_sync_pass_math_only,
+            inputs=[print_exposure, db_mode, db_seconds],
+            outputs=[pass_math_md],
+        )
+        db_shape.change(fn=_toggle_custom_editor, inputs=[db_shape], outputs=[db_editor])
 
         # Film / developer swap chemistry list + datasheet-normal minutes, then refresh.
         film.change(
@@ -2301,7 +2546,7 @@ def build_ui() -> gr.Blocks:
         ).then(
             fn=seed_dodge_burn_editor,
             inputs=[state],
-            outputs=[db_editor, db_timer_md],
+            outputs=[db_editor, db_timer_md, base_math_md, pass_math_md, db_shape],
         )
 
         db_start_btn.click(
@@ -2309,6 +2554,7 @@ def build_ui() -> gr.Blocks:
             inputs=[
                 db_mode,
                 db_seconds,
+                db_shape,
                 paper,
                 print_exposure,
                 print_grade,
@@ -2356,6 +2602,59 @@ def build_ui() -> gr.Blocks:
                 db_clock,
                 db_flag,
                 db_pos,
+                db_wave_banner,
+            ],
+        )
+
+        guide_btn.click(
+            fn=guided_first_print,
+            inputs=[
+                sample,
+                file_in,
+                film,
+                developer,
+                development_minutes,
+                contrast,
+                grain,
+                paper,
+                print_exposure,
+                print_grade,
+                print_contrast,
+                state,
+            ],
+            outputs=[
+                live_out,
+                original_out,
+                latent_out,
+                neg_out,
+                status,
+                history,
+                sample,
+                file_in,
+                ingest_btn,
+                film,
+                developer,
+                development_minutes,
+                contrast,
+                grain,
+                develop_btn,
+                unlock_develop_btn,
+                print_btn,
+                unlock_print_btn,
+                ingest_acc,
+                develop_acc,
+                print_acc,
+                rotate_ccw_btn,
+                rotate_180_btn,
+                rotate_cw_btn,
+                inspect_out,
+                inspect_acc,
+                state,
+                db_editor,
+                db_timer_md,
+                base_math_md,
+                pass_math_md,
+                db_shape,
                 db_wave_banner,
             ],
         )
