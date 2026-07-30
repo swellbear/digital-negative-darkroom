@@ -370,7 +370,7 @@ UI_JS = """
     document.querySelectorAll('#db_actions, #controls_col').forEach((root) => {
       root.querySelectorAll('span, p, div').forEach((node) => {
         const t = (node.textContent || '').trim();
-        if (/^\d+(\.\d+)?s$/.test(t) && node.children.length === 0) {
+        if (/^\\d+(\\.\\d+)?s$/.test(t) && node.children.length === 0) {
           node.style.display = 'none';
         }
       });
