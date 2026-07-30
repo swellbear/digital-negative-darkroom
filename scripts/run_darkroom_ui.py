@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sequential Gradio UI — large high-res live preview for real editing."""
+"""Darkroom UI: large commit-accurate live preview beside always-visible controls."""
 
 from __future__ import annotations
 
@@ -23,9 +23,9 @@ from digital_negative.papers import load_paper_profile
 from digital_negative.pipeline import list_film_profiles, list_paper_profiles
 from digital_negative.print_engine import print_negative
 
-# High enough for critical viewing on a desktop; still downscales huge 24MP+ raws.
-LIVE_MAX_SIDE = 1800
-REF_MAX_SIDE = 480
+# Match commit look as closely as practical while staying interactive.
+LIVE_MAX_SIDE = 2000
+REF_MAX_SIDE = 420
 
 FILM_CHOICES = []
 for path in list_film_profiles():
@@ -47,27 +47,26 @@ if SAMPLE_DIR.exists():
             SAMPLE_CHOICES.append((path.name, str(path)))
 
 UI_CSS = """
-:root { --dn-live-h: min(78vh, 1100px); }
-.gradio-container { max-width: 1600px !important; }
+.gradio-container { max-width: 1700px !important; }
+#controls_col {
+  max-height: 92vh;
+  overflow-y: auto;
+  padding-right: 8px;
+}
 #live_preview {
-  min-height: var(--dn-live-h);
+  min-height: 72vh;
 }
 #live_preview img,
 #live_preview .image-container img {
-  max-height: var(--dn-live-h) !important;
+  max-height: 72vh !important;
   width: 100% !important;
-  height: auto !important;
   object-fit: contain !important;
-  background: #111 !important;
+  background: #0c0c0c !important;
 }
 #ref_row img {
-  max-height: 180px !important;
+  max-height: 140px !important;
   object-fit: contain !important;
-  background: #111 !important;
-}
-#controls_col {
-  max-height: 90vh;
-  overflow-y: auto;
+  background: #0c0c0c !important;
 }
 """
 
@@ -142,7 +141,7 @@ def _history_md(dn) -> str:
                 f"exp {h.get('overall_exposure'):+g} stops"
             )
         elif op == "unlock":
-            lines.append(f"{i}. **Unlock** — {h.get('stage')} (re-opened for changes)")
+            lines.append(f"{i}. **Unlock** — {h.get('stage')}")
         else:
             lines.append(f"{i}. **{op}**")
     locks = dn.metadata.get("ui_state", {}).get("locked_stages", [])
@@ -188,7 +187,8 @@ def commit_ingest(sample_path, file_obj, state):
     latent_ref = _downscale_rgb(latent_full, REF_MAX_SIDE)
     summary = (
         f"{_stage_banner('development')}\n\n"
-        f"**Ingest locked.** Adjust Develop — the large viewer is your working print proof.  \n"
+        f"**Ingest locked.** The large image is a **Commit Develop preview** — "
+        f"it shows what locking Develop will look like as you move the sliders.  \n"
         f"`{dn.metadata['source']['original_filename']}`  \n\n{_history_md(dn)}"
     )
     state = {
@@ -196,14 +196,14 @@ def commit_ingest(sample_path, file_obj, state):
         "proxy": _proxy_dn(dn, LIVE_MAX_SIDE),
         "latent_ref": latent_ref,
         "neg_ref": None,
-        "live_rgb": latent_full,
+        "live_rgb": _downscale_rgb(latent_full, LIVE_MAX_SIDE),
         "development": None,
         "development_full": None,
         "stage": "development",
         "summary_cache": summary,
     }
     return (
-        latent_full,
+        state["live_rgb"],
         latent_ref,
         None,
         summary,
@@ -217,7 +217,10 @@ def commit_ingest(sample_path, file_obj, state):
 
 
 def _run_live_develop(film_id, developer_id, relative_time, contrast, grain, state):
+    """Same develop path as Commit (variation/grain), on a high-res proxy."""
     proxy = state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE)
+    # Keep proxy metadata seed aligned with the real DN
+    proxy.metadata["process_seed"] = state["dn"].metadata.get("process_seed")
     profile = load_film_profile(_profile_path(list_film_profiles(), film_id))
     development = develop(
         proxy,
@@ -226,19 +229,20 @@ def _run_live_develop(film_id, developer_id, relative_time, contrast, grain, sta
         contrast_modifier=float(contrast),
         grain_strength=float(grain),
         developer_id=developer_id,
-        process_variation=0.2,
+        process_variation=1.0,  # match Commit Develop
         commit=False,
     )
-    # Hero = large positive proof (what you judge while editing)
     live_rgb = _to_rgb_u8(development.positive_preview)
-    neg_ref = _downscale_rgb(_to_rgb_u8(negative_lightbox_preview(development.transmittance)), REF_MAX_SIDE)
+    neg_ref = _downscale_rgb(
+        _to_rgb_u8(negative_lightbox_preview(development.transmittance)), REF_MAX_SIDE
+    )
     summary = (
         f"{_stage_banner('development')}\n\n"
-        f"**Live proof** {live_rgb.shape[1]}×{live_rgb.shape[0]} — "
+        f"**Commit Develop preview** ({live_rgb.shape[1]}×{live_rgb.shape[0]}) — "
+        f"this is what Commit will lock.  \n"
         f"{profile.name} · {developer_id} · rel={float(relative_time):.2f} · "
         f"contrast={float(contrast):+.2f} · grain={float(grain):.2f} · "
-        f"density μ={float(development.density.mean()):.2f}  \n"
-        f"_Commit Develop when the large image looks right._  \n\n{_history_md(state['dn'])}"
+        f"density μ={float(development.density.mean()):.2f}  \n\n{_history_md(state['dn'])}"
     )
     state = {
         **state,
@@ -294,16 +298,14 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
     step = max(1, int(np.ceil(max(development.transmittance.shape) / LIVE_MAX_SIDE)))
     t_proxy = np.ascontiguousarray(development.transmittance[::step, ::step])
 
-    live_rgb = _to_rgb_u8(development.positive_preview)
-    # Keep live viewer snappy if full frame is enormous
-    live_view = _downscale_rgb(live_rgb, LIVE_MAX_SIDE)
+    live_view = _downscale_rgb(_to_rgb_u8(development.positive_preview), LIVE_MAX_SIDE)
     neg_ref = _downscale_rgb(
         _to_rgb_u8(negative_lightbox_preview(development.transmittance)), REF_MAX_SIDE
     )
     summary = (
         f"{_stage_banner('print')}\n\n"
-        f"**Develop locked** at {live_rgb.shape[1]}×{live_rgb.shape[0]}. "
-        f"Print sliders update the large viewer.  \n\n{_history_md(dn)}"
+        f"**Develop locked.** Large image is now a **Commit Print preview** — "
+        f"move Print controls to see the final print before locking.  \n\n{_history_md(dn)}"
     )
     state = {
         "dn": dn,
@@ -322,15 +324,15 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
         state.get("latent_ref"),
         neg_ref,
         summary,
-        gr.update(interactive=False),  # film
         gr.update(interactive=False),
         gr.update(interactive=False),
         gr.update(interactive=False),
         gr.update(interactive=False),
-        gr.update(interactive=False),  # develop commit
-        gr.update(interactive=True),  # unlock develop
-        gr.update(interactive=True),  # print commit
-        gr.update(interactive=False),  # unlock print
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        gr.update(interactive=True),
+        gr.update(interactive=True),
+        gr.update(interactive=False),
         state,
     )
 
@@ -345,9 +347,18 @@ def live_print(paper_id, print_exposure, print_grade, print_contrast, state):
     if _locked(state, "print"):
         return state.get("live_rgb"), state.get("summary_cache", ""), state
 
-    t = state.get("transmittance_proxy")
-    if t is None:
+    # Prefer full-res transmittance when available for commit-accurate print preview
+    if state.get("development_full") is not None:
         t = state["development_full"].transmittance
+        # Downscale only for display speed after computing? Computing full print is heavy.
+        # Use high-res proxy derived from full negative for accuracy/speed balance.
+        step = max(1, int(np.ceil(max(t.shape) / LIVE_MAX_SIDE)))
+        t = np.ascontiguousarray(t[::step, ::step])
+    else:
+        t = state.get("transmittance_proxy")
+        if t is None:
+            t = state["development"].transmittance
+
     paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
     result = print_negative(
         t,
@@ -362,10 +373,10 @@ def live_print(paper_id, print_exposure, print_grade, print_contrast, state):
     speed = state["dn"].metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
     summary = (
         f"{_stage_banner('print')}\n\n"
-        f"**Live print** {live_rgb.shape[1]}×{live_rgb.shape[0]} — {paper.name} · "
-        f"grade {float(print_grade):.1f} · exp {float(print_exposure):+.2f} · "
-        f"filter ×{float(speed):.2f}  \n"
-        f"_Commit Print to finalize._  \n\n{_history_md(state['dn'])}"
+        f"**Commit Print preview** ({live_rgb.shape[1]}×{live_rgb.shape[0]}) — "
+        f"this is what Commit Print will lock.  \n"
+        f"{paper.name} · grade {float(print_grade):.1f} · exp {float(print_exposure):+.2f} · "
+        f"filter ×{float(speed):.2f}  \n\n{_history_md(state['dn'])}"
     )
     state = {**state, "print_draft": result, "live_rgb": live_rgb, "summary_cache": summary}
     return live_rgb, summary, state
@@ -401,7 +412,8 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
     summary = (
         f"{_stage_banner('print')}\n\n"
         f"**Print locked** — {paper.name} · grade {float(print_grade):.1f} · "
-        f"exp {float(print_exposure):+.2f} · filter ×{float(speed):.2f}  \n\n{_history_md(dn)}"
+        f"exp {float(print_exposure):+.2f} · filter ×{float(speed):.2f}  \n"
+        f"Use Unlock to revise.  \n\n{_history_md(dn)}"
     )
     state = {**state, "print": result, "live_rgb": live_rgb, "summary_cache": summary}
     return (
@@ -409,12 +421,12 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         state.get("latent_ref"),
         state.get("neg_ref"),
         summary,
-        gr.update(interactive=False),  # paper
         gr.update(interactive=False),
         gr.update(interactive=False),
         gr.update(interactive=False),
-        gr.update(interactive=False),  # print commit
-        gr.update(interactive=True),  # unlock print
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        gr.update(interactive=True),
         state,
     )
 
@@ -426,14 +438,12 @@ def _unlock_stage(dn, stage: str) -> None:
     if stage in locks:
         locks.remove(stage)
     if stage in committed and stage != "ingest":
-        # Keep ingest committed; develop/print can be re-committed
         committed.remove(stage)
     dn.metadata.setdefault("history", []).append({"op": "unlock", "stage": stage})
     dn.touch()
 
 
 def unlock_develop(state):
-    """Re-open Develop (also unlocks Print, since the negative changed)."""
     if not state or state.get("dn") is None:
         raise gr.Error("Nothing to unlock — Commit Ingest first.")
     if not _locked(state, "development"):
@@ -444,7 +454,6 @@ def unlock_develop(state):
         _unlock_stage(dn, "print")
     _unlock_stage(dn, "development")
 
-    # Clear full-res print dependency; keep last develop preview for editing
     state = {
         **state,
         "development_full": None,
@@ -455,8 +464,7 @@ def unlock_develop(state):
     }
     summary = (
         f"{_stage_banner('development')}\n\n"
-        f"**Develop unlocked.** Change settings — the large image updates live again.  \n"
-        f"_Commit Develop when ready (this also cleared the Print lock)._  \n\n"
+        f"**Develop unlocked.** Large image is again a Commit Develop preview.  \n\n"
         f"{_history_md(dn)}"
     )
     state["summary_cache"] = summary
@@ -466,25 +474,24 @@ def unlock_develop(state):
         state.get("latent_ref"),
         state.get("neg_ref"),
         summary,
-        on,  # film
         on,
         on,
         on,
-        on,  # grain
-        on,  # develop commit
-        off,  # unlock develop (hidden until locked again)
-        off,  # print commit
-        on,  # print controls stay visible but print requires develop lock for live
         on,
         on,
         on,
-        off,  # unlock print
+        off,
+        off,
+        on,
+        on,
+        on,
+        on,
+        off,
         state,
     )
 
 
 def unlock_print(state):
-    """Re-open Print only — Develop stays locked."""
     if not state or state.get("dn") is None:
         raise gr.Error("Nothing to unlock.")
     if not _locked(state, "print"):
@@ -497,26 +504,26 @@ def unlock_print(state):
     state = {**state, "print": None, "stage": "print"}
     summary = (
         f"{_stage_banner('print')}\n\n"
-        f"**Print unlocked.** Adjust exposure/grade — large image updates live.  \n"
-        f"_Commit Print when ready._  \n\n{_history_md(dn)}"
+        f"**Print unlocked.** Large image is a Commit Print preview again.  \n\n"
+        f"{_history_md(dn)}"
     )
     state["summary_cache"] = summary
     on, off = gr.update(interactive=True), gr.update(interactive=False)
     return (
         state.get("live_rgb"),
         summary,
-        on,  # paper
         on,
         on,
         on,
-        on,  # print commit
-        off,  # unlock print until locked again
+        on,
+        on,
+        off,
         state,
     )
 
 
 def reset_session():
-    summary = "*Commit Ingest — the large viewer is for critical editing.*"
+    summary = "*Commit Ingest. The large image previews what Commit will lock.*"
     on, off = gr.update(interactive=True), gr.update(interactive=False)
     return (
         None,
@@ -525,20 +532,20 @@ def reset_session():
         summary,
         on,
         on,
-        on,  # ingest
         on,
         on,
         on,
         on,
         on,
-        off,  # develop commit
-        off,  # unlock develop
+        on,
+        off,
+        off,
         on,
         on,
         on,
         on,
-        off,  # print commit
-        off,  # unlock print
+        off,
+        off,
         None,
     )
 
@@ -550,24 +557,13 @@ def build_ui() -> gr.Blocks:
         gr.Markdown(
             """
             # Digital Negative Darkroom
-            **Large viewer = working image.** Sliders update it live.  
-            **Commit** locks a stage; **Unlock** re-opens it so you can revise.
+            **Large image = Commit preview** — it shows what the next Commit will look like, updating as you edit.  
+            **Commit** locks · **Unlock** revises · references under the viewer are secondary.
             """
         )
 
-        # Hero live viewer — full width, tall
-        live_out = gr.Image(
-            label="Working image (live)",
-            type="numpy",
-            elem_id="live_preview",
-        )
-
-        with gr.Row(elem_id="ref_row"):
-            latent_out = gr.Image(label="Latent DN (reference)", type="numpy", height=180)
-            neg_out = gr.Image(label="Developed negative (reference)", type="numpy", height=180)
-
         with gr.Row():
-            with gr.Column(scale=1, elem_id="controls_col"):
+            with gr.Column(scale=1, elem_id="controls_col", min_width=320):
                 with gr.Accordion("1 · Ingest", open=True):
                     sample = gr.Dropdown(choices=SAMPLE_CHOICES, value=default_sample, label="Sample raw")
                     file_in = gr.File(
@@ -609,11 +605,17 @@ def build_ui() -> gr.Blocks:
                         unlock_print_btn = gr.Button("Unlock Print", interactive=False)
 
                 reset_btn = gr.Button("New negative")
+                summary = gr.Markdown("*Commit Ingest, then watch the large Commit preview while you edit.*")
 
-            with gr.Column(scale=1):
-                summary = gr.Markdown(
-                    "*Commit Ingest → edit live → Commit to lock → Unlock anytime to revise.*"
+            with gr.Column(scale=4, min_width=900):
+                live_out = gr.Image(
+                    label="Commit preview (live) — what locking will look like",
+                    type="numpy",
+                    elem_id="live_preview",
                 )
+                with gr.Row(elem_id="ref_row"):
+                    latent_out = gr.Image(label="Latent DN (reference)", type="numpy", height=140)
+                    neg_out = gr.Image(label="Developed negative (reference)", type="numpy", height=140)
 
         develop_inputs = [film, developer, relative_time, contrast, grain, state]
         print_inputs = [paper, print_exposure, print_grade, print_contrast, state]
@@ -622,16 +624,8 @@ def build_ui() -> gr.Blocks:
             fn=commit_ingest,
             inputs=[sample, file_in, state],
             outputs=[
-                live_out,
-                latent_out,
-                neg_out,
-                summary,
-                sample,
-                file_in,
-                ingest_btn,
-                develop_btn,
-                print_btn,
-                state,
+                live_out, latent_out, neg_out, summary,
+                sample, file_in, ingest_btn, develop_btn, print_btn, state,
             ],
         ).then(
             fn=live_develop,
@@ -655,20 +649,9 @@ def build_ui() -> gr.Blocks:
             fn=commit_develop,
             inputs=[film, developer, relative_time, contrast, grain, state],
             outputs=[
-                live_out,
-                latent_out,
-                neg_out,
-                summary,
-                film,
-                developer,
-                relative_time,
-                contrast,
-                grain,
-                develop_btn,
-                unlock_develop_btn,
-                print_btn,
-                unlock_print_btn,
-                state,
+                live_out, latent_out, neg_out, summary,
+                film, developer, relative_time, contrast, grain,
+                develop_btn, unlock_develop_btn, print_btn, unlock_print_btn, state,
             ],
         ).then(
             fn=live_print,
@@ -680,24 +663,10 @@ def build_ui() -> gr.Blocks:
             fn=unlock_develop,
             inputs=[state],
             outputs=[
-                live_out,
-                latent_out,
-                neg_out,
-                summary,
-                film,
-                developer,
-                relative_time,
-                contrast,
-                grain,
-                develop_btn,
-                unlock_develop_btn,
-                print_btn,
-                paper,
-                print_exposure,
-                print_grade,
-                print_contrast,
-                unlock_print_btn,
-                state,
+                live_out, latent_out, neg_out, summary,
+                film, developer, relative_time, contrast, grain,
+                develop_btn, unlock_develop_btn, print_btn,
+                paper, print_exposure, print_grade, print_contrast, unlock_print_btn, state,
             ],
         ).then(
             fn=live_develop,
@@ -721,17 +690,9 @@ def build_ui() -> gr.Blocks:
             fn=commit_print,
             inputs=[paper, print_exposure, print_grade, print_contrast, state],
             outputs=[
-                live_out,
-                latent_out,
-                neg_out,
-                summary,
-                paper,
-                print_exposure,
-                print_grade,
-                print_contrast,
-                print_btn,
-                unlock_print_btn,
-                state,
+                live_out, latent_out, neg_out, summary,
+                paper, print_exposure, print_grade, print_contrast,
+                print_btn, unlock_print_btn, state,
             ],
         )
 
@@ -739,15 +700,9 @@ def build_ui() -> gr.Blocks:
             fn=unlock_print,
             inputs=[state],
             outputs=[
-                live_out,
-                summary,
-                paper,
-                print_exposure,
-                print_grade,
-                print_contrast,
-                print_btn,
-                unlock_print_btn,
-                state,
+                live_out, summary,
+                paper, print_exposure, print_grade, print_contrast,
+                print_btn, unlock_print_btn, state,
             ],
         ).then(
             fn=live_print,
@@ -759,27 +714,12 @@ def build_ui() -> gr.Blocks:
             fn=reset_session,
             inputs=[],
             outputs=[
-                live_out,
-                latent_out,
-                neg_out,
-                summary,
-                sample,
-                file_in,
-                ingest_btn,
-                film,
-                developer,
-                relative_time,
-                contrast,
-                grain,
-                develop_btn,
-                unlock_develop_btn,
-                paper,
-                print_exposure,
-                print_grade,
-                print_contrast,
-                print_btn,
-                unlock_print_btn,
-                state,
+                live_out, latent_out, neg_out, summary,
+                sample, file_in, ingest_btn,
+                film, developer, relative_time, contrast, grain,
+                develop_btn, unlock_develop_btn,
+                paper, print_exposure, print_grade, print_contrast,
+                print_btn, unlock_print_btn, state,
             ],
         )
     return demo
