@@ -642,7 +642,8 @@ UI_JS = """
     const el = document.querySelector('#db_size_readout .db-size-value');
     if (!el) return;
     const pct = Math.round(clampToolScale(window.__dbToolScale || 1) * 100);
-    el.textContent = pct + '%';
+    const text = pct + '%';
+    if (el.textContent !== text) el.textContent = text;
   };
 
   const formatPos = (nx, ny) =>
@@ -682,7 +683,8 @@ UI_JS = """
     if (tool !== 'print') hideTool();
     const modeEl = document.querySelector('#db_size_readout .db-tool-mode');
     if (modeEl) {
-      modeEl.textContent = tool === 'frame' ? 'Frame' : (tool === 'inspect' ? 'Inspect' : 'Print');
+      const label = tool === 'frame' ? 'Frame' : (tool === 'inspect' ? 'Inspect' : 'Print');
+      if (modeEl.textContent !== label) modeEl.textContent = label;
     }
     return tool;
   };
@@ -839,8 +841,10 @@ UI_JS = """
 
   const forceNoCursor = (live) => {
     if (!live) return;
-    live.style.cursor = 'none';
-    live.querySelectorAll('*').forEach((el) => { el.style.cursor = 'none'; });
+    if (live.style.cursor !== 'none') live.style.cursor = 'none';
+    live.querySelectorAll('*').forEach((el) => {
+      if (el.style.cursor !== 'none') el.style.cursor = 'none';
+    });
   };
 
   const shapePaths = (kind, stroke) => {
@@ -1032,23 +1036,29 @@ UI_JS = """
   };
 
   let bootScheduled = false;
+  let bootLastRun = 0;
+  const BOOT_MIN_GAP = 250; // ms — our own class/style writes must not re-arm us
   const boot = () => {
     // Coalesce observer storms — never re-enter synchronously.
     if (bootScheduled) return;
     bootScheduled = true;
-    requestAnimationFrame(() => {
-      bootScheduled = false;
-      if (window.__dbBootLock) return;
-      window.__dbBootLock = true;
-      try {
-        enhance('#live_preview');
-        enhance('#inspect_preview');
-        hideClockChrome();
-        syncWave();
-      } finally {
-        window.__dbBootLock = false;
-      }
-    });
+    const wait = Math.max(0, BOOT_MIN_GAP - (performance.now() - bootLastRun));
+    setTimeout(() => {
+      requestAnimationFrame(() => {
+        bootScheduled = false;
+        bootLastRun = performance.now();
+        if (window.__dbBootLock) return;
+        window.__dbBootLock = true;
+        try {
+          enhance('#live_preview');
+          enhance('#inspect_preview');
+          hideClockChrome();
+          syncWave();
+        } finally {
+          window.__dbBootLock = false;
+        }
+      });
+    }, wait);
   };
   boot();
   updateSizeReadout();
@@ -1074,9 +1084,11 @@ UI_JS = """
   // Observe only flag + live preview. Do NOT watch #controls_col — style tweaks
   // there used to re-enter MutationObserver and freeze Upload / Commit clicks.
   const observeRoots = () => {
+    // Watch 'src' only on the print: we write classes/styles there ourselves,
+    // and reacting to them re-armed this observer every frame (page freeze).
     const specs = [
       ['#db_flag', { childList: true, subtree: true, attributes: true, attributeFilter: ['data-exposing', 'data-shape', 'data-mode', 'data-stamp-fw', 'src'] }],
-      ['#live_preview', { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'class'] }],
+      ['#live_preview', { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] }],
     ];
     specs.forEach(([sel, opts]) => {
       const el = document.querySelector(sel);
@@ -1404,7 +1416,7 @@ UI_JS = """
       if (!relevant) return;
       readBoxFromInput();
       syncOverlay();
-    }).observe(stage, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'class'] });
+    }).observe(stage, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
     window.addEventListener('resize', syncOverlay);
   };
 
