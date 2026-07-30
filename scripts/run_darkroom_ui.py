@@ -31,6 +31,14 @@ from digital_negative.display import (
     rotate_image,
     to_u8_gray,
 )
+from digital_negative.dodge_burn import (
+    apply_exposure_tick,
+    local_stops_from_state,
+    mask_from_editor,
+    reset_local_work,
+    seconds_to_stops,
+    stops_per_second,
+)
 from digital_negative.ingest import ingest_path
 from digital_negative.papers import load_paper_profile
 from digital_negative.pipeline import list_film_profiles, list_paper_profiles
@@ -237,6 +245,11 @@ UI_CSS = """
   max-height: 88px !important;
   object-fit: contain !important;
   background: #0c0c0c !important;
+}
+#db_hint {
+  font-size: 0.8rem !important;
+  opacity: 0.9;
+  margin: 2px 0 6px 0 !important;
 }
 @media (max-width: 900px) {
   #main_workspace { flex-wrap: wrap !important; }
@@ -451,10 +464,13 @@ def _history_md(dn) -> str:
                 f"grain={h.get('grain_strength')}"
             )
         elif op == "print":
+            db = h.get("dodge_burn") or []
+            db_bit = f" · {len(db)} local pass(es)" if db else ""
             lines.append(
                 f"{i}. **Print** — `{h.get('paper_id')}` · grade {h.get('grade')} · "
                 f"exp {h.get('overall_exposure'):+g} stops"
                 + (f" · nudge={h.get('contrast')}" if h.get("contrast") not in (None, 0, 0.0) else "")
+                + db_bit
             )
         elif op == "unlock":
             stage = h.get("stage", "?")
@@ -867,6 +883,7 @@ def _run_live_develop_then_print(
         overall_exposure=float(print_exposure),
         grade=float(print_grade),
         contrast=float(print_contrast),
+        local_stops=local_stops_from_state(state),
         commit=False,
     )
     live_rgb = _to_rgb_u8(printed.preview)
@@ -974,16 +991,20 @@ def live_preview(
             overall_exposure=float(print_exposure),
             grade=float(print_grade),
             contrast=float(print_contrast),
+            local_stops=local_stops_from_state(state),
             commit=False,
         )
         live_rgb = _to_rgb_u8(result.preview)
         speed = state["dn"].metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
         quality_note = "drag" if quality == "drag" else "hq"
+        strokes = state.get("db_strokes") or []
+        db_note = f" · dodge/burn ×{len(strokes)}" if strokes else ""
+        exposing = " · **EXPOSING**" if state.get("db_exposing") else ""
         summary = (
             f"{_stage_banner('print', _locks(state))}\n\n"
             f"**Print preview** {live_rgb.shape[1]}×{live_rgb.shape[0]} ({quality_note})  \n"
             f"{paper.name} · g{float(print_grade):.1f} · exp {float(print_exposure):+.2f} · "
-            f"×{float(speed):.2f}\n\n{_history_md(state['dn'])}"
+            f"×{float(speed):.2f}{db_note}{exposing}\n\n{_history_md(state['dn'])}"
         )
         state = {**state, "print_draft": result, "live_rgb": live_rgb, "summary_cache": summary}
         return _pack_preview(
@@ -1131,6 +1152,10 @@ def commit_develop(film_id, developer_id, development_minutes, contrast, grain, 
         "stage": "print",
         "summary_cache": summary,
         "source_path": state.get("source_path"),
+        "db_accum": None,
+        "db_exposing": False,
+        "db_seconds_left": 0,
+        "db_strokes": [],
     }
     return (
         _viewer_frame(state, live=live_view, neg=neg_view),
@@ -1158,10 +1183,14 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         raise gr.Error("Commit Develop first.")
     if _locked(state, "print"):
         raise gr.Error("Print is already locked.")
+    if state.get("db_exposing"):
+        raise gr.Error("Wait for the dodge/burn timer to finish.")
 
     dn = state["dn"]
     development = state["development_full"]
     paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
+    strokes = list(state.get("db_strokes") or [])
+    dn.metadata.setdefault("print", {})["dodge_burn"] = strokes
     result = print_negative(
         development.transmittance,
         dn,
@@ -1169,6 +1198,7 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         overall_exposure=float(print_exposure),
         grade=float(print_grade),
         contrast=float(print_contrast),
+        local_stops=local_stops_from_state(state),
         commit=True,
     )
     stages = dn.metadata["ui_state"].setdefault("committed_stages", [])
@@ -1180,10 +1210,11 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
 
     live_rgb = _downscale_rgb(_to_rgb_u8(result.preview), LIVE_MAX_SIDE)
     speed = dn.metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
+    db_note = f" · {len(strokes)} dodge/burn pass(es)" if strokes else ""
     summary = (
         f"{_stage_banner('print', locks)}\n\n"
         f"**Print locked** — {paper.name} · g{float(print_grade):.1f} · "
-        f"exp {float(print_exposure):+.2f}\n\n{_history_md(dn)}"
+        f"exp {float(print_exposure):+.2f}{db_note}\n\n{_history_md(dn)}"
     )
     state = {**state, "print": result, "live_rgb": live_rgb, "summary_cache": summary}
     return (
@@ -1214,6 +1245,161 @@ def _unlock_stage(dn, stage: str) -> None:
     dn.touch()
 
 
+def _db_target_shape(state) -> tuple[int, int]:
+    """Height, width for the dodge/burn accumulation map."""
+    t = state.get("transmittance_proxy")
+    if t is None and state.get("development_full") is not None:
+        full = state["development_full"].transmittance
+        step = max(1, int(np.ceil(max(full.shape) / LIVE_MAX_SIDE)))
+        t = full[::step, ::step]
+    if t is None and state.get("development") is not None:
+        t = state["development"].transmittance
+    if t is None:
+        return (512, 512)
+    return int(t.shape[0]), int(t.shape[1])
+
+
+def _editor_from_print(rgb: np.ndarray | None) -> dict:
+    if rgb is None:
+        return None
+    return {"background": rgb, "layers": [], "composite": rgb}
+
+
+def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print_contrast, editor, state):
+    if not state or state.get("development_full") is None:
+        raise gr.Error("Commit Develop first — dodge/burn happens on the print.")
+    if _locked(state, "print"):
+        raise gr.Error("Unlock Print to dodge/burn.")
+    if state.get("db_exposing"):
+        raise gr.Error("Already exposing — wait for the timer.")
+
+    seconds = int(round(float(seconds)))
+    if seconds < 1:
+        raise gr.Error("Timer must be at least 1 second.")
+    h, w = _db_target_shape(state)
+    mask = mask_from_editor(editor, height=h, width=w)
+    if float(mask.max()) < 0.12:
+        raise gr.Error("Paint a tool shape on the print first (brush over the area to hold or burn).")
+
+    mode = "dodge" if str(mode).lower().startswith("dodge") else "burn"
+    state = {**state}
+    state["db_exposing"] = True
+    state["db_mode"] = mode
+    state["db_seconds_left"] = seconds
+    state["db_total_seconds"] = seconds
+    state["db_stops_per_second"] = stops_per_second(seconds)
+    state["db_feather_px"] = 6.0
+    # First second applies immediately (darkroom: light is already on)
+    apply_exposure_tick(state, editor, height=h, width=w)
+    left = int(state.get("db_seconds_left", 0))
+    verb = "Dodging" if mode == "dodge" else "Burning"
+    total_stops = seconds_to_stops(seconds)
+    status = (
+        f"**{verb}** — {left}s left · ~{total_stops:.2f} stops if held still.  \n"
+        f"_Move or reshape the tool while the timer runs._"
+    )
+    return _db_refresh_print(
+        paper_id, print_exposure, print_grade, print_contrast, state, status_md=status
+    )
+
+
+def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, state, *, status_md: str):
+    """Re-print with current accum; returns live, timer_md, status, history, state."""
+    if state.get("development_full") is None:
+        st, hi = _split_summary(status_md)
+        return state.get("live_rgb"), status_md, st, hi, state
+
+    t = state.get("transmittance_proxy")
+    if t is None:
+        full = state["development_full"].transmittance
+        step = max(1, int(np.ceil(max(full.shape) / LIVE_MAX_SIDE)))
+        t = np.ascontiguousarray(full[::step, ::step])
+        state = {**state, "transmittance_proxy": t}
+
+    paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
+    result = print_negative(
+        t,
+        state["dn"],
+        paper,
+        overall_exposure=float(print_exposure),
+        grade=float(print_grade),
+        contrast=float(print_contrast),
+        local_stops=local_stops_from_state(state),
+        commit=False,
+    )
+    live_rgb = _to_rgb_u8(result.preview)
+    strokes = state.get("db_strokes") or []
+    left = int(state.get("db_seconds_left", 0))
+    if state.get("db_exposing"):
+        verb = "Dodging" if state.get("db_mode") == "dodge" else "Burning"
+        timer_line = f"**{verb}… {left}s** — keep moving or reshaping the tool"
+    elif strokes:
+        timer_line = f"**Ready** — {len(strokes)} local pass(es). Reset clears them."
+    else:
+        timer_line = "**Ready** — paint a shape, set the timer, Start exposure."
+
+    summary = (
+        f"{_stage_banner('print', _locks(state))}\n\n"
+        f"{status_md}\n\n"
+        f"**Print preview** {live_rgb.shape[1]}×{live_rgb.shape[0]}  \n"
+        f"{paper.name} · g{float(print_grade):.1f} · exp {float(print_exposure):+.2f} · "
+        f"local passes={len(strokes)}\n\n{_history_md(state['dn'])}"
+    )
+    state = {
+        **state,
+        "print_draft": result,
+        "live_rgb": live_rgb,
+        "summary_cache": summary,
+        "viewer_mode": "live",
+    }
+    st, hi = _split_summary(summary)
+    return live_rgb, timer_line, st, hi, state
+
+
+def tick_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, editor, state):
+    if not state or not state.get("db_exposing"):
+        # No-op while idle — don't thrash the preview
+        return (
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            state,
+        )
+    h, w = _db_target_shape(state)
+    apply_exposure_tick(state, editor, height=h, width=w)
+    left = int(state.get("db_seconds_left", 0))
+    if state.get("db_exposing"):
+        verb = "Dodging" if state.get("db_mode") == "dodge" else "Burning"
+        status = f"**{verb}… {left}s left** — move or reshape the tool"
+    else:
+        status = "**Exposure done** — inspect the print. Start again for another pass, or Reset."
+    return _db_refresh_print(
+        paper_id, print_exposure, print_grade, print_contrast, state, status_md=status
+    )
+
+
+def reset_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, state):
+    if not state:
+        raise gr.Error("Commit Ingest / Develop first.")
+    if state.get("db_exposing"):
+        raise gr.Error("Stop — wait for the current exposure, or unlock and reset.")
+    state = reset_local_work({**state})
+    if state.get("dn") is not None:
+        state["dn"].metadata.setdefault("print", {})["dodge_burn"] = []
+    live_rgb, timer_line, status, history, state = _db_refresh_print(
+        paper_id,
+        print_exposure,
+        print_grade,
+        print_contrast,
+        state,
+        status_md="**Local work cleared** — base print only (global exposure / grade kept).",
+    )
+    # Clear brush layers; keep current print as background
+    editor = _editor_from_print(live_rgb)
+    return live_rgb, timer_line, status, history, editor, state
+
+
 def unlock_develop(state):
     if not state or state.get("dn") is None:
         raise gr.Error("Nothing to unlock — Commit Ingest first.")
@@ -1233,6 +1419,7 @@ def unlock_develop(state):
         "print_draft": None,
         "stage": "development",
     }
+    state = reset_local_work(state)
     summary = (
         f"{_stage_banner('development', _locks(state))}\n\n"
         f"**Develop unlocked** — adjust Develop below, then Commit again.\n\n"
@@ -1262,6 +1449,16 @@ def unlock_develop(state):
         gr.update(open=True),
         gr.update(open=True),
         state,
+    )
+
+
+def seed_dodge_burn_editor(state):
+    """After Commit Develop — put the live print under the tool brush."""
+    rgb = state.get("live_rgb") if state else None
+    return (
+        _editor_from_print(rgb),
+        "**Ready** — paint a freeform tool, set the timer, Start exposure. "
+        "Move the brush while it counts.",
     )
 
 
@@ -1406,6 +1603,41 @@ def build_ui() -> gr.Blocks:
                     print_exposure = gr.Slider(-2.0, 2.0, value=0.0, step=0.05, label="Exposure (stops)")
                     print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="MG filtration")
                     print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter nudge")
+                    with gr.Accordion("Dodge & burn (enlarger card)", open=True):
+                        gr.Markdown(
+                            "Paint any tool shape on the print → Start exposure → "
+                            "**move or reshape while the timer counts** → see the print update. "
+                            "Reset clears local work only.",
+                            elem_id="db_hint",
+                        )
+                        db_editor = gr.ImageEditor(
+                            label="Tool over print — brush = card / wand shape",
+                            type="numpy",
+                            image_mode="RGBA",
+                            height=360,
+                            brush=gr.Brush(
+                                default_size=40,
+                                colors=["#ffffff", "#ffcc66", "#66ccff"],
+                                default_color="#ffffff",
+                                color_mode="defaults",
+                            ),
+                            eraser=gr.Eraser(),
+                            layers=True,
+                            transforms=(),
+                            sources=(),
+                            buttons=["fullscreen"],
+                        )
+                        db_mode = gr.Radio(
+                            choices=[("Dodge (hold back light)", "dodge"), ("Burn (add light)", "burn")],
+                            value="burn",
+                            label="Mode",
+                        )
+                        db_seconds = gr.Slider(1, 16, value=4, step=1, label="Timer (seconds)")
+                        db_timer_md = gr.Markdown("**Ready** — Commit Develop, then paint a shape.")
+                        with gr.Row():
+                            db_start_btn = gr.Button("Start exposure", variant="primary", size="sm")
+                            db_reset_btn = gr.Button("Reset local work", size="sm")
+                        db_clock = gr.Timer(value=1.0, active=True)
                     with gr.Row():
                         print_btn = gr.Button(
                             "Commit Print", interactive=False, variant="primary", size="sm"
@@ -1549,6 +1781,35 @@ def build_ui() -> gr.Blocks:
             fn=live_preview_high,
             inputs=preview_inputs,
             outputs=preview_outputs,
+        ).then(
+            fn=seed_dodge_burn_editor,
+            inputs=[state],
+            outputs=[db_editor, db_timer_md],
+        )
+
+        db_start_btn.click(
+            fn=start_dodge_burn,
+            inputs=[
+                db_mode,
+                db_seconds,
+                paper,
+                print_exposure,
+                print_grade,
+                print_contrast,
+                db_editor,
+                state,
+            ],
+            outputs=[live_out, db_timer_md, status, history, state],
+        )
+        db_clock.tick(
+            fn=tick_dodge_burn,
+            inputs=[paper, print_exposure, print_grade, print_contrast, db_editor, state],
+            outputs=[live_out, db_timer_md, status, history, state],
+        )
+        db_reset_btn.click(
+            fn=reset_dodge_burn,
+            inputs=[paper, print_exposure, print_grade, print_contrast, state],
+            outputs=[live_out, db_timer_md, status, history, db_editor, state],
         )
 
         unlock_develop_btn.click(
