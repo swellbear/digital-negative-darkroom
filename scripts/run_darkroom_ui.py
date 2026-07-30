@@ -847,6 +847,23 @@ UI_JS = """
     });
   };
 
+  const releaseNoCursor = (live) => {
+    if (!live) return;
+    if (live.style.cursor === 'none') live.style.cursor = '';
+    live.querySelectorAll('*').forEach((el) => {
+      if (el.style.cursor === 'none') el.style.cursor = '';
+    });
+  };
+
+  // The dodge/burn card only takes over the pointer once the easel is open
+  // (right-click → Dodge / Burn) or a pass is actually running.
+  const dbEngaged = (flag) => {
+    const easel = document.getElementById('float_easel');
+    if (easel && easel.classList.contains('is-open')) return true;
+    const f = flag || readFlag();
+    return !!(f && f.exposing);
+  };
+
   const shapePaths = (kind, stroke) => {
     const fill = stroke + '44';
     const common = `fill="${fill}" stroke="${stroke}" stroke-width="3.5" stroke-linejoin="round"`;
@@ -882,7 +899,10 @@ UI_JS = """
     const tool = document.getElementById('db_tool_cursor');
     if (tool) tool.style.display = 'none';
     const live = document.querySelector('#live_preview');
-    if (live) live.classList.remove('db-tool-hover');
+    if (live) {
+      live.classList.remove('db-tool-hover');
+      releaseNoCursor(live);
+    }
   };
 
   const readCheckedValue = (allowed) => {
@@ -969,7 +989,7 @@ UI_JS = """
     const exposing = !!(flag && flag.exposing);
     const wasExposing = document.body.classList.contains('db-exposing');
     document.body.classList.toggle('db-exposing', exposing);
-    if (syncPreviewToolClasses() !== 'print') {
+    if (syncPreviewToolClasses() !== 'print' || !dbEngaged(flag)) {
       if (live) live.classList.remove('db-waving');
       hideTool();
       return;
@@ -1007,6 +1027,11 @@ UI_JS = """
       return;
     }
     const flag = readFlag();
+    if (!dbEngaged(flag)) {
+      window.__dbHoveringPrint = false;
+      hideTool();
+      return;
+    }
     const live = document.querySelector('#live_preview');
     const img = live && live.querySelector('img');
     if (!flag || !img) {
@@ -1502,6 +1527,7 @@ UI_JS = """
 
   const closeFloats = () => {
     document.querySelectorAll('.float-toolbar').forEach((el) => el.classList.remove('is-open'));
+    try { hideTool(); } catch (_) {}
   };
 
   const openFloat = (id, x, y) => {
@@ -1509,6 +1535,7 @@ UI_JS = """
     const el = document.getElementById(id);
     if (!el) return;
     el.classList.add('is-open');
+    if (id === 'float_easel') setTimeout(() => { try { syncWave(); } catch (_) {} }, 30);
     const pad = 12;
     const w = Math.min(420, window.innerWidth - 24);
     let left = Math.min(Math.max(pad, x), window.innerWidth - w - pad);
