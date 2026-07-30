@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 from scipy.interpolate import PchipInterpolator
 
+from .chemistry import DEVELOPER_STYLES, resolve_style
+
 
 @dataclass(frozen=True)
 class FilmProfile:
@@ -68,39 +70,7 @@ def load_film_profile(path: str | Path) -> FilmProfile:
     )
 
 
-# Tuned to read like tank chemistry, not generic contrast sliders:
-# - High Definition ≈ fine-grain / solvent developer (cleaner, slightly leaner)
-# - High Energy ≈ speed-enhancing / vigorous developer (punchier, grainier, more fog)
-# v4: slightly softer biases so styles feel like chemistry choices, not LUT presets.
-DEVELOPER_STYLES = {
-    "standard": {
-        "name": "Standard",
-        "contrast_bias": 0.0,
-        "density_bias": 1.0,
-        "grain_bias": 1.0,
-        "fog_lift": 0.0,
-        "toe_softness": 0.0,
-        "shoulder_roll": 0.0,
-    },
-    "high_definition": {
-        "name": "High Definition",
-        "contrast_bias": 0.06,
-        "density_bias": 0.94,
-        "grain_bias": 0.50,
-        "fog_lift": -0.012,
-        "toe_softness": 0.10,
-        "shoulder_roll": 0.06,
-    },
-    "high_energy": {
-        "name": "High Energy",
-        "contrast_bias": 0.36,
-        "density_bias": 1.14,
-        "grain_bias": 1.38,
-        "fog_lift": 0.022,
-        "toe_softness": -0.05,
-        "shoulder_roll": -0.035,
-    },
-}
+# Developer character presets live in chemistry.py (DEVELOPER_STYLES re-exported).
 
 
 def modify_curve(
@@ -114,11 +84,15 @@ def modify_curve(
 
     relative_time:
         1.0 = N / normal. >1 push (CI up, more density in highlights).
-        <1 pull (flatter, leaner).
+        <1 pull (flatter, leaner). Prefer deriving this from tank minutes via
+        ``chemistry.minutes_to_relative`` when a film chemistry is selected.
     contrast_modifier:
         Extra straight-line stretch around midtones (−1…+1), like aiming N− / N+.
+    developer_id:
+        Named film chemistry (e.g. ``d76``) or legacy style
+        (``standard`` / ``high_definition`` / ``high_energy``).
     """
-    style = DEVELOPER_STYLES.get(developer_id, DEVELOPER_STYLES["standard"])
+    style, _chem = resolve_style(profile, developer_id)
     log_e = profile.log_exposure.copy()
     dens = profile.density.copy()
     fog = max(0.02, profile.base_plus_fog + float(style["fog_lift"]))

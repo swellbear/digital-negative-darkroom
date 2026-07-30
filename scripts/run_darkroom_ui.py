@@ -15,7 +15,13 @@ import gradio as gr
 from gradio import SelectData
 import numpy as np
 
-from digital_negative.curves import DEVELOPER_STYLES, load_film_profile
+from digital_negative.chemistry import (
+    chemistry_choices,
+    default_chemistry_id,
+    get_chemistry,
+    time_slider_bounds,
+)
+from digital_negative.curves import load_film_profile
 from digital_negative.development import develop
 from digital_negative.digital_negative import DigitalNegative
 from digital_negative.display import (
@@ -46,7 +52,10 @@ for path in list_paper_profiles():
     data = json.loads(path.read_text(encoding="utf-8"))
     PAPER_CHOICES.append((data["name"], data["id"]))
 
-DEVELOPER_CHOICES = [(v["name"], k) for k, v in DEVELOPER_STYLES.items()]
+# Filled after helper defs below (film-specific chemistry dropdown + minutes).
+_INIT_DEV_CHOICES: list = []
+_INIT_DEV_ID = "standard"
+_INIT_TMIN, _INIT_TMAX, _INIT_TNORM = 4.0, 16.0, 8.0
 
 SAMPLE_DIR = ROOT / "samples" / "raws"
 SAMPLE_CHOICES = [("Synthetic test scene (no file)", "")]
@@ -287,6 +296,50 @@ def _profile_path(paths, profile_id: str) -> Path:
     raise FileNotFoundError(profile_id)
 
 
+def _film_profile(film_id: str):
+    return load_film_profile(_profile_path(list_film_profiles(), film_id))
+
+
+def _chem_time_update(film_id: str, developer_id: str, *, reset_to_normal: bool = True):
+    """Gradio updates for developer dropdown / minutes slider."""
+    profile = _film_profile(film_id)
+    chem = get_chemistry(profile, developer_id)
+    if chem is None:
+        label = "Dev time (rel. ×8 min stand-in)"
+        return gr.update(minimum=4.0, maximum=16.0, value=8.0, label=label, step=0.25)
+    tmin, tmax, normal = time_slider_bounds(chem)
+    label = f"Dev time (min) · N={normal:g} @ 20°C"
+    return gr.update(minimum=tmin, maximum=tmax, value=normal, label=label, step=0.25)
+
+
+def on_film_change(film_id: str):
+    profile = _film_profile(film_id)
+    chem_id = default_chemistry_id(profile)
+    choices = chemistry_choices(profile)
+    return (
+        gr.update(choices=choices, value=chem_id),
+        _chem_time_update(film_id, chem_id, reset_to_normal=True),
+    )
+
+
+def on_developer_change(film_id: str, developer_id: str):
+    return _chem_time_update(film_id, developer_id, reset_to_normal=True)
+
+
+# Initial Develop controls (film-specific chemistry + datasheet normal minutes).
+if FILM_CHOICES:
+    _boot_film = FILM_CHOICES[0][1]
+    _boot_profile = _film_profile(_boot_film)
+    _INIT_DEV_CHOICES = chemistry_choices(_boot_profile)
+    _INIT_DEV_ID = default_chemistry_id(_boot_profile)
+    _boot_chem = get_chemistry(_boot_profile, _INIT_DEV_ID) or {
+        "normal_minutes": 8.0,
+        "time_min": 4.0,
+        "time_max": 16.0,
+    }
+    _INIT_TMIN, _INIT_TMAX, _INIT_TNORM = time_slider_bounds(_boot_chem)
+
+
 def _resolve_input(file_obj, sample_path: str | None) -> str | None:
     """Prefer an uploaded file over the sample dropdown when both are set."""
     upload_path = None
@@ -345,9 +398,14 @@ def _history_md(dn) -> str:
         if op == "ingest":
             lines.append(f"{i}. **Ingest** — `{h.get('source')}`")
         elif op == "develop":
+            chem = h.get("developer_name") or h.get("developer_id")
+            if h.get("development_minutes") is not None:
+                time_bit = f"{float(h['development_minutes']):g} min"
+            else:
+                time_bit = f"rel={h.get('relative_time')}"
             lines.append(
-                f"{i}. **Develop** — `{h.get('film_profile_id')}` · {h.get('developer_id')} · "
-                f"rel={h.get('relative_time')} · N±={h.get('contrast_modifier')} · "
+                f"{i}. **Develop** — `{h.get('film_profile_id')}` · {chem} · "
+                f"{time_bit} · N±={h.get('contrast_modifier')} · "
                 f"grain={h.get('grain_strength')}"
             )
         elif op == "print":
@@ -727,7 +785,7 @@ def commit_ingest(sample_path, file_obj, state):
 def _run_live_develop_then_print(
     film_id,
     developer_id,
-    relative_time,
+    development_minutes,
     contrast,
     grain,
     paper_id,
@@ -752,7 +810,7 @@ def _run_live_develop_then_print(
     development = develop(
         proxy,
         profile,
-        relative_time=float(relative_time),
+        development_minutes=float(development_minutes),
         contrast_modifier=float(contrast),
         grain_strength=float(grain),
         developer_id=developer_id,
@@ -781,7 +839,7 @@ def _run_live_develop_then_print(
     summary = (
         f"{_stage_banner('development', _locks(state))}\n\n"
         f"**Live print** {live_rgb.shape[1]}×{live_rgb.shape[0]} ({quality_note})  \n"
-        f"{profile.name} · {developer_id} · rel={float(relative_time):.2f} · "
+        f"{profile.name} · {developer_id} · {float(development_minutes):g} min · "
         f"N±={float(contrast):+.2f} · grain={float(grain):.2f}  \n"
         f"{paper.name} · g{float(print_grade):.1f} · exp {float(print_exposure):+.2f} "
         f"· ×{float(speed):.2f}\n\n"
@@ -812,7 +870,7 @@ def _run_live_develop_then_print(
 def live_preview(
     film_id,
     developer_id,
-    relative_time,
+    development_minutes,
     contrast,
     grain,
     paper_id,
@@ -898,7 +956,7 @@ def live_preview(
     live_rgb, neg_ref, summary, state = _run_live_develop_then_print(
         film_id,
         developer_id,
-        relative_time,
+        development_minutes,
         contrast,
         grain,
         paper_id,
@@ -916,7 +974,7 @@ def live_preview(
 def live_preview_drag(
     film_id,
     developer_id,
-    relative_time,
+    development_minutes,
     contrast,
     grain,
     paper_id,
@@ -928,7 +986,7 @@ def live_preview_drag(
     return live_preview(
         film_id,
         developer_id,
-        relative_time,
+        development_minutes,
         contrast,
         grain,
         paper_id,
@@ -943,7 +1001,7 @@ def live_preview_drag(
 def live_preview_high(
     film_id,
     developer_id,
-    relative_time,
+    development_minutes,
     contrast,
     grain,
     paper_id,
@@ -955,7 +1013,7 @@ def live_preview_high(
     return live_preview(
         film_id,
         developer_id,
-        relative_time,
+        development_minutes,
         contrast,
         grain,
         paper_id,
@@ -967,7 +1025,7 @@ def live_preview_high(
     )
 
 
-def commit_develop(film_id, developer_id, relative_time, contrast, grain, state):
+def commit_develop(film_id, developer_id, development_minutes, contrast, grain, state):
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
     if _locked(state, "development"):
@@ -978,7 +1036,7 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
     development = develop(
         dn,
         profile,
-        relative_time=float(relative_time),
+        development_minutes=float(development_minutes),
         contrast_modifier=float(contrast),
         grain_strength=float(grain),
         developer_id=developer_id,
@@ -1276,9 +1334,17 @@ def build_ui() -> gr.Blocks:
                         label="Film",
                     )
                     developer = gr.Dropdown(
-                        choices=DEVELOPER_CHOICES, value="standard", label="Developer"
+                        choices=_INIT_DEV_CHOICES,
+                        value=_INIT_DEV_ID,
+                        label="Developer",
                     )
-                    relative_time = gr.Slider(0.5, 2.0, value=1.0, step=0.05, label="Rel. development")
+                    development_minutes = gr.Slider(
+                        _INIT_TMIN,
+                        _INIT_TMAX,
+                        value=_INIT_TNORM,
+                        step=0.25,
+                        label=f"Dev time (min) · N={_INIT_TNORM:g} @ 20°C",
+                    )
                     contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Contrast N− / N+")
                     grain = gr.Slider(0.0, 2.5, value=1.0, step=0.05, label="Grain")
                     with gr.Row():
@@ -1364,7 +1430,7 @@ def build_ui() -> gr.Blocks:
         preview_inputs = [
             film,
             developer,
-            relative_time,
+            development_minutes,
             contrast,
             grain,
             paper,
@@ -1394,9 +1460,7 @@ def build_ui() -> gr.Blocks:
         )
 
         for ctrl in (
-            film,
-            developer,
-            relative_time,
+            development_minutes,
             contrast,
             grain,
             paper,
@@ -1408,12 +1472,32 @@ def build_ui() -> gr.Blocks:
             ctrl.input(fn=live_preview_drag, inputs=preview_inputs, outputs=preview_outputs)
             ctrl.change(fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs)
 
+        # Film / developer swap chemistry list + datasheet-normal minutes, then refresh.
+        film.change(
+            fn=on_film_change,
+            inputs=[film],
+            outputs=[developer, development_minutes],
+        ).then(
+            fn=live_preview_high,
+            inputs=preview_inputs,
+            outputs=preview_outputs,
+        )
+        developer.change(
+            fn=on_developer_change,
+            inputs=[film, developer],
+            outputs=[development_minutes],
+        ).then(
+            fn=live_preview_high,
+            inputs=preview_inputs,
+            outputs=preview_outputs,
+        )
+
         develop_btn.click(
             fn=commit_develop,
-            inputs=[film, developer, relative_time, contrast, grain, state],
+            inputs=[film, developer, development_minutes, contrast, grain, state],
             outputs=[
                 live_out, original_out, latent_out, neg_out, status, history,
-                film, developer, relative_time, contrast, grain,
+                film, developer, development_minutes, contrast, grain,
                 develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
                 develop_acc, print_acc, state,
             ],
@@ -1428,7 +1512,7 @@ def build_ui() -> gr.Blocks:
             inputs=[state],
             outputs=[
                 live_out, original_out, latent_out, neg_out, status, history,
-                film, developer, relative_time, contrast, grain,
+                film, developer, development_minutes, contrast, grain,
                 develop_btn, unlock_develop_btn, print_btn,
                 paper, print_exposure, print_grade, print_contrast, unlock_print_btn,
                 develop_acc, print_acc, state,
@@ -1469,7 +1553,7 @@ def build_ui() -> gr.Blocks:
             outputs=[
                 live_out, original_out, latent_out, neg_out, status, history,
                 sample, file_in, ingest_btn,
-                film, developer, relative_time, contrast, grain,
+                film, developer, development_minutes, contrast, grain,
                 develop_btn, unlock_develop_btn,
                 paper, print_exposure, print_grade, print_contrast,
                 print_btn, unlock_print_btn,

@@ -40,10 +40,12 @@ The live + Commit/Unlock model is good. Now refine the *experience* of the ritua
 
 Resist the urge to add many more films/papers yet. Tri-X 400 was added as one carefully chosen favorite (Kodak F-4017 approximate digitization) — still prefer deepening existing stocks over a large catalog.
 
+**Chemistries (v1):** Develop now exposes named developers + tank minutes from public datasheets (Ilford / Kodak). The base D–logE curve is still one digitization per film; other chems reuse that curve with character biases, and minutes map through CI (or time ratio) into relative development. Next calibration: side-by-side real tanks vs these mappings.
+
 **Next critique focus:**
 - Side-by-side Tri-X / HP5 / FP4 / Delta against real references; refine toe/shoulder where they diverge.
+- Do D-76 vs HC-110 vs XTOL (and Ilford equivalents) feel distinct enough, or only the times?
 - Which profile currently feels weakest?
-- Are there specific tonal regions (toe, shoulder, midtones) that consistently feel off?
 - Would one carefully refined additional paper (e.g., a different surface) add more value than three mediocre new films?
 
 **Explicit non-goal for now:** analog camera / lens catalogs at ingest. Ingest stays digital raw → linear DN; capture-character (format, vignette, flare, MTF) is a later layer once film/paper feel is strong.

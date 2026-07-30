@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -52,6 +53,57 @@ def test_tri_x_profile_loads_and_is_iso_400():
     assert dens[0] > profile.base_plus_fog
     hp5 = json.loads((ROOT / "profiles" / "films" / "hp5-plus-v1.json").read_text())
     assert data["grain_scale"] >= hp5["grain_scale"]
+
+
+def test_film_chemistries_have_named_developers_and_minutes():
+    from digital_negative.chemistry import (
+        default_chemistry_id,
+        minutes_to_relative,
+        chemistries_map,
+    )
+
+    for film_name in ("tri-x-400-v1", "hp5-plus-v1", "fp4-plus-v1", "delta-100-v1"):
+        profile = load_film_profile(ROOT / "profiles" / "films" / f"{film_name}.json")
+        chems = chemistries_map(profile)
+        assert chems, f"{film_name} missing chemistries"
+        base_id = default_chemistry_id(profile)
+        assert chems[base_id].get("is_base") or base_id in chems
+        chem = chems[base_id]
+        assert chem["normal_minutes"] > 0
+        assert minutes_to_relative(chem, chem["normal_minutes"]) == pytest.approx(1.0, abs=0.02)
+        longer = minutes_to_relative(chem, chem["normal_minutes"] * 1.5)
+        assert longer > 1.05
+
+
+def test_tri_x_d76_ci_push_increases_relative():
+    from digital_negative.chemistry import get_chemistry, minutes_to_relative
+
+    profile = load_film_profile(ROOT / "profiles" / "films" / "tri-x-400-v1.json")
+    chem = get_chemistry(profile, "d76")
+    assert chem is not None
+    assert minutes_to_relative(chem, 6.75) == pytest.approx(1.0, abs=0.02)
+    assert minutes_to_relative(chem, 10.0) > minutes_to_relative(chem, 6.75)
+
+
+def test_develop_accepts_minutes():
+    from digital_negative.chemistry import default_chemistry_id, get_chemistry
+
+    dn = ingest_path(None)
+    profile = load_film_profile(ROOT / "profiles" / "films" / "tri-x-400-v1.json")
+    chem_id = default_chemistry_id(profile)
+    chem = get_chemistry(profile, chem_id)
+    result = develop(
+        dn,
+        profile,
+        developer_id=chem_id,
+        development_minutes=float(chem["normal_minutes"]),
+        commit=False,
+    )
+    assert result.density.mean() > 0
+    assert dn.metadata["development"]["development_minutes"] == pytest.approx(
+        float(chem["normal_minutes"])
+    )
+    assert dn.metadata["development"]["relative_time"] == pytest.approx(1.0, abs=0.05)
 
 
 def test_push_increases_midtone_density():
