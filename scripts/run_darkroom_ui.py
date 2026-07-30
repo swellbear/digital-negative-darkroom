@@ -142,12 +142,12 @@ html, body {
 }
 #app_header p, #app_header .md, #app_header ul { display: none !important; }
 
-/* Fixed non-scrolling workspace */
+/* Fixed non-scrolling workspace — leave room for Gradio footer */
 #main_workspace {
   flex: 1 1 auto !important;
   min-height: 0 !important;
   height: 100% !important;
-  max-height: calc(100vh - 36px) !important;
+  max-height: calc(100vh - 64px) !important;
   display: flex !important;
   flex-direction: row !important;
   flex-wrap: nowrap !important;
@@ -361,12 +361,25 @@ body.drawer-collapsed #drawer_host {
   height: auto !important;
   object-fit: contain !important;
 }
-/* Hide Gradio chrome that steals stage height / adds scrollbars */
+/* Hide Gradio chrome that steals stage height / covers the print */
 #live_preview .icon-wrap,
 #live_preview .download,
 #live_preview button.svelte-1w6vlo0,
-#live_preview .image-button-row {
+#live_preview .image-button-row,
+#live_preview .icon-button-wrapper,
+#live_preview .top-panel,
+#live_preview .icon-button-wrapper.top-panel {
   display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  background: transparent !important;
+  overflow: hidden !important;
 }
 #live_preview .label-wrap {
   position: absolute !important;
@@ -381,10 +394,31 @@ body.drawer-collapsed #drawer_host {
 #seq_strip {
   flex: 0 0 auto !important;
   gap: 6px !important;
-  align-items: center !important;
-  min-height: 64px !important;
-  max-height: 72px !important;
-  overflow: hidden !important;
+  align-items: flex-end !important;
+  min-height: 96px !important;
+  max-height: none !important;
+  overflow: visible !important;
+  padding-bottom: 2px !important;
+}
+#seq_strip .block {
+  overflow: visible !important;
+}
+#seq_strip .image-container,
+#seq_strip .image-frame {
+  height: 56px !important;
+  min-height: 56px !important;
+  max-height: 56px !important;
+}
+#seq_strip .label-wrap {
+  font-size: 0.7rem !important;
+  margin: 0 !important;
+  line-height: 1.1 !important;
+}
+#seq_strip img { max-height: 52px !important; object-fit: contain !important; }
+#seq_strip button {
+  min-height: 28px !important;
+  font-size: 0.72rem !important;
+  padding: 2px 8px !important;
 }
 /* Floating toolbars live in #float_host — never steal preview flex space */
 #float_host {
@@ -406,17 +440,6 @@ body.drawer-collapsed #drawer_host {
 }
 #float_host .float-toolbar.is-open {
   pointer-events: auto !important;
-}
-#seq_strip .image-container,
-#seq_strip .image-frame {
-  height: 56px !important;
-  min-height: 56px !important;
-}
-#seq_strip img { max-height: 52px !important; object-fit: contain !important; }
-#seq_strip button {
-  min-height: 28px !important;
-  font-size: 0.72rem !important;
-  padding: 2px 8px !important;
 }
 #preview_tool, #active_drawer, #crop_rect, #db_pos {
   position: absolute !important;
@@ -1622,15 +1645,18 @@ UI_JS = """
       if (!col || !live) return;
       const colRect = col.getBoundingClientRect();
       if (colRect.height < 80) return;
-      let used = 8;
+      let used = 12;
       ['#db_wave_banner', '#db_size_readout', '#seq_strip'].forEach((sel) => {
         const el = document.querySelector(sel);
         if (!el) return;
         const cs = getComputedStyle(el);
         if (cs.display === 'none' || cs.visibility === 'hidden') return;
-        used += el.getBoundingClientRect().height;
+        // Prefer scrollHeight so labeled thumbs aren't clipped out of the budget.
+        used += Math.max(el.getBoundingClientRect().height, el.scrollHeight || 0);
       });
-      const h = Math.max(220, Math.floor(colRect.height - used));
+      // Keep a little air above the Gradio footer.
+      used += 8;
+      const h = Math.max(200, Math.floor(colRect.height - used));
       const hPx = h + 'px';
       if (live.dataset.fitH === hPx) return;
       live.dataset.fitH = hPx;
