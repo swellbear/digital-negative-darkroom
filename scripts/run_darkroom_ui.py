@@ -22,6 +22,7 @@ from digital_negative.display import (
     linear_to_srgb,
     negative_lightbox_preview,
     original_photo_preview,
+    rotate_image,
     to_u8_gray,
 )
 from digital_negative.ingest import ingest_path
@@ -252,6 +253,11 @@ def _history_md(dn) -> str:
             stage = h.get("stage", "?")
             label = {"development": "Develop", "print": "Print", "ingest": "Ingest"}.get(stage, stage)
             lines.append(f"{i}. **← Unlocked {label}** — previous lock opened for revision")
+        elif op == "rotate":
+            lines.append(
+                f"{i}. **Rotate** — {h.get('degrees_cw'):+g}° "
+                f"(total {h.get('total_degrees')}° CW)"
+            )
         else:
             lines.append(f"{i}. **{op}**")
     locks = dn.metadata.get("ui_state", {}).get("locked_stages", [])
@@ -379,6 +385,107 @@ def focus_viewer_button(mode: str):
     return _fn
 
 
+def _rebuild_views_from_dn(state: dict) -> dict:
+    """Refresh latent / proxy caches from the current DN image."""
+    dn = state["dn"]
+    latent_full = _to_rgb_u8(dn.to_luminance(), assume_linear=True)
+    latent_view = _downscale_rgb(latent_full, LIVE_MAX_SIDE)
+    latent_ref = _downscale_rgb(latent_full, REF_MAX_SIDE)
+    return {
+        **state,
+        "proxy": _proxy_dn(dn, LIVE_MAX_SIDE),
+        "proxy_drag": _proxy_dn(dn, DRAG_MAX_SIDE),
+        "latent_view": latent_view,
+        "latent_ref": latent_ref,
+        "live_rgb": latent_view if state.get("development") is None else state.get("live_rgb"),
+        "development": None,
+        "development_full": None,
+        "transmittance_proxy": None,
+        "print": None,
+        "print_draft": None,
+        "neg_ref": None,
+        "neg_view": None,
+    }
+
+
+def rotate_working(turns_cw: int, state):
+    """Rotate the Digital Negative and reference previews; clears Develop/Print locks."""
+    if not state or state.get("dn") is None:
+        raise gr.Error("Commit Ingest first.")
+
+    dn = state["dn"]
+    dn.image = rotate_image(dn.image, turns_cw)
+    ingest = dn.metadata.setdefault("ingest", {})
+    degrees = int(ingest.get("rotation_degrees", 0)) + (90 * int(turns_cw))
+    ingest["rotation_degrees"] = degrees % 360
+
+    for key in ("original_view", "original_ref"):
+        if state.get(key) is not None:
+            state[key] = rotate_image(state[key], turns_cw)
+
+    ui = dn.metadata.setdefault("ui_state", {})
+    locks = ui.setdefault("locked_stages", [])
+    committed = ui.setdefault("committed_stages", [])
+    for stage in ("print", "development"):
+        if stage in locks:
+            locks.remove(stage)
+        if stage in committed:
+            committed.remove(stage)
+    dn.metadata.setdefault("history", []).append(
+        {
+            "op": "rotate",
+            "degrees_cw": 90 * int(turns_cw),
+            "total_degrees": ingest["rotation_degrees"],
+        }
+    )
+    dn.touch()
+
+    state = _rebuild_views_from_dn(
+        {
+            **state,
+            "dn": dn,
+            "viewer_mode": "live",
+            "stage": "development",
+            "original_view": state.get("original_view"),
+            "original_ref": state.get("original_ref"),
+        }
+    )
+    deg = ingest["rotation_degrees"]
+    summary = (
+        f"{_stage_banner('development', _locks(state))}\n\n"
+        f"**Rotated {90 * int(turns_cw):+d}°** (total {deg}° CW).  \n"
+        f"_Develop/Print unlocked — check orientation, then Commit Develop._\n\n"
+        f"{_history_md(dn)}"
+    )
+    state["summary_cache"] = summary
+    return (
+        _viewer_frame(state, live=state.get("live_rgb")),
+        state.get("original_ref"),
+        state.get("latent_ref"),
+        None,
+        *_split_summary(summary),
+        gr.update(interactive=True),
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        gr.update(open=True),
+        gr.update(open=True),
+        state,
+    )
+
+
+def rotate_cw(state):
+    return rotate_working(1, state)
+
+
+def rotate_ccw(state):
+    return rotate_working(-1, state)
+
+
+def rotate_180(state):
+    return rotate_working(2, state)
+
+
 def commit_ingest(sample_path, file_obj, state):
     path = _resolve_input(file_obj, sample_path)
     dn = ingest_path(path or None)
@@ -443,6 +550,9 @@ def commit_ingest(sample_path, file_obj, state):
         gr.update(open=False),  # collapse Ingest
         gr.update(open=True),   # show Develop
         gr.update(open=True),   # keep Print reachable
+        gr.update(interactive=True),
+        gr.update(interactive=True),
+        gr.update(interactive=True),
         state,
     )
 
@@ -944,6 +1054,9 @@ def reset_session():
         gr.update(open=True),
         gr.update(open=True),
         gr.update(open=True),
+        off,
+        off,
+        off,
         None,
     )
 
@@ -1030,6 +1143,10 @@ def build_ui() -> gr.Blocks:
                     elem_id="live_preview",
                     height=620,
                 )
+                with gr.Row():
+                    rotate_ccw_btn = gr.Button("Rotate ⟲ 90°", size="sm", interactive=False)
+                    rotate_180_btn = gr.Button("Rotate 180°", size="sm", interactive=False)
+                    rotate_cw_btn = gr.Button("Rotate 90° ⟳", size="sm", interactive=False)
                 with gr.Row(elem_id="ref_row"):
                     original_out = gr.Image(
                         label="Original (click to enlarge)", type="numpy", height=96
@@ -1068,7 +1185,8 @@ def build_ui() -> gr.Blocks:
             outputs=[
                 live_out, original_out, latent_out, neg_out, status, history,
                 sample, file_in, ingest_btn, develop_btn, print_btn,
-                ingest_acc, develop_acc, print_acc, state,
+                ingest_acc, develop_acc, print_acc,
+                rotate_ccw_btn, rotate_180_btn, rotate_cw_btn, state,
             ],
         ).then(
             fn=live_preview_high,
@@ -1156,8 +1274,24 @@ def build_ui() -> gr.Blocks:
                 develop_btn, unlock_develop_btn,
                 paper, print_exposure, print_grade, print_contrast,
                 print_btn, unlock_print_btn,
-                ingest_acc, develop_acc, print_acc, state,
+                ingest_acc, develop_acc, print_acc,
+                rotate_ccw_btn, rotate_180_btn, rotate_cw_btn, state,
             ],
+        )
+
+        rotate_outputs = [
+            live_out, original_out, latent_out, neg_out, status, history,
+            develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
+            develop_acc, print_acc, state,
+        ]
+        rotate_ccw_btn.click(fn=rotate_ccw, inputs=[state], outputs=rotate_outputs).then(
+            fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
+        )
+        rotate_cw_btn.click(fn=rotate_cw, inputs=[state], outputs=rotate_outputs).then(
+            fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
+        )
+        rotate_180_btn.click(fn=rotate_180, inputs=[state], outputs=rotate_outputs).then(
+            fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
         )
 
         # Thumbnail / button → enlarge in main preview

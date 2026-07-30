@@ -21,6 +21,17 @@ def to_u8_gray(image: np.ndarray) -> np.ndarray:
     return (np.clip(image, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
 
 
+def rotate_image(image: np.ndarray, turns_cw: int) -> np.ndarray:
+    """Rotate an H×W or H×W×C array by 90° clockwise steps (turns_cw may be negative)."""
+    if image is None:
+        return image
+    turns = int(turns_cw) % 4
+    if turns == 0:
+        return np.ascontiguousarray(image)
+    # np.rot90 is counter-clockwise; negate for clockwise steps
+    return np.ascontiguousarray(np.rot90(image, k=-turns))
+
+
 def to_pil_gray(image: np.ndarray, *, assume_linear: bool = False) -> Image.Image:
     view = linear_to_srgb(image) if assume_linear else image
     return Image.fromarray(to_u8_gray(view), mode="L")
