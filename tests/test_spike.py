@@ -81,8 +81,9 @@ def test_tri_x_d76_ci_push_increases_relative():
     profile = load_film_profile(ROOT / "profiles" / "films" / "tri-x-400-v1.json")
     chem = get_chemistry(profile, "d76")
     assert chem is not None
-    assert minutes_to_relative(chem, 6.75) == pytest.approx(1.0, abs=0.02)
-    assert minutes_to_relative(chem, 10.0) > minutes_to_relative(chem, 6.75)
+    normal = float(chem["normal_minutes"])
+    assert minutes_to_relative(chem, normal) == pytest.approx(1.0, abs=0.02)
+    assert minutes_to_relative(chem, 10.0) > minutes_to_relative(chem, normal)
 
 
 def test_develop_accepts_minutes():
@@ -104,6 +105,63 @@ def test_develop_accepts_minutes():
         float(chem["normal_minutes"])
     )
     assert dn.metadata["development"]["relative_time"] == pytest.approx(1.0, abs=0.05)
+
+
+def test_tri_x_d76_curve_family_interpolates_between_published_times():
+    from digital_negative.curves import interpolate_curve_family, modify_curve
+    from digital_negative.chemistry import get_chemistry
+
+    profile = load_film_profile(ROOT / "profiles" / "films" / "tri-x-400-v1.json")
+    chem = get_chemistry(profile, "d76")
+    assert chem is not None and len(chem["curve_family"]) >= 4
+    log_e, dens6, fog6, meta6 = interpolate_curve_family(chem["curve_family"], 6.0)
+    _, dens8, _, meta8 = interpolate_curve_family(chem["curve_family"], 8.0)
+    _, dens7, _, meta7 = interpolate_curve_family(chem["curve_family"], 7.0)
+    assert meta6["family_mode"] == "exact"
+    assert meta8["family_mode"] == "exact"
+    assert meta7["family_mode"] == "interpolated"
+    # Mid/high tones should rise with time
+    mid = int(0.65 * (len(dens6) - 1))
+    assert dens8[mid] > dens6[mid]
+    assert dens6[mid] < dens7[mid] < dens8[mid]
+
+    worked = modify_curve(
+        profile, developer_id="d76", development_minutes=7.0, contrast_modifier=0.0
+    )
+    assert worked.raw["_last_curve_meta"]["curve_source"] == "family"
+    # Longer family time → denser highlights than shorter
+    short = modify_curve(profile, developer_id="d76", development_minutes=6.0)
+    long = modify_curve(profile, developer_id="d76", development_minutes=12.0)
+    probe = np.array([3.5])
+    assert float(long.density_from_log_exposure(probe)[0]) > float(
+        short.density_from_log_exposure(probe)[0]
+    )
+
+
+def test_tri_x_tmax_uses_curve_family_not_morph():
+    dn = ingest_path(None)
+    profile = load_film_profile(ROOT / "profiles" / "films" / "tri-x-400-v1.json")
+    develop(
+        dn,
+        profile,
+        developer_id="tmax",
+        development_minutes=7.0,
+        commit=False,
+    )
+    assert dn.metadata["development"]["curve_source"] == "family"
+
+
+def test_ilford_without_family_still_morphs():
+    dn = ingest_path(None)
+    profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
+    develop(
+        dn,
+        profile,
+        developer_id="ilfotec_hc_1_31",
+        development_minutes=6.5,
+        commit=False,
+    )
+    assert dn.metadata["development"]["curve_source"] == "morph"
 
 
 def test_push_increases_midtone_density():

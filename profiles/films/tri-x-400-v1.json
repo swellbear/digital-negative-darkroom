@@ -2,120 +2,100 @@
   "id": "tri-x-400-v1",
   "name": "Tri-X 400",
   "type": "bw",
-  "version": "1.1",
+  "version": "1.2",
   "iso": 400,
   "manufacturer": "Kodak Alaris / Kodak Professional",
   "grain_scale": 1.12,
   "source": {
     "document": "KODAK PROFESSIONAL TRI-X 320 and 400 Films \u2014 Technical Data F-4017 (February 2016)",
     "reference_url": "https://business.kodakmoments.com/sites/default/files/files/resources/f4017_TriX.pdf",
-    "process": "KODAK PROFESSIONAL D-76, large tank, ~8 minutes at 20\u00b0C, agitation at 1-minute intervals (near the published CI 0.56 starting recommendation; small-tank D-76 stock is 6\u00be min at 20\u00b0C)",
+    "process": "KODAK PROFESSIONAL D-76, large tank, ~7\u00be\u20138 minutes at 20\u00b0C (CI \u2248 0.56 starting recommendation). Curve family digitized at 6/8/10/12 min.",
     "digitization_date": "2026-07-30",
-    "digitization_notes": "Approximate digitization of the published 400TX / 35 mm D\u2013logE characteristic curve for D-76 large-tank ~8 min (F-4017 p.8). Absolute log exposure (lux-seconds, bar notation) remapped onto the project's relative log-exposure axis (rel \u2248 kodak_logE + 4.0). Longer softer toe than HP5, mid-curve average gradient ~0.56\u20130.60 matching the datasheet CI target, open highlight scale into ~2.2 D. Diffuse rms granularity listed as 17 (fine); grain_scale set slightly above HP5 for classic Tri-X texture. Re-digitize from a high-res plot for production calibration.",
-    "chemistry_notes": "Named developers + normal times from F-4017. Base curve remains D-76 ~8 min large-tank digitization; other chems reuse that curve with character biases. CI vs time for D-76 / HC-110 / XTOL / T-MAX approximated from published CI plots; dilute variants use synthetic CI scaled to datasheet normal."
+    "digitization_notes": "v1.2: Tri-X D-76 and T-MAX use multi-time characteristic curve families digitized from F-4017 (interpolated between published times). Other chemistries still morph from the D-76 ~8 min base with character biases. Re-digitize from high-res plots for production.",
+    "chemistry_notes": "D-76 and T-MAX: true curve-family path (chemistry\u00d7time). Other named developers: datasheet normals + CI/time morph of the D-76 base until their curve families are digitized."
   },
   "curve": {
     "x_label": "relative_log_exposure",
     "y_label": "density",
-    "base_plus_fog": 0.24,
+    "base_plus_fog": 0.26,
     "points": [
       [
         0.5,
-        0.24
+        0.26
       ],
       [
-        0.7,
-        0.245
+        0.8,
+        0.28
       ],
       [
-        0.9,
-        0.27
+        1.0,
+        0.35
       ],
       [
-        1.1,
-        0.32
-      ],
-      [
-        1.3,
-        0.4
+        1.2,
+        0.45
       ],
       [
         1.5,
-        0.5
+        0.65
       ],
       [
-        1.7,
-        0.6
+        1.8,
+        0.85
       ],
       [
-        1.9,
-        0.7
-      ],
-      [
-        2.1,
-        0.81
+        2.0,
+        0.98
       ],
       [
         2.3,
-        0.92
+        1.2
       ],
       [
         2.5,
-        1.03
+        1.35
       ],
       [
-        2.7,
-        1.14
+        2.8,
+        1.55
       ],
       [
-        2.9,
-        1.25
-      ],
-      [
-        3.1,
-        1.36
+        3.0,
+        1.65
       ],
       [
         3.3,
-        1.47
+        1.8
       ],
       [
         3.5,
-        1.58
-      ],
-      [
-        3.7,
-        1.68
-      ],
-      [
-        3.9,
-        1.78
-      ],
-      [
-        4.1,
         1.88
       ],
       [
+        3.8,
+        1.95
+      ],
+      [
+        4.0,
+        2.0
+      ],
+      [
         4.3,
-        1.97
+        2.1
       ],
       [
         4.5,
-        2.05
+        2.15
       ],
       [
-        4.7,
-        2.12
-      ],
-      [
-        4.9,
-        2.17
+        4.8,
+        2.2
       ]
     ]
   },
   "defaults": {
     "developer_id": "d76",
-    "development_minutes": 6.75,
+    "development_minutes": 7.75,
     "relative_time": 1.0,
     "contrast_modifier": 0.0,
     "grain_strength": 1.05
@@ -124,11 +104,11 @@
     {
       "id": "d76",
       "name": "D-76 (stock)",
-      "normal_minutes": 6.75,
-      "time_min": 4.0,
-      "time_max": 14.0,
+      "normal_minutes": 7.75,
+      "time_min": 6.0,
+      "time_max": 12.0,
       "temperature_c": 20,
-      "agitation": "small_tank_30s",
+      "agitation": "large_tank_1min",
       "target_ci": 0.56,
       "is_base": true,
       "character": "balanced",
@@ -170,7 +150,322 @@
           1.0
         ]
       ],
-      "source": "Kodak F-4017 small-tank 20\u00b0C; CI curve approx. from p.8"
+      "source": "Kodak F-4017 large-tank D-76 curve family + CI guidance",
+      "curve_family": [
+        {
+          "minutes": 6.0,
+          "base_plus_fog": 0.25,
+          "points": [
+            [
+              0.5,
+              0.25
+            ],
+            [
+              0.8,
+              0.26
+            ],
+            [
+              1.0,
+              0.3
+            ],
+            [
+              1.2,
+              0.38
+            ],
+            [
+              1.5,
+              0.52
+            ],
+            [
+              1.8,
+              0.68
+            ],
+            [
+              2.0,
+              0.78
+            ],
+            [
+              2.3,
+              0.95
+            ],
+            [
+              2.5,
+              1.05
+            ],
+            [
+              2.8,
+              1.2
+            ],
+            [
+              3.0,
+              1.28
+            ],
+            [
+              3.3,
+              1.4
+            ],
+            [
+              3.5,
+              1.48
+            ],
+            [
+              3.8,
+              1.55
+            ],
+            [
+              4.0,
+              1.6
+            ],
+            [
+              4.3,
+              1.68
+            ],
+            [
+              4.5,
+              1.72
+            ],
+            [
+              4.8,
+              1.78
+            ]
+          ]
+        },
+        {
+          "minutes": 8.0,
+          "base_plus_fog": 0.26,
+          "points": [
+            [
+              0.5,
+              0.26
+            ],
+            [
+              0.8,
+              0.28
+            ],
+            [
+              1.0,
+              0.35
+            ],
+            [
+              1.2,
+              0.45
+            ],
+            [
+              1.5,
+              0.65
+            ],
+            [
+              1.8,
+              0.85
+            ],
+            [
+              2.0,
+              0.98
+            ],
+            [
+              2.3,
+              1.2
+            ],
+            [
+              2.5,
+              1.35
+            ],
+            [
+              2.8,
+              1.55
+            ],
+            [
+              3.0,
+              1.65
+            ],
+            [
+              3.3,
+              1.8
+            ],
+            [
+              3.5,
+              1.88
+            ],
+            [
+              3.8,
+              1.95
+            ],
+            [
+              4.0,
+              2.0
+            ],
+            [
+              4.3,
+              2.1
+            ],
+            [
+              4.5,
+              2.15
+            ],
+            [
+              4.8,
+              2.2
+            ]
+          ]
+        },
+        {
+          "minutes": 10.0,
+          "base_plus_fog": 0.28,
+          "points": [
+            [
+              0.5,
+              0.28
+            ],
+            [
+              0.8,
+              0.3
+            ],
+            [
+              1.0,
+              0.4
+            ],
+            [
+              1.2,
+              0.55
+            ],
+            [
+              1.5,
+              0.8
+            ],
+            [
+              1.8,
+              1.05
+            ],
+            [
+              2.0,
+              1.2
+            ],
+            [
+              2.3,
+              1.45
+            ],
+            [
+              2.5,
+              1.6
+            ],
+            [
+              2.8,
+              1.85
+            ],
+            [
+              3.0,
+              1.98
+            ],
+            [
+              3.3,
+              2.12
+            ],
+            [
+              3.5,
+              2.2
+            ],
+            [
+              3.8,
+              2.28
+            ],
+            [
+              4.0,
+              2.32
+            ],
+            [
+              4.3,
+              2.45
+            ],
+            [
+              4.5,
+              2.52
+            ],
+            [
+              4.8,
+              2.58
+            ]
+          ]
+        },
+        {
+          "minutes": 12.0,
+          "base_plus_fog": 0.3,
+          "points": [
+            [
+              0.5,
+              0.3
+            ],
+            [
+              0.8,
+              0.33
+            ],
+            [
+              1.0,
+              0.45
+            ],
+            [
+              1.2,
+              0.65
+            ],
+            [
+              1.5,
+              0.95
+            ],
+            [
+              1.8,
+              1.25
+            ],
+            [
+              2.0,
+              1.42
+            ],
+            [
+              2.3,
+              1.7
+            ],
+            [
+              2.5,
+              1.9
+            ],
+            [
+              2.8,
+              2.18
+            ],
+            [
+              3.0,
+              2.32
+            ],
+            [
+              3.3,
+              2.5
+            ],
+            [
+              3.5,
+              2.58
+            ],
+            [
+              3.8,
+              2.65
+            ],
+            [
+              4.0,
+              2.7
+            ],
+            [
+              4.3,
+              2.85
+            ],
+            [
+              4.5,
+              2.92
+            ],
+            [
+              4.8,
+              2.98
+            ]
+          ]
+        }
+      ],
+      "curve_family_source": "Approximate digitization of F-4017 p.8 characteristic curves: TRI-X 400 / 400TX 35mm, D-76, large tank, 20\u00b0C, 1-min agitation (published times 6 / 8 / 10 / 12 min). Absolute log E remapped: rel \u2248 kodak_logE + 4."
     },
     {
       "id": "d76_1_1",
@@ -340,8 +635,8 @@
       "id": "tmax",
       "name": "T-MAX Developer",
       "normal_minutes": 6.0,
-      "time_min": 4.0,
-      "time_max": 14.0,
+      "time_min": 6.0,
+      "time_max": 11.0,
       "temperature_c": 20,
       "is_base": false,
       "character": "vigorous",
@@ -375,7 +670,323 @@
           1.0
         ]
       ],
-      "source": "Kodak F-4017 small-tank 20\u00b0C"
+      "source": "Kodak F-4017 small-tank T-MAX curve family",
+      "agitation": "small_tank_30s",
+      "curve_family": [
+        {
+          "minutes": 6.0,
+          "base_plus_fog": 0.28,
+          "points": [
+            [
+              0.5,
+              0.28
+            ],
+            [
+              0.8,
+              0.3
+            ],
+            [
+              1.0,
+              0.36
+            ],
+            [
+              1.2,
+              0.48
+            ],
+            [
+              1.5,
+              0.7
+            ],
+            [
+              1.8,
+              0.9
+            ],
+            [
+              2.0,
+              1.02
+            ],
+            [
+              2.3,
+              1.22
+            ],
+            [
+              2.5,
+              1.35
+            ],
+            [
+              2.8,
+              1.52
+            ],
+            [
+              3.0,
+              1.6
+            ],
+            [
+              3.3,
+              1.7
+            ],
+            [
+              3.5,
+              1.75
+            ],
+            [
+              3.8,
+              1.8
+            ],
+            [
+              4.0,
+              1.82
+            ],
+            [
+              4.3,
+              1.9
+            ],
+            [
+              4.5,
+              1.95
+            ],
+            [
+              4.8,
+              2.0
+            ]
+          ]
+        },
+        {
+          "minutes": 7.0,
+          "base_plus_fog": 0.29,
+          "points": [
+            [
+              0.5,
+              0.29
+            ],
+            [
+              0.8,
+              0.32
+            ],
+            [
+              1.0,
+              0.4
+            ],
+            [
+              1.2,
+              0.55
+            ],
+            [
+              1.5,
+              0.8
+            ],
+            [
+              1.8,
+              1.05
+            ],
+            [
+              2.0,
+              1.18
+            ],
+            [
+              2.3,
+              1.4
+            ],
+            [
+              2.5,
+              1.55
+            ],
+            [
+              2.8,
+              1.75
+            ],
+            [
+              3.0,
+              1.85
+            ],
+            [
+              3.3,
+              1.98
+            ],
+            [
+              3.5,
+              2.05
+            ],
+            [
+              3.8,
+              2.12
+            ],
+            [
+              4.0,
+              2.15
+            ],
+            [
+              4.3,
+              2.25
+            ],
+            [
+              4.5,
+              2.3
+            ],
+            [
+              4.8,
+              2.35
+            ]
+          ]
+        },
+        {
+          "minutes": 9.0,
+          "base_plus_fog": 0.3,
+          "points": [
+            [
+              0.5,
+              0.3
+            ],
+            [
+              0.8,
+              0.35
+            ],
+            [
+              1.0,
+              0.48
+            ],
+            [
+              1.2,
+              0.68
+            ],
+            [
+              1.5,
+              1.0
+            ],
+            [
+              1.8,
+              1.3
+            ],
+            [
+              2.0,
+              1.48
+            ],
+            [
+              2.3,
+              1.75
+            ],
+            [
+              2.5,
+              1.92
+            ],
+            [
+              2.8,
+              2.15
+            ],
+            [
+              3.0,
+              2.28
+            ],
+            [
+              3.3,
+              2.42
+            ],
+            [
+              3.5,
+              2.5
+            ],
+            [
+              3.8,
+              2.55
+            ],
+            [
+              4.0,
+              2.58
+            ],
+            [
+              4.3,
+              2.7
+            ],
+            [
+              4.5,
+              2.75
+            ],
+            [
+              4.8,
+              2.8
+            ]
+          ]
+        },
+        {
+          "minutes": 11.0,
+          "base_plus_fog": 0.32,
+          "points": [
+            [
+              0.5,
+              0.32
+            ],
+            [
+              0.8,
+              0.38
+            ],
+            [
+              1.0,
+              0.55
+            ],
+            [
+              1.2,
+              0.8
+            ],
+            [
+              1.5,
+              1.15
+            ],
+            [
+              1.8,
+              1.5
+            ],
+            [
+              2.0,
+              1.7
+            ],
+            [
+              2.3,
+              2.0
+            ],
+            [
+              2.5,
+              2.18
+            ],
+            [
+              2.8,
+              2.42
+            ],
+            [
+              3.0,
+              2.55
+            ],
+            [
+              3.3,
+              2.7
+            ],
+            [
+              3.5,
+              2.75
+            ],
+            [
+              3.8,
+              2.8
+            ],
+            [
+              4.0,
+              2.82
+            ],
+            [
+              4.3,
+              2.95
+            ],
+            [
+              4.5,
+              3.0
+            ],
+            [
+              4.8,
+              3.05
+            ]
+          ]
+        }
+      ],
+      "curve_family_source": "Approximate digitization of F-4017 p.7 characteristic curves: TRI-X 400 / 400TX 35mm, T-MAX Developer, small tank, 20\u00b0C, 30s agitation (published times 6 / 7 / 9 / 11 min). Absolute log E remapped: rel \u2248 kodak_logE + 4."
     },
     {
       "id": "tmax_rs",
