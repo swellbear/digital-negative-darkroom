@@ -105,6 +105,7 @@ def print_negative(
     overall_exposure: float | None = None,
     grade: float | None = None,
     contrast: float | None = None,
+    local_stops: np.ndarray | None = None,
     commit: bool = True,
 ) -> PrintResult:
     """Expose paper through a developed negative.
@@ -112,6 +113,7 @@ def print_negative(
     overall_exposure: timer stops (+ = more light = darker print)
     grade: multigrade filtration 00–5 (also applies filter speed factor)
     contrast: fine nudge between filter steps
+    local_stops: optional HxW map of extra exposure stops (burn +, dodge −)
     commit=False: live preview only — no history entry
     """
     print_meta = dn.metadata.setdefault("print", {})
@@ -131,6 +133,22 @@ def print_negative(
     # Timer stops + MG filter speed (harder grades need more light for same midtone)
     speed = _filter_speed(effective_grade)
     light = transmittance * (2.0**exposure_stops) * speed
+
+    # Local dodge/burn: multiply light by 2**local_stops (burn darkens, dodge lightens)
+    if local_stops is not None:
+        ls = np.asarray(local_stops, dtype=np.float32)
+        if ls.shape != light.shape:
+            # Resize to light map
+            try:
+                from PIL import Image
+
+                im = Image.fromarray(ls, mode="F")
+                im = im.resize((light.shape[1], light.shape[0]), resample=Image.Resampling.BILINEAR)
+                ls = np.asarray(im).astype(np.float32)
+            except Exception:
+                ls = np.zeros(light.shape, dtype=np.float32)
+        light = light * np.power(2.0, np.clip(ls, -3.0, 3.0))
+
     print_density = paper_response(
         light, paper=paper, grade=effective_grade, log_center=log_center
     )
@@ -141,6 +159,7 @@ def print_negative(
     # Mild display gamma so paper Dmax reads as print black without crushing midtones.
     preview = np.power(preview, 0.78).astype(np.float32)
 
+    strokes = print_meta.get("dodge_burn") or []
     print_meta.update(
         {
             "enabled": True,
@@ -156,22 +175,24 @@ def print_negative(
             },
             "overall_exposure": exposure_stops,
             "contrast": contrast_nudge,
+            "dodge_burn": strokes,
         }
     )
     dn.metadata.setdefault("ui_state", {})["current_stage"] = "print"
 
     if commit:
         dn.touch()
-        dn.metadata.setdefault("history", []).append(
-            {
-                "op": "print",
-                "paper_id": paper.id,
-                "grade": grade_value,
-                "overall_exposure": exposure_stops,
-                "contrast": contrast_nudge,
-                "filter_speed": speed,
-            }
-        )
+        hist = {
+            "op": "print",
+            "paper_id": paper.id,
+            "grade": grade_value,
+            "overall_exposure": exposure_stops,
+            "contrast": contrast_nudge,
+            "filter_speed": speed,
+        }
+        if strokes:
+            hist["dodge_burn"] = list(strokes)
+        dn.metadata.setdefault("history", []).append(hist)
 
     return PrintResult(
         print_density=print_density,

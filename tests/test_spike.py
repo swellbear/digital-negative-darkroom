@@ -392,3 +392,55 @@ def test_heif_ingest_decodes():
     assert float(dn.image.mean()) > 0
     assert "HEIF" in dn.metadata["ingest"]["notes"] or "HEIC" in dn.metadata["ingest"]["notes"]
     path.unlink(missing_ok=True)
+
+
+def test_dodge_burn_timer_darkens_and_lightens():
+    from digital_negative.dodge_burn import (
+        apply_exposure_tick,
+        ensure_accum,
+        mask_from_editor,
+        seconds_to_stops,
+    )
+
+    dn = ingest_path(None)
+    profile = load_film_profile(ROOT / "profiles" / "films" / "hp5-plus-v1.json")
+    paper = load_paper_profile(ROOT / "profiles" / "papers" / "mg-standard-v1.json")
+    developed = develop(dn, profile, grain_strength=0.0, commit=False)
+    base = print_negative(
+        developed.transmittance, dn, paper, overall_exposure=0.0, grade=2.5, commit=False
+    )
+    h, w = base.preview.shape
+    layer = np.zeros((h, w, 4), dtype=np.float32)
+    layer[h // 5 : 4 * h // 5, w // 5 : 4 * w // 5, :] = 1.0
+    editor = {"background": None, "layers": [layer], "composite": None}
+    assert float(mask_from_editor(editor, height=h, width=w).max()) > 0.5
+
+    def run(mode: str):
+        st = {
+            "db_exposing": True,
+            "db_mode": mode,
+            "db_seconds_left": 5,
+            "db_total_seconds": 5,
+            "db_stops_per_second": seconds_to_stops(5) / 5,
+            "db_feather_px": 3.0,
+            "db_strokes": [],
+        }
+        ensure_accum(st, h, w)
+        for _ in range(5):
+            apply_exposure_tick(st, editor, height=h, width=w)
+        assert st["db_exposing"] is False
+        assert st["db_strokes"]
+        return print_negative(
+            developed.transmittance,
+            dn,
+            paper,
+            overall_exposure=0.0,
+            grade=2.5,
+            local_stops=st["db_accum"],
+            commit=False,
+        )
+
+    burned = run("burn")
+    dodged = run("dodge")
+    assert float(burned.preview.mean()) < float(base.preview.mean())
+    assert float(dodged.preview.mean()) > float(base.preview.mean())
