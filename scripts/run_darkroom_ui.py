@@ -33,6 +33,7 @@ from digital_negative.print_engine import print_negative
 # Match commit look as closely as practical while staying interactive.
 LIVE_MAX_SIDE = 2000
 DRAG_MAX_SIDE = 1280  # high enough for critical judgment while dragging
+INSPECT_MAX_SIDE = 3600  # high-res for zoom / inspect panel
 REF_MAX_SIDE = 420
 
 FILM_CHOICES = []
@@ -143,13 +144,44 @@ UI_CSS = """
 #live_preview {
   min-height: 0 !important;
 }
+#live_preview .image-frame,
+#live_preview .image-container,
+#inspect_preview .image-frame,
+#inspect_preview .image-container {
+  overflow: auto !important;
+  max-height: calc(100vh - 160px) !important;
+  background: #0c0c0c !important;
+}
 #live_preview img,
 #live_preview .image-container img,
 #live_preview .image-frame img {
   max-height: calc(100vh - 160px) !important;
-  width: 100% !important;
+  width: auto !important;
+  max-width: 100% !important;
   object-fit: contain !important;
   background: #0c0c0c !important;
+  transform-origin: center center;
+  cursor: zoom-in;
+}
+#inspect_preview {
+  min-height: 60vh !important;
+}
+#inspect_preview img,
+#inspect_preview .image-container img,
+#inspect_preview .image-frame img {
+  max-height: none !important;
+  max-width: none !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain !important;
+  background: #0c0c0c !important;
+  transform-origin: center center;
+  cursor: grab;
+}
+#inspect_hint {
+  font-size: 0.8rem !important;
+  opacity: 0.85;
+  margin: 2px 0 6px 0 !important;
 }
 #ref_row {
   gap: 6px !important;
@@ -169,6 +201,81 @@ UI_CSS = """
     position: relative !important;
     max-height: none !important;
   }
+}
+"""
+
+# Wheel / trackpad zoom + drag pan for main and inspect viewers
+UI_JS = """
+() => {
+  function enhance(sel) {
+    const root = document.querySelector(sel);
+    if (!root || root.dataset.zoomReady === '1') return;
+    const findImg = () => root.querySelector('img');
+    let scale = 1;
+    let panX = 0, panY = 0;
+    let dragging = false, lastX = 0, lastY = 0;
+
+    const apply = (img) => {
+      if (!img) return;
+      img.style.transformOrigin = 'center center';
+      img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+      img.style.maxWidth = scale > 1.02 ? 'none' : '';
+      img.style.maxHeight = scale > 1.02 ? 'none' : '';
+      img.style.cursor = scale > 1.02 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in';
+    };
+
+    root.addEventListener('wheel', (e) => {
+      const img = findImg();
+      if (!img) return;
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      scale = Math.min(10, Math.max(0.4, scale * factor));
+      if (scale <= 1.02) { panX = 0; panY = 0; }
+      apply(img);
+    }, { passive: false });
+
+    root.addEventListener('pointerdown', (e) => {
+      const img = findImg();
+      if (!img || scale <= 1.02) return;
+      dragging = true; lastX = e.clientX; lastY = e.clientY;
+      root.setPointerCapture?.(e.pointerId);
+      apply(img);
+    });
+    root.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const img = findImg();
+      if (!img) return;
+      panX += e.clientX - lastX;
+      panY += e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      apply(img);
+    });
+    const endDrag = () => {
+      dragging = false;
+      apply(findImg());
+    };
+    root.addEventListener('pointerup', endDrag);
+    root.addEventListener('pointercancel', endDrag);
+    root.addEventListener('dblclick', () => {
+      scale = 1; panX = 0; panY = 0;
+      apply(findImg());
+    });
+
+    const mo = new MutationObserver(() => {
+      scale = 1; panX = 0; panY = 0;
+      apply(findImg());
+    });
+    mo.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+    root.dataset.zoomReady = '1';
+    apply(findImg());
+  }
+
+  const boot = () => {
+    enhance('#live_preview');
+    enhance('#inspect_preview');
+  };
+  boot();
+  new MutationObserver(boot).observe(document.body, { childList: true, subtree: true });
 }
 """
 
@@ -341,16 +448,51 @@ def _viewer_frame(state, live=None, original=None, latent=None, neg=None):
     return gr.update(value=img, label=_VIEWER_LABELS.get(mode, _VIEWER_LABELS["live"]))
 
 
+def _inspect_frame(state, live=None):
+    """High-res inspect panel image for zooming the active sequence stage."""
+    mode = (state or {}).get("viewer_mode", "live")
+    if mode == "original":
+        img = (state or {}).get("original_inspect")
+        if img is None:
+            img = (state or {}).get("original_view")
+    elif mode == "latent":
+        img = (state or {}).get("latent_inspect")
+        if img is None:
+            img = (state or {}).get("latent_view")
+    elif mode == "negative":
+        img = (state or {}).get("neg_inspect")
+        if img is None:
+            img = (state or {}).get("neg_view")
+    else:
+        mode = "live"
+        img = (state or {}).get("live_inspect")
+        if img is None:
+            img = live if live is not None else (state or {}).get("live_rgb")
+    label = {
+        "live": "Inspect — Live theoretical print (scroll-wheel zoom, drag to pan, double-click reset)",
+        "original": "Inspect — Original (scroll-wheel zoom, drag to pan, double-click reset)",
+        "latent": "Inspect — Latent DN (scroll-wheel zoom, drag to pan, double-click reset)",
+        "negative": "Inspect — Developed negative (scroll-wheel zoom, drag to pan, double-click reset)",
+    }.get(mode, "Inspect")
+    return gr.update(value=img, label=label)
+
+
 def _pack_preview(live, original, latent, neg, summary, state):
     status, hist = _split_summary(summary or "")
     if state is not None:
-        # Keep large copies in sync when live path refreshes
         if live is not None:
-            state = {**state, "live_rgb": live}
+            state = {**state, "live_rgb": live, "live_inspect": live}
         if neg is not None:
-            state = {**state, "neg_ref": neg, "neg_view": neg}
+            state = {
+                **state,
+                "neg_ref": neg,
+                "neg_view": neg,
+                "neg_inspect": state.get("neg_inspect")
+                if state.get("neg_inspect") is not None
+                else neg,
+            }
     shown = _viewer_frame(state, live=live, original=original, latent=latent, neg=neg)
-    return shown, original, latent, neg, status, hist, state
+    return shown, original, latent, neg, status, hist, _inspect_frame(state, live=live), state
 
 
 def focus_viewer(mode: str):
@@ -358,22 +500,28 @@ def focus_viewer(mode: str):
 
     def _fn(state, evt: SelectData | None = None):
         if not state or state.get("dn") is None:
-            return gr.update(), "*Commit Ingest first.*", state
-        # Image deselect → return to live print
+            empty = gr.update()
+            return empty, empty, "*Commit Ingest first.*", gr.update(open=False), state
         if evt is not None and getattr(evt, "selected", True) is False:
             mode_use = "live"
         else:
             mode_use = mode
         state = {**state, "viewer_mode": mode_use}
         tip = {
-            "live": "_Large view: live theoretical print (updates with controls)._",
-            "original": "_Large view: **Original** — use for start reference while editing._",
-            "latent": "_Large view: **Latent DN** — linear Digital Negative._",
-            "negative": "_Large view: **Developed negative** — updates as you Develop._",
+            "live": "_Large + Inspect: **live theoretical print**. Scroll-wheel zooms; drag pans._",
+            "original": "_Large + Inspect: **Original**. Scroll-wheel zooms; drag pans._",
+            "latent": "_Large + Inspect: **Latent DN**. Scroll-wheel zooms; drag pans._",
+            "negative": "_Large + Inspect: **Developed negative**. Scroll-wheel zooms; drag pans._",
         }.get(mode_use, "")
         banner = _stage_banner(state.get("stage", "development"), _locks(state))
         status = f"{banner}\n\n{tip}"
-        return _viewer_frame(state), status, state
+        return (
+            _viewer_frame(state),
+            _inspect_frame(state),
+            status,
+            gr.update(open=True),
+            state,
+        )
 
     return _fn
 
@@ -390,14 +538,17 @@ def _rebuild_views_from_dn(state: dict) -> dict:
     dn = state["dn"]
     latent_full = _to_rgb_u8(dn.to_luminance(), assume_linear=True)
     latent_view = _downscale_rgb(latent_full, LIVE_MAX_SIDE)
+    latent_inspect = _downscale_rgb(latent_full, INSPECT_MAX_SIDE)
     latent_ref = _downscale_rgb(latent_full, REF_MAX_SIDE)
     return {
         **state,
         "proxy": _proxy_dn(dn, LIVE_MAX_SIDE),
         "proxy_drag": _proxy_dn(dn, DRAG_MAX_SIDE),
         "latent_view": latent_view,
+        "latent_inspect": latent_inspect,
         "latent_ref": latent_ref,
         "live_rgb": latent_view if state.get("development") is None else state.get("live_rgb"),
+        "live_inspect": latent_inspect if state.get("development") is None else state.get("live_inspect"),
         "development": None,
         "development_full": None,
         "transmittance_proxy": None,
@@ -419,7 +570,16 @@ def rotate_working(turns_cw: int, state):
     degrees = int(ingest.get("rotation_degrees", 0)) + (90 * int(turns_cw))
     ingest["rotation_degrees"] = degrees % 360
 
-    for key in ("original_view", "original_ref"):
+    for key in (
+        "original_view",
+        "original_ref",
+        "original_inspect",
+        "latent_view",
+        "latent_ref",
+        "latent_inspect",
+        "live_rgb",
+        "live_inspect",
+    ):
         if state.get(key) is not None:
             state[key] = rotate_image(state[key], turns_cw)
 
@@ -507,15 +667,16 @@ def commit_ingest(sample_path, file_obj, state):
 
     latent_full = _to_rgb_u8(dn.to_luminance(), assume_linear=True)
     latent_view = _downscale_rgb(latent_full, LIVE_MAX_SIDE)
+    latent_inspect = _downscale_rgb(latent_full, INSPECT_MAX_SIDE)
     latent_ref = _downscale_rgb(latent_full, REF_MAX_SIDE)
     original_full = original_photo_preview(path, dn_image=dn.image)
     original_view = _downscale_rgb(original_full, LIVE_MAX_SIDE)
+    original_inspect = _downscale_rgb(original_full, INSPECT_MAX_SIDE)
     original_ref = _downscale_rgb(original_full, REF_MAX_SIDE)
     summary = (
         f"{_stage_banner('development', ['ingest'])}\n\n"
         f"**Ingest locked** — `{dn.metadata['source']['original_filename']}`  \n"
-        f"_Click Original / Latent / Negative under the preview to enlarge. "
-        f"Live print returns to the theoretical print._\n\n"
+        f"_Open a sequence below, then use **Inspect & zoom** (scroll-wheel zoom, drag pan)._\n\n"
         f"{_history_md(dn)}"
     )
     state = {
@@ -524,11 +685,15 @@ def commit_ingest(sample_path, file_obj, state):
         "proxy_drag": _proxy_dn(dn, DRAG_MAX_SIDE),
         "original_ref": original_ref,
         "original_view": original_view,
+        "original_inspect": original_inspect,
         "latent_ref": latent_ref,
         "latent_view": latent_view,
+        "latent_inspect": latent_inspect,
         "neg_ref": None,
         "neg_view": None,
+        "neg_inspect": None,
         "live_rgb": latent_view,
+        "live_inspect": latent_inspect,
         "viewer_mode": "live",
         "development": None,
         "development_full": None,
@@ -553,6 +718,8 @@ def commit_ingest(sample_path, file_obj, state):
         gr.update(interactive=True),
         gr.update(interactive=True),
         gr.update(interactive=True),
+        _inspect_frame(state, live=latent_inspect),
+        gr.update(open=True),
         state,
     )
 
@@ -603,10 +770,10 @@ def _run_live_develop_then_print(
         commit=False,
     )
     live_rgb = _to_rgb_u8(printed.preview)
-    neg_view = _to_rgb_u8(negative_lightbox_preview(development.transmittance))
-    neg_ref = _downscale_rgb(neg_view, REF_MAX_SIDE)
-    # Keep negative enlarge view at live preview resolution
-    neg_view = _downscale_rgb(neg_view, LIVE_MAX_SIDE)
+    neg_full = _to_rgb_u8(negative_lightbox_preview(development.transmittance))
+    neg_inspect = _downscale_rgb(neg_full, INSPECT_MAX_SIDE)
+    neg_view = _downscale_rgb(neg_full, LIVE_MAX_SIDE)
+    neg_ref = _downscale_rgb(neg_full, REF_MAX_SIDE)
     speed = state["dn"].metadata.get("print", {}).get("filtration", {}).get("values", {}).get(
         "filter_speed", 1.0
     )
@@ -626,8 +793,10 @@ def _run_live_develop_then_print(
         "proxy_drag": state.get("proxy_drag") or _proxy_dn(state["dn"], DRAG_MAX_SIDE),
         "development": development,
         "live_rgb": live_rgb,
+        "live_inspect": live_rgb,
         "neg_ref": neg_ref,
         "neg_view": neg_view,
+        "neg_inspect": neg_inspect,
         "stage": "development",
         "summary_cache": summary,
         "draft_print": {
@@ -831,10 +1000,10 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
         live_view = _downscale_rgb(
             _to_rgb_u8(development.positive_preview), LIVE_MAX_SIDE
         )
-    neg_view = _downscale_rgb(
-        _to_rgb_u8(negative_lightbox_preview(development.transmittance)), LIVE_MAX_SIDE
-    )
-    neg_ref = _downscale_rgb(neg_view, REF_MAX_SIDE)
+    neg_full = _to_rgb_u8(negative_lightbox_preview(development.transmittance))
+    neg_inspect = _downscale_rgb(neg_full, INSPECT_MAX_SIDE)
+    neg_view = _downscale_rgb(neg_full, LIVE_MAX_SIDE)
+    neg_ref = _downscale_rgb(neg_full, REF_MAX_SIDE)
     summary = (
         f"{_stage_banner('print', locks)}\n\n"
         f"**Develop locked** — refine Print below, then Commit Print.\n\n{_history_md(dn)}"
@@ -845,11 +1014,15 @@ def commit_develop(film_id, developer_id, relative_time, contrast, grain, state)
         "proxy_drag": state.get("proxy_drag"),
         "original_ref": state.get("original_ref"),
         "original_view": state.get("original_view"),
+        "original_inspect": state.get("original_inspect"),
         "latent_ref": state.get("latent_ref"),
         "latent_view": state.get("latent_view"),
+        "latent_inspect": state.get("latent_inspect"),
         "neg_ref": neg_ref,
         "neg_view": neg_view,
+        "neg_inspect": neg_inspect,
         "live_rgb": live_view,
+        "live_inspect": live_view,
         "viewer_mode": state.get("viewer_mode", "live"),
         "development": development,
         "development_full": development,
@@ -1142,6 +1315,7 @@ def build_ui() -> gr.Blocks:
                     type="numpy",
                     elem_id="live_preview",
                     height=620,
+                    buttons=["fullscreen", "download"],
                 )
                 with gr.Row():
                     rotate_ccw_btn = gr.Button("Rotate ⟲ 90°", size="sm", interactive=False)
@@ -1149,19 +1323,41 @@ def build_ui() -> gr.Blocks:
                     rotate_cw_btn = gr.Button("Rotate 90° ⟳", size="sm", interactive=False)
                 with gr.Row(elem_id="ref_row"):
                     original_out = gr.Image(
-                        label="Original (click to enlarge)", type="numpy", height=96
+                        label="Original (click to enlarge)",
+                        type="numpy",
+                        height=96,
+                        buttons=["fullscreen"],
                     )
                     latent_out = gr.Image(
-                        label="Latent DN (click to enlarge)", type="numpy", height=96
+                        label="Latent DN (click to enlarge)",
+                        type="numpy",
+                        height=96,
+                        buttons=["fullscreen"],
                     )
                     neg_out = gr.Image(
-                        label="Negative (click to enlarge)", type="numpy", height=96
+                        label="Negative (click to enlarge)",
+                        type="numpy",
+                        height=96,
+                        buttons=["fullscreen"],
                     )
                 with gr.Row():
                     view_orig_btn = gr.Button("Original", size="sm")
                     view_lat_btn = gr.Button("Latent DN", size="sm")
                     view_neg_btn = gr.Button("Negative", size="sm")
                     view_live_btn = gr.Button("Live print", size="sm", variant="primary")
+                with gr.Accordion("Inspect & zoom", open=True) as inspect_acc:
+                    gr.Markdown(
+                        "Scroll-wheel zooms · drag pans when zoomed · double-click resets · "
+                        "fullscreen button for an even larger view",
+                        elem_id="inspect_hint",
+                    )
+                    inspect_out = gr.Image(
+                        label="Inspect — pick a sequence above",
+                        type="numpy",
+                        elem_id="inspect_preview",
+                        height=720,
+                        buttons=["fullscreen", "download"],
+                    )
 
         # Always pass develop + print controls so the large viewer can show a
         # theoretical print through the working negative while developing.
@@ -1177,7 +1373,9 @@ def build_ui() -> gr.Blocks:
             print_contrast,
             state,
         ]
-        preview_outputs = [live_out, original_out, latent_out, neg_out, status, history, state]
+        preview_outputs = [
+            live_out, original_out, latent_out, neg_out, status, history, inspect_out, state
+        ]
 
         ingest_btn.click(
             fn=commit_ingest,
@@ -1186,7 +1384,8 @@ def build_ui() -> gr.Blocks:
                 live_out, original_out, latent_out, neg_out, status, history,
                 sample, file_in, ingest_btn, develop_btn, print_btn,
                 ingest_acc, develop_acc, print_acc,
-                rotate_ccw_btn, rotate_180_btn, rotate_cw_btn, state,
+                rotate_ccw_btn, rotate_180_btn, rotate_cw_btn,
+                inspect_out, inspect_acc, state,
             ],
         ).then(
             fn=live_preview_high,
@@ -1294,8 +1493,8 @@ def build_ui() -> gr.Blocks:
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
         )
 
-        # Thumbnail / button → enlarge in main preview
-        focus_outputs = [live_out, status, state]
+        # Thumbnail / button → enlarge in main preview + open inspect/zoom
+        focus_outputs = [live_out, inspect_out, status, inspect_acc, state]
         original_out.select(fn=focus_viewer("original"), inputs=[state], outputs=focus_outputs)
         latent_out.select(fn=focus_viewer("latent"), inputs=[state], outputs=focus_outputs)
         neg_out.select(fn=focus_viewer("negative"), inputs=[state], outputs=focus_outputs)
@@ -1318,4 +1517,5 @@ if __name__ == "__main__":
         server_port=args.port,
         share=args.share,
         css=UI_CSS,
+        js=UI_JS,
     )
