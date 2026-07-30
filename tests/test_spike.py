@@ -398,8 +398,12 @@ def test_dodge_burn_timer_darkens_and_lightens():
     from digital_negative.dodge_burn import (
         apply_exposure_tick,
         ensure_accum,
+        extract_tool_stamp,
         mask_from_editor,
+        place_stamp,
         seconds_to_stops,
+        stops_per_tick,
+        TICK_SECONDS,
     )
 
     dn = ingest_path(None)
@@ -415,19 +419,32 @@ def test_dodge_burn_timer_darkens_and_lightens():
     editor = {"background": None, "layers": [layer], "composite": None}
     assert float(mask_from_editor(editor, height=h, width=w).max()) > 0.5
 
+    # Transparent white must not count as coverage (old eraser-like bug).
+    ghost = np.zeros((32, 32, 4), dtype=np.float32)
+    ghost[..., :3] = 1.0
+    ghost[..., 3] = 0.0
+    assert float(mask_from_editor({"layers": [ghost]}, height=32, width=32).max()) < 0.05
+
+    stamp = extract_tool_stamp(editor, feather_px=1.0)
+    assert stamp is not None and float(stamp.max()) > 0.5
+
     def run(mode: str):
+        seconds = 5
         st = {
             "db_exposing": True,
             "db_mode": mode,
-            "db_seconds_left": 5,
-            "db_total_seconds": 5,
-            "db_stops_per_second": seconds_to_stops(5) / 5,
+            "db_seconds_left": float(seconds),
+            "db_total_seconds": seconds,
+            "db_tick_seconds": TICK_SECONDS,
+            "db_stops_per_tick": stops_per_tick(seconds, TICK_SECONDS),
             "db_feather_px": 3.0,
             "db_strokes": [],
+            "db_stamp": stamp,
         }
         ensure_accum(st, h, w)
-        for _ in range(5):
-            apply_exposure_tick(st, editor, height=h, width=w)
+        ticks = int(round(seconds / TICK_SECONDS))
+        for _ in range(ticks):
+            apply_exposure_tick(st, None, height=h, width=w, position=(0.5, 0.5))
         assert st["db_exposing"] is False
         assert st["db_strokes"]
         return print_negative(
@@ -444,3 +461,33 @@ def test_dodge_burn_timer_darkens_and_lightens():
     dodged = run("dodge")
     assert float(burned.preview.mean()) < float(base.preview.mean())
     assert float(dodged.preview.mean()) > float(base.preview.mean())
+
+    # Waving the card: position A then B must not keep burning A after move.
+    card = np.ones((21, 21), dtype=np.float32)
+    st = {
+        "db_exposing": True,
+        "db_mode": "burn",
+        "db_seconds_left": 1.0,
+        "db_total_seconds": 1,
+        "db_tick_seconds": 0.5,
+        "db_stops_per_tick": seconds_to_stops(1) * 0.5,
+        "db_strokes": [],
+        "db_stamp": card,
+    }
+    ensure_accum(st, 100, 100)
+    apply_exposure_tick(st, None, height=100, width=100, position=(0.2, 0.2))
+    a = st["db_accum"].copy()
+    apply_exposure_tick(st, None, height=100, width=100, position=(0.8, 0.8))
+    # Corner near first stamp should not increase on the second tick.
+    assert float(st["db_accum"][20, 20]) == float(a[20, 20])
+    assert float(st["db_accum"][80, 80]) > float(a[80, 80])
+    placed = place_stamp(100, 100, card, 0.5, 0.5)
+    assert float(placed[50, 50]) > 0.5
+
+
+def test_dodge_burn_seconds_helpers():
+    from digital_negative.dodge_burn import seconds_to_stops, stops_per_tick, TICK_SECONDS
+
+    assert abs(seconds_to_stops(8.0) - 1.0) < 1e-6
+    assert stops_per_tick(8.0, TICK_SECONDS) > 0
+

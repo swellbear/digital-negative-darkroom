@@ -32,12 +32,16 @@ from digital_negative.display import (
     to_u8_gray,
 )
 from digital_negative.dodge_burn import (
+    TICK_SECONDS,
     apply_exposure_tick,
+    extract_tool_stamp,
     local_stops_from_state,
-    mask_from_editor,
+    parse_pointer,
     reset_local_work,
+    stamp_to_png_data_url,
     seconds_to_stops,
-    stops_per_second,
+    stops_per_tick,
+    tool_workshop_canvas,
 )
 from digital_negative.ingest import ingest_path
 from digital_negative.papers import load_paper_profile
@@ -283,6 +287,21 @@ UI_CSS = """
 #controls_col .db_clock_hidden ~ .meta-text {
   display: none !important;
 }
+#db_flag { display: none !important; }
+#db_pos { display: none !important; }
+#live_preview.db-waving,
+#live_preview.db-waving img {
+  cursor: none !important;
+}
+#db_card_cursor {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  transform: translate(-50%, -50%);
+  opacity: 0.72;
+  mix-blend-mode: screen;
+  image-rendering: auto;
+}
 @media (max-width: 900px) {
   #main_workspace { flex-wrap: wrap !important; }
   #controls_col {
@@ -295,9 +314,13 @@ UI_CSS = """
 }
 """
 
-# Wheel / trackpad zoom + drag pan for main and inspect viewers
+# Wheel / trackpad zoom + drag pan for main and inspect viewers;
+# during dodge/burn exposure, wave a card stamp over the live print.
 UI_JS = """
 () => {
+  window.__dbPos = '';
+  window.__dbGetPos = () => window.__dbPos || '';
+
   function enhance(sel) {
     const root = document.querySelector(sel);
     if (!root || root.dataset.zoomReady === '1') return;
@@ -312,10 +335,15 @@ UI_JS = """
       img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
       img.style.maxWidth = scale > 1.02 ? 'none' : '';
       img.style.maxHeight = scale > 1.02 ? 'none' : '';
+      if (root.classList.contains('db-waving')) {
+        img.style.cursor = 'none';
+        return;
+      }
       img.style.cursor = scale > 1.02 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in';
     };
 
     root.addEventListener('wheel', (e) => {
+      if (root.classList.contains('db-waving')) return;
       const img = findImg();
       if (!img) return;
       e.preventDefault();
@@ -326,6 +354,7 @@ UI_JS = """
     }, { passive: false });
 
     root.addEventListener('pointerdown', (e) => {
+      if (root.classList.contains('db-waving')) return;
       const img = findImg();
       if (!img || scale <= 1.02) return;
       dragging = true; lastX = e.clientX; lastY = e.clientY;
@@ -333,7 +362,7 @@ UI_JS = """
       apply(img);
     });
     root.addEventListener('pointermove', (e) => {
-      if (!dragging) return;
+      if (!dragging || root.classList.contains('db-waving')) return;
       const img = findImg();
       if (!img) return;
       panX += e.clientX - lastX;
@@ -348,12 +377,15 @@ UI_JS = """
     root.addEventListener('pointerup', endDrag);
     root.addEventListener('pointercancel', endDrag);
     root.addEventListener('dblclick', () => {
+      if (root.classList.contains('db-waving')) return;
       scale = 1; panX = 0; panY = 0;
       apply(findImg());
     });
 
     const mo = new MutationObserver(() => {
-      scale = 1; panX = 0; panY = 0;
+      if (!root.classList.contains('db-waving')) {
+        scale = 1; panX = 0; panY = 0;
+      }
       apply(findImg());
     });
     mo.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
@@ -377,13 +409,93 @@ UI_JS = """
     });
   };
 
+  const normOverImg = (img, clientX, clientY) => {
+    const r = img.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return null;
+    const nx = (clientX - r.left) / r.width;
+    const ny = (clientY - r.top) / r.height;
+    if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return null;
+    return [Math.min(1, Math.max(0, nx)), Math.min(1, Math.max(0, ny))];
+  };
+
+  const ensureCursor = () => {
+    let el = document.getElementById('db_card_cursor');
+    if (!el) {
+      el = document.createElement('img');
+      el.id = 'db_card_cursor';
+      el.alt = '';
+      document.body.appendChild(el);
+    }
+    return el;
+  };
+
+  const syncWave = () => {
+    const flag = document.querySelector('#db_flag [data-exposing], #db_flag');
+    const node = flag && flag.getAttribute
+      ? (flag.getAttribute('data-exposing') != null ? flag : flag.querySelector('[data-exposing]'))
+      : null;
+    const exposing = node && node.getAttribute('data-exposing') === '1';
+    const stamp = node ? (node.getAttribute('data-stamp') || '') : '';
+    const live = document.querySelector('#live_preview');
+    const cursor = ensureCursor();
+    if (!exposing) {
+      window.__dbPos = '';
+      if (live) live.classList.remove('db-waving');
+      cursor.style.display = 'none';
+      return;
+    }
+    if (live) live.classList.add('db-waving');
+    if (stamp && cursor.getAttribute('src') !== stamp) cursor.setAttribute('src', stamp);
+    cursor.style.display = window.__dbPos ? 'block' : 'none';
+  };
+
+  const onLivePointer = (e) => {
+    const flag = document.querySelector('#db_flag [data-exposing="1"]');
+    if (!flag) {
+      window.__dbPos = '';
+      const c = document.getElementById('db_card_cursor');
+      if (c) c.style.display = 'none';
+      return;
+    }
+    const live = document.querySelector('#live_preview');
+    const img = live && live.querySelector('img');
+    if (!img) return;
+    const n = normOverImg(img, e.clientX, e.clientY);
+    const cursor = ensureCursor();
+    if (!n) {
+      window.__dbPos = '';
+      cursor.style.display = 'none';
+      return;
+    }
+    window.__dbPos = n[0].toFixed(4) + ',' + n[1].toFixed(4);
+    const stamp = flag.getAttribute('data-stamp') || '';
+    const frac = parseFloat(flag.getAttribute('data-stamp-fw') || '0.25');
+    if (stamp && cursor.getAttribute('src') !== stamp) cursor.setAttribute('src', stamp);
+    const iw = img.getBoundingClientRect().width;
+    cursor.style.width = Math.max(24, frac * iw) + 'px';
+    cursor.style.height = 'auto';
+    cursor.style.left = e.clientX + 'px';
+    cursor.style.top = e.clientY + 'px';
+    cursor.style.display = 'block';
+  };
+
   const boot = () => {
     enhance('#live_preview');
     enhance('#inspect_preview');
     hideClockChrome();
+    syncWave();
   };
   boot();
+  document.addEventListener('pointermove', onLivePointer, { passive: true });
+  document.addEventListener('pointerdown', onLivePointer, { passive: true });
   new MutationObserver(boot).observe(document.body, { childList: true, subtree: true });
+}
+"""
+
+DB_TICK_JS = """
+(paper, pe, pg, pc, pos, state) => {
+  const p = (window.__dbGetPos && window.__dbGetPos()) || pos || '';
+  return [paper, pe, pg, pc, p, state];
 }
 """
 
@@ -1309,9 +1421,30 @@ def _db_target_shape(state) -> tuple[int, int]:
 
 
 def _editor_from_print(rgb: np.ndarray | None) -> dict:
-    if rgb is None:
-        return None
-    return {"background": rgb, "layers": [], "composite": rgb}
+    """Seed a dark tool-workshop canvas sized like the current print."""
+    if rgb is not None and getattr(rgb, "shape", None) is not None and len(rgb.shape) >= 2:
+        h, w = int(rgb.shape[0]), int(rgb.shape[1])
+        side = 480
+        if h >= w:
+            hh, ww = side, max(64, int(round(side * w / max(h, 1))))
+        else:
+            ww, hh = side, max(64, int(round(side * h / max(w, 1))))
+        return tool_workshop_canvas(hh, ww)
+    return tool_workshop_canvas()
+
+
+def _db_flag_html(state) -> str:
+    exposing = "1" if state and state.get("db_exposing") else "0"
+    stamp = ""
+    frac = "0.2"
+    if state and state.get("db_stamp_url"):
+        stamp = str(state["db_stamp_url"])
+    if state and state.get("db_stamp_frac"):
+        frac = f"{float(state['db_stamp_frac']):.4f}"
+    return (
+        f'<div data-exposing="{exposing}" data-stamp="{stamp}" data-stamp-fw="{frac}" '
+        f'data-mode="{state.get("db_mode", "") if state else ""}"></div>'
+    )
 
 
 def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print_contrast, editor, state):
@@ -1325,32 +1458,62 @@ def start_dodge_burn(mode, seconds, paper_id, print_exposure, print_grade, print
     seconds = int(round(float(seconds)))
     if seconds < 1:
         raise gr.Error("Timer must be at least 1 second.")
+
     h, w = _db_target_shape(state)
-    mask = mask_from_editor(editor, height=h, width=w)
-    if float(mask.max()) < 0.12:
-        raise gr.Error("Paint a tool shape on the print first (brush over the area to hold or burn).")
+    stamp = extract_tool_stamp(editor, feather_px=4.0, target_height=h, target_width=w)
+    if stamp is None or float(stamp.max()) < 0.12:
+        raise gr.Error("Paint a card / wand shape in the dark workshop first, then Start exposure.")
 
     mode = "dodge" if str(mode).lower().startswith("dodge") else "burn"
     state = {**state}
     state["db_exposing"] = True
     state["db_mode"] = mode
-    state["db_seconds_left"] = seconds
+    state["db_seconds_left"] = float(seconds)
     state["db_total_seconds"] = seconds
-    state["db_stops_per_second"] = stops_per_second(seconds)
-    state["db_feather_px"] = 6.0
-    # First second applies immediately (darkroom: light is already on)
-    apply_exposure_tick(state, editor, height=h, width=w)
-    left = int(state.get("db_seconds_left", 0))
+    state["db_tick_seconds"] = TICK_SECONDS
+    state["db_stops_per_tick"] = stops_per_tick(seconds, TICK_SECONDS)
+    state["db_feather_px"] = 4.0
+    state["db_stamp"] = stamp
+    tint = (120, 200, 255) if mode == "dodge" else (255, 200, 90)
+    # Compact cursor image; full-resolution stamp stays in state for exposure.
+    cursor = stamp
+    mx = max(int(stamp.shape[0]), int(stamp.shape[1]), 1)
+    if mx > 240:
+        scale = 240.0 / mx
+        nh = max(1, int(round(stamp.shape[0] * scale)))
+        nw = max(1, int(round(stamp.shape[1] * scale)))
+        from digital_negative.dodge_burn import _resize_mask
+
+        cursor = _resize_mask(stamp, nh, nw)
+    state["db_stamp_url"] = stamp_to_png_data_url(cursor, tint=tint)
+    state["db_stamp_frac"] = float(stamp.shape[1]) / float(max(w, 1))
+
     verb = "Dodging" if mode == "dodge" else "Burning"
     total_stops = seconds_to_stops(seconds)
     status = (
-        f"**{verb}** — {left}s left · ~{total_stops:.2f} stops if held still.  \n"
-        f"_Move or reshape the tool while the timer runs._"
+        f"**{verb}** — {seconds}s · ~{total_stops:.2f} stops if held still.  \n"
+        f"_Wave the card over the **live print** on the right. Result appears when the timer ends._"
     )
-    live, timer_md, st, hi, state = _db_refresh_print(
-        paper_id, print_exposure, print_grade, print_contrast, state, status_md=status
+    timer_md = (
+        f"**{verb}… {seconds}s** — move the card over the live print "
+        f"(hold pointer on the print)"
     )
-    return live, timer_md, st, hi, state, gr.update(active=True)
+    if state.get("dn") is not None:
+        summary = f"{_stage_banner('print', _locks(state))}\n\n{status}\n\n{_history_md(state['dn'])}"
+    else:
+        summary = status
+    st, hi = _split_summary(summary)
+    state = {**state, "summary_cache": summary}
+    return (
+        gr.skip(),
+        timer_md,
+        st,
+        hi,
+        state,
+        gr.update(active=True),
+        _db_flag_html(state),
+        "",
+    )
 
 
 def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, state, *, status_md: str):
@@ -1379,14 +1542,18 @@ def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, sta
     )
     live_rgb = _to_rgb_u8(result.preview)
     strokes = state.get("db_strokes") or []
-    left = int(state.get("db_seconds_left", 0))
+    left = float(state.get("db_seconds_left", 0.0))
     if state.get("db_exposing"):
         verb = "Dodging" if state.get("db_mode") == "dodge" else "Burning"
-        timer_line = f"**{verb}… {left}s** — keep moving or reshaping the tool"
+        secs = max(0, int(np.ceil(left)))
+        timer_line = f"**{verb}… {secs}s** — keep waving the card over the live print"
     elif strokes:
         timer_line = f"**Ready** — {len(strokes)} local pass(es). Reset clears them."
     else:
-        timer_line = "**Ready** — paint a shape, set the timer, Start exposure."
+        timer_line = (
+            "**Ready** — cut a card shape, set the timer, Start exposure, "
+            "then wave over the live print."
+        )
 
     summary = (
         f"{_stage_banner('print', _locks(state))}\n\n"
@@ -1406,9 +1573,8 @@ def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, sta
     return live_rgb, timer_line, st, hi, state
 
 
-def tick_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, editor, state):
+def tick_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, pos, state):
     if not state or not state.get("db_exposing"):
-        # Idle: keep the clock off and don't thrash the preview.
         return (
             gr.skip(),
             gr.skip(),
@@ -1416,22 +1582,34 @@ def tick_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, edito
             gr.skip(),
             state,
             gr.update(active=False),
+            _db_flag_html(state),
         )
+
     h, w = _db_target_shape(state)
-    apply_exposure_tick(state, editor, height=h, width=w)
-    left = int(state.get("db_seconds_left", 0))
+    pointer = parse_pointer(pos)
+    apply_exposure_tick(state, None, height=h, width=w, position=pointer)
+    left = float(state.get("db_seconds_left", 0.0))
     still = bool(state.get("db_exposing"))
+    secs = max(0, int(np.ceil(left)))
+
     if still:
         verb = "Dodging" if state.get("db_mode") == "dodge" else "Burning"
-        status = f"**{verb}… {left}s left** — move or reshape the tool"
-    else:
-        status = "**Exposure done** — inspect the print. Start again for another pass, or Reset."
+        timer_md = f"**{verb}… {secs}s** — keep waving the card over the live print"
+        return (
+            gr.skip(),
+            timer_md,
+            gr.skip(),
+            gr.skip(),
+            state,
+            gr.update(active=True),
+            _db_flag_html(state),
+        )
+
+    status = "**Exposure done** — inspect the print. Start again for another pass, or Reset."
     live, timer_md, st, hi, state = _db_refresh_print(
         paper_id, print_exposure, print_grade, print_contrast, state, status_md=status
     )
-    # Stop the Gradio Timer when the enlarger countdown finishes.
-    clock = gr.update(active=still)
-    return live, timer_md, st, hi, state, clock
+    return live, timer_md, st, hi, state, gr.update(active=False), _db_flag_html(state)
 
 
 def reset_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, state):
@@ -1450,9 +1628,18 @@ def reset_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, stat
         state,
         status_md="**Local work cleared** — base print only (global exposure / grade kept).",
     )
-    # Clear brush layers; keep current print as background
     editor = _editor_from_print(live_rgb)
-    return live_rgb, timer_line, status, history, editor, state, gr.update(active=False)
+    return (
+        live_rgb,
+        timer_line,
+        status,
+        history,
+        editor,
+        state,
+        gr.update(active=False),
+        _db_flag_html(state),
+        "",
+    )
 
 
 def unlock_develop(state):
@@ -1508,12 +1695,12 @@ def unlock_develop(state):
 
 
 def seed_dodge_burn_editor(state):
-    """After Commit Develop — put the live print under the tool brush."""
+    """After Commit Develop — open a dark workshop to cut the card shape."""
     rgb = state.get("live_rgb") if state else None
     return (
         _editor_from_print(rgb),
-        "**Ready** — paint a freeform tool, set the timer, Start exposure. "
-        "Move the brush while it counts.",
+        "**Ready** — paint a freeform card/wand on the dark pad, set the timer, "
+        "Start exposure, then **wave over the live print**. Result shows when the timer ends.",
     )
 
 
@@ -1660,20 +1847,22 @@ def build_ui() -> gr.Blocks:
                     print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter nudge")
                     with gr.Accordion("Dodge & burn (enlarger card)", open=True):
                         gr.Markdown(
-                            "Paint any tool shape on the print → Start exposure → "
-                            "**move or reshape while the timer counts** → see the print update. "
-                            "Reset clears local work only.",
+                            "1) Paint a **card / wand** shape on the dark pad  \n"
+                            "2) **Start exposure**  \n"
+                            "3) **Wave** that card over the live print while the timer counts  \n"
+                            "4) When it stops, inspect the result. Reset clears local work only.",
                             elem_id="db_hint",
                         )
                         db_editor = gr.ImageEditor(
-                            label="Tool over print — brush = card / wand shape",
+                            label="Cut card / wand (dark workshop — not the print)",
                             type="numpy",
                             image_mode="RGBA",
                             height=360,
+                            value=tool_workshop_canvas(),
                             brush=gr.Brush(
-                                default_size=40,
-                                colors=["#ffffff", "#ffcc66", "#66ccff"],
-                                default_color="#ffffff",
+                                default_size=48,
+                                colors=["#ffcc66", "#ffffff", "#66ccff"],
+                                default_color="#ffcc66",
                                 color_mode="defaults",
                             ),
                             eraser=gr.Eraser(),
@@ -1688,13 +1877,17 @@ def build_ui() -> gr.Blocks:
                             label="Mode",
                         )
                         db_seconds = gr.Slider(1, 16, value=4, step=1, label="Timer (seconds)")
-                        db_timer_md = gr.Markdown("**Ready** — Commit Develop, then paint a shape.")
+                        db_timer_md = gr.Markdown(
+                            "**Ready** — Commit Develop, cut a card shape, then Start exposure."
+                        )
                         with gr.Row(elem_id="db_actions"):
                             db_start_btn = gr.Button("Start exposure", variant="primary", size="sm")
                             db_reset_btn = gr.Button("Reset local work", size="sm")
-                        # Off-screen tick source only — never show Gradio's stopwatch chrome.
+                        db_flag = gr.HTML(_db_flag_html(None), elem_id="db_flag")
+                        db_pos = gr.Textbox(value="", elem_id="db_pos", visible=False)
+                        # Off-screen tick source — samples the waved card ~4×/sec.
                         with gr.Column(elem_classes=["db_clock_hidden"]):
-                            db_clock = gr.Timer(value=1.0, active=False)
+                            db_clock = gr.Timer(value=TICK_SECONDS, active=False)
                     with gr.Row():
                         print_btn = gr.Button(
                             "Commit Print", interactive=False, variant="primary", size="sm"
@@ -1856,17 +2049,18 @@ def build_ui() -> gr.Blocks:
                 db_editor,
                 state,
             ],
-            outputs=[live_out, db_timer_md, status, history, state, db_clock],
+            outputs=[live_out, db_timer_md, status, history, state, db_clock, db_flag, db_pos],
         )
         db_clock.tick(
             fn=tick_dodge_burn,
-            inputs=[paper, print_exposure, print_grade, print_contrast, db_editor, state],
-            outputs=[live_out, db_timer_md, status, history, state, db_clock],
+            inputs=[paper, print_exposure, print_grade, print_contrast, db_pos, state],
+            outputs=[live_out, db_timer_md, status, history, state, db_clock, db_flag],
+            js=DB_TICK_JS,
         )
         db_reset_btn.click(
             fn=reset_dodge_burn,
             inputs=[paper, print_exposure, print_grade, print_contrast, state],
-            outputs=[live_out, db_timer_md, status, history, db_editor, state, db_clock],
+            outputs=[live_out, db_timer_md, status, history, db_editor, state, db_clock, db_flag, db_pos],
         )
 
         unlock_develop_btn.click(
