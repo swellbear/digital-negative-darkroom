@@ -142,7 +142,7 @@ def test_switch_after_develop_reenables_film_controls():
 
     # Simulate locked Develop UI, then save-and-switch to the other undeveloped frame.
     state = {**state, "dirty": True}
-    outs = mod.begin_roll_switch("0:click", state)
+    outs = mod.begin_roll_switch("0:click", state, *_default_controls(mod))
     state = _state_from(outs)
     outs = mod.save_and_switch_roll(0, state, *_default_controls(mod))
     state = _state_from(outs)
@@ -159,3 +159,47 @@ def test_switch_after_develop_reenables_film_controls():
     # And Commit Develop must succeed on the newly active frame.
     state = _state_from(mod.commit_develop(*develop_args, state))
     assert mod._locked(state, "development")
+
+
+def test_frame_controls_do_not_leak_across_roll():
+    """Edits on one frame must not appear on another unless loaded as a recipe."""
+    mod = _load_ui()
+    path = str(FIXTURE)
+    state = _state_from(mod.commit_ingest(None, [path, path], None))
+    assert state["roll_index"] == 1
+
+    edited = list(_default_controls(mod))
+    edited[3] = 0.75  # contrast
+    edited[4] = 2.0  # grain
+    edited[10] = 12.0  # print_exposure
+
+    # Clean switch away from the edited frame — snapshot should stick on frame 1.
+    outs = mod.begin_roll_switch("0:click", state, *edited)
+    state = _state_from(outs)
+    assert state["roll_index"] == 0
+    assert state["roll"][1]["controls"]["contrast"] == 0.75
+    assert state["roll"][1]["controls"]["grain"] == 2.0
+    assert state["roll"][1]["controls"]["print_exposure"] == 12.0
+
+    # Active frame 0 keeps its own defaults (not the edited values).
+    assert state["controls"]["contrast"] == 0.0
+    assert state["controls"]["grain"] == 1.0
+    assert state["controls"]["print_exposure"] == 8.0
+
+    contrast_u = _control_block(outs, mod)[3]
+    grain_u = _control_block(outs, mod)[4]
+    print_exp_u = _control_block(outs, mod)[10]
+    assert contrast_u.get("value") == 0.0
+    assert grain_u.get("value") == 1.0
+    assert print_exp_u.get("value") == 8.0
+
+    # Switch back — frame 1's edits restore, not frame 0's defaults-as-leak.
+    outs = mod.begin_roll_switch("1:click", state, *_default_controls(mod))
+    state = _state_from(outs)
+    assert state["roll_index"] == 1
+    assert state["controls"]["contrast"] == 0.75
+    assert state["controls"]["grain"] == 2.0
+    contrast_u = _control_block(outs, mod)[3]
+    grain_u = _control_block(outs, mod)[4]
+    assert contrast_u.get("value") == 0.75
+    assert grain_u.get("value") == 2.0

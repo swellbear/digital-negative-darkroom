@@ -3299,42 +3299,77 @@ def export_recipe_file(
 
 
 def apply_recipe_file(recipe_file, state):
-    """Load a recipe JSON onto the control surface."""
+    """Load a recipe JSON onto the active frame only (not the whole roll)."""
     if recipe_file is None:
         raise gr.Error("Choose a recipe JSON first.")
     path = recipe_file if isinstance(recipe_file, (str, Path)) else getattr(recipe_file, "name", None)
     if not path:
         raise gr.Error("Choose a recipe JSON first.")
     recipe = load_recipe(path)
-    tip = f"**Recipe loaded** — {recipe.get('name', 'untitled')}."
+    tip = f"**Recipe loaded** — {recipe.get('name', 'untitled')} · this frame only."
     film_id = recipe["film_id"]
     profile = _film_profile(film_id)
     chem = get_chemistry(profile, recipe["developer_id"])
+    minutes = float(recipe["development_minutes"])
     if chem is not None:
         tmin, tmax, _normal = time_slider_bounds(chem)
+        minutes = float(np.clip(minutes, tmin, tmax))
         minutes_update = gr.update(
             minimum=tmin,
             maximum=tmax,
-            value=float(np.clip(recipe["development_minutes"], tmin, tmax)),
+            value=minutes,
             step=0.25,
         )
     else:
-        minutes_update = gr.update(value=float(recipe["development_minutes"]))
+        minutes_update = gr.update(value=minutes)
     extras = recipe.get("extensions") or {}
+    contrast = float(recipe.get("contrast", 0.0))
+    grain = float(recipe.get("grain", 1.0))
+    exposure_index = float(extras.get("exposure_index", profile.iso))
+    contrast_filter = str(extras.get("contrast_filter", "none"))
+    scene_exposure = float(extras.get("scene_exposure_seconds", 0.01))
+    halation = float(extras.get("halation", 0.0))
+    paper_id = recipe["paper_id"]
+    print_grade = float(recipe["print_grade"])
+    print_exposure = float(recipe["print_exposure"])
+    print_contrast = float(recipe.get("print_contrast", 0.0))
+    # Persist onto the active frame so switching away / back keeps the recipe
+    # here without leaking it onto other roll frames.
+    if state and state.get("dn") is not None:
+        base = _merged_frame_controls(state)
+        state = _mark_dirty(
+            state,
+            {
+                **base,
+                "film_id": film_id,
+                "developer_id": recipe["developer_id"],
+                "development_minutes": minutes,
+                "contrast": contrast,
+                "grain": grain,
+                "exposure_index": exposure_index,
+                "contrast_filter": contrast_filter,
+                "scene_exposure": scene_exposure,
+                "halation": halation,
+                "paper_id": paper_id,
+                "print_grade": print_grade,
+                "print_exposure": print_exposure,
+                "print_contrast": print_contrast,
+            },
+        )
     return (
         gr.update(value=film_id),
         gr.update(choices=chemistry_choices(profile), value=recipe["developer_id"]),
         minutes_update,
-        gr.update(value=float(recipe.get("contrast", 0.0))),
-        gr.update(value=float(recipe.get("grain", 1.0))),
-        gr.update(value=float(extras.get("exposure_index", profile.iso))),
-        gr.update(value=str(extras.get("contrast_filter", "none"))),
-        gr.update(value=float(extras.get("scene_exposure_seconds", 0.01))),
-        gr.update(value=float(extras.get("halation", 0.0))),
-        gr.update(value=recipe["paper_id"]),
-        gr.update(value=float(recipe["print_grade"])),
-        gr.update(value=float(recipe["print_exposure"])),
-        gr.update(value=float(recipe.get("print_contrast", 0.0))),
+        gr.update(value=contrast),
+        gr.update(value=grain),
+        gr.update(value=exposure_index),
+        gr.update(value=contrast_filter),
+        gr.update(value=scene_exposure),
+        gr.update(value=halation),
+        gr.update(value=paper_id),
+        gr.update(value=print_grade),
+        gr.update(value=print_exposure),
+        gr.update(value=print_contrast),
         gr.update(value=str(recipe.get("name", ""))),
         tip,
         state,
@@ -3595,32 +3630,116 @@ _PRINT_CONTROL_KEYS = (
 )
 
 
-def _control_updates(state):
-    """Restore per-frame Develop/Print values and lock-matched interactivity.
+def _default_controls_dict() -> dict:
+    """Fresh Develop/Print defaults for a newly ingested roll frame."""
+    return {
+        "film_id": FILM_CHOICES[0][1] if FILM_CHOICES else None,
+        "developer_id": _INIT_DEV_ID,
+        "development_minutes": float(_INIT_TNORM),
+        "contrast": 0.0,
+        "grain": 1.0,
+        "exposure_index": 400.0,
+        "contrast_filter": "none",
+        "scene_exposure": 0.01,
+        "halation": 0.0,
+        "paper_id": PAPER_CHOICES[0][1] if PAPER_CHOICES else None,
+        "print_exposure": 8.0,
+        "print_grade": 2.5,
+        "print_contrast": 0.0,
+        "split_grade": False,
+        "soft_grade": 0.0,
+        "hard_grade": 5.0,
+        "soft_seconds": 4.5,
+        "hard_seconds": 3.5,
+        "test_strips": False,
+        "test_bands": 5,
+        "test_stops": 0.5,
+        "flash_stops": 0.0,
+        "dry_down": 0.0,
+        "tone": "none",
+        "border_frac": 0.0,
+    }
 
-    Commit Develop disables the film/developer controls. Switching to an
-    undeveloped roll frame must turn them back on, or that photo cannot be
-    developed until the whole session is reset.
+
+def _merged_frame_controls(state) -> dict:
+    """Per-frame controls with defaults filled in (never borrow another frame's UI)."""
+    return {**_default_controls_dict(), **((state or {}).get("controls") or {})}
+
+
+def _control_interactivity_updates(state):
+    """Update interactive flags only — leave current widget values alone."""
+    has_dn = bool(state and state.get("dn") is not None)
+    dev_on = (not _locked(state, "development")) if has_dn else True
+    print_on = (not _locked(state, "print")) if has_dn else True
+    return tuple(gr.update(interactive=dev_on) for _ in _DEV_CONTROL_KEYS) + tuple(
+        gr.update(interactive=print_on) for _ in _PRINT_CONTROL_KEYS
+    )
+
+
+def _control_updates(state):
+    """Restore this frame's Develop/Print values + lock-matched interactivity.
+
+    Always writes explicit values (saved controls or defaults). Leaving values
+    unset used to keep the previous frame's sliders, so edits leaked across
+    the camera roll.
     """
-    c = (state or {}).get("controls") or {}
+    c = _merged_frame_controls(state)
     has_dn = bool(state and state.get("dn") is not None)
     dev_on = (not _locked(state, "development")) if has_dn else True
     print_on = (not _locked(state, "print")) if has_dn else True
 
-    def one(key: str, *, interactive: bool):
-        kwargs = {"interactive": bool(interactive)}
-        if key in c:
-            kwargs["value"] = c[key]
-        return gr.update(**kwargs)
+    film_id = c["film_id"]
+    developer_id = c["developer_id"]
+    minutes = float(c["development_minutes"])
+    try:
+        profile = _film_profile(str(film_id))
+        choices = chemistry_choices(profile)
+        chem = get_chemistry(profile, str(developer_id))
+        if chem is not None:
+            tmin, tmax, _normal = time_slider_bounds(chem)
+            minutes_u = gr.update(
+                minimum=tmin,
+                maximum=tmax,
+                value=float(np.clip(minutes, tmin, tmax)),
+                step=0.25,
+                interactive=dev_on,
+            )
+        else:
+            minutes_u = gr.update(value=minutes, interactive=dev_on)
+        head = (
+            gr.update(value=film_id, interactive=dev_on),
+            gr.update(choices=choices, value=developer_id, interactive=dev_on),
+            minutes_u,
+        )
+    except Exception:
+        head = (
+            gr.update(value=film_id, interactive=dev_on),
+            gr.update(value=developer_id, interactive=dev_on),
+            gr.update(value=minutes, interactive=dev_on),
+        )
 
-    return tuple(one(k, interactive=dev_on) for k in _DEV_CONTROL_KEYS) + tuple(
-        one(k, interactive=print_on) for k in _PRINT_CONTROL_KEYS
+    rest_dev = tuple(
+        gr.update(value=c[k], interactive=dev_on) for k in _DEV_CONTROL_KEYS[3:]
     )
+    print_u = tuple(
+        gr.update(value=c[k], interactive=print_on) for k in _PRINT_CONTROL_KEYS
+    )
+    return head + rest_dev + print_u
 
 
 def _session_with_controls(state, *, drawer: str | None = "roll"):
     """Roll/ingest session outputs plus Develop/Print control restore."""
     return (*_roll_session_outputs(state, drawer=drawer), *_control_updates(state))
+
+
+def _attach_controls(state, *control_args):
+    """Write current UI Develop/Print values onto the active frame state."""
+    if not state or len(control_args) < _CONTROL_COUNT:
+        return state
+    return {
+        **state,
+        "controls": _capture_controls(*control_args[:_CONTROL_COUNT]),
+    }
 
 
 def _is_dirty(state) -> bool:
@@ -3774,7 +3893,7 @@ def _build_ingest_frame(path: str | None) -> dict:
         "stage": "development",
         "summary_cache": summary,
         "source_path": path,
-        "controls": {},
+        "controls": _default_controls_dict(),
         "dirty": False,
     }
 
@@ -4782,9 +4901,8 @@ def _roll_switch_bundle(state, *, drawer="roll", modal_visible=False, pending=-1
     if restore_controls:
         ctrls = _control_updates(state)
     elif state and state.get("dn") is not None:
-        # Keep current slider values, but refresh interactive flags from locks.
-        # Otherwise Commit Develop leaves film controls stuck off after a switch.
-        ctrls = _control_updates({**state, "controls": {}})
+        # Stay on this frame's widget values (dirty prompt); only sync lock flags.
+        ctrls = _control_interactivity_updates(state)
     else:
         ctrls = tuple(gr.skip() for _ in range(_CONTROL_COUNT))
     return (
@@ -4795,8 +4913,12 @@ def _roll_switch_bundle(state, *, drawer="roll", modal_visible=False, pending=-1
     )
 
 
-def begin_roll_switch(index_raw, state):
-    """Start a frame switch — prompt when the current frame has unsaved work."""
+def begin_roll_switch(index_raw, state, *control_args):
+    """Start a frame switch — prompt when the current frame has unsaved work.
+
+    control_args snapshots the outgoing frame's Develop/Print UI so settings
+    stay per-frame instead of leaking through shared Gradio widgets.
+    """
     # Careful: index 0 is valid — never use `index_raw or ""`.
     if index_raw is None:
         raw = ""
@@ -4818,6 +4940,9 @@ def begin_roll_switch(index_raw, state):
     if target == current:
         return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1, restore_controls=False)
 
+    # Stash the live UI onto the outgoing frame before any switch/prompt.
+    state = _attach_controls(state, *control_args)
+
     if _is_dirty(state):
         # Keep working on the current frame until the user chooses Save / Discard.
         return _roll_switch_bundle(
@@ -4832,12 +4957,12 @@ def begin_roll_switch(index_raw, state):
     return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
 
 
-def select_roll_frame(state, evt: SelectData | None = None):
+def select_roll_frame(state, evt: SelectData | None = None, *control_args):
     """Gallery select → same save-aware switch path as an explicit thumb click."""
     index = evt.index if evt is not None else (state or {}).get("roll_index", 0)
     if isinstance(index, (list, tuple)):
         index = index[0]
-    return begin_roll_switch(index, state)
+    return begin_roll_switch(index, state, *control_args)
 
 
 def save_and_switch_roll(pending, state, *control_args):
@@ -4848,12 +4973,9 @@ def save_and_switch_roll(pending, state, *control_args):
         target = int(pending)
     except (TypeError, ValueError):
         return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
+    state = _attach_controls(state, *control_args)
     if len(control_args) >= _CONTROL_COUNT:
-        state = {
-            **state,
-            "controls": _capture_controls(*control_args[:_CONTROL_COUNT]),
-            "dirty": True,
-        }
+        state = {**state, "dirty": True}
     state = _activate_roll_index(state, target, save_current=True)
     return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
 
@@ -7079,9 +7201,10 @@ def build_ui() -> gr.Blocks:
 
         # Primary path: JS writes index:token → textbox .change (same as remove).
         # Button click is only a fallback; do not fire both (stale-index race).
+        # Control inputs snapshot the outgoing frame so settings stay per-frame.
         roll_switch_index.change(
             fn=begin_roll_switch,
-            inputs=[roll_switch_index, state],
+            inputs=[roll_switch_index, state] + control_outputs,
             outputs=roll_switch_outputs,
         ).then(
             fn=live_preview_high,
@@ -7090,7 +7213,7 @@ def build_ui() -> gr.Blocks:
         )
         roll_switch_btn.click(
             fn=begin_roll_switch,
-            inputs=[roll_switch_index, state],
+            inputs=[roll_switch_index, state] + control_outputs,
             outputs=roll_switch_outputs,
         ).then(
             fn=live_preview_high,
