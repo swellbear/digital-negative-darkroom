@@ -112,3 +112,50 @@ def test_dirty_switch_discard_keeps_last_saved():
     assert state["roll_index"] == 0
     assert state["roll"][1]["summary_cache"] == "SAVED"
     assert not mod._is_dirty(state)
+
+
+def _control_block(outs, mod):
+    """Develop/Print control updates sit just before modal + pending."""
+    return outs[-(2 + mod._CONTROL_COUNT) : -2]
+
+
+def test_switch_after_develop_reenables_film_controls():
+    """Commit Develop disables film controls; the next undeveloped frame must get them back."""
+    mod = _load_ui()
+    path = str(FIXTURE)
+    state = _state_from(mod.commit_ingest(None, [path, path], None))
+    assert state["roll_index"] == 1
+
+    develop_args = (
+        mod.FILM_CHOICES[0][1],
+        mod._INIT_DEV_ID,
+        mod._INIT_TNORM,
+        0.0,
+        1.0,
+        400,
+        "none",
+        0.01,
+        0.0,
+    )
+    state = _state_from(mod.commit_develop(*develop_args, state))
+    assert mod._locked(state, "development")
+
+    # Simulate locked Develop UI, then save-and-switch to the other undeveloped frame.
+    state = {**state, "dirty": True}
+    outs = mod.begin_roll_switch("0:click", state)
+    state = _state_from(outs)
+    outs = mod.save_and_switch_roll(0, state, *_default_controls(mod))
+    state = _state_from(outs)
+    assert state["roll_index"] == 0
+    assert not mod._locked(state, "development")
+
+    film_u, developer_u, minutes_u, contrast_u, grain_u = _control_block(outs, mod)[:5]
+    assert film_u.get("interactive") is True
+    assert developer_u.get("interactive") is True
+    assert minutes_u.get("interactive") is True
+    assert contrast_u.get("interactive") is True
+    assert grain_u.get("interactive") is True
+
+    # And Commit Develop must succeed on the newly active frame.
+    state = _state_from(mod.commit_develop(*develop_args, state))
+    assert mod._locked(state, "development")
