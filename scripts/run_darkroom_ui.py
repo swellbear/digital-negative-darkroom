@@ -2973,6 +2973,8 @@ UI_JS = """
     const t = e.target;
     if (!(t instanceof Element)) return;
     if (!t.closest || !t.closest('#apply_framing_btn')) return;
+    // Apply is exiting Frame — do not re-arm crop if Gradio echoes print.
+    window.__cropEngageUntil = 0;
     try { writeCropRectBox(); } catch (_) {}
   }, true);
 
@@ -2982,8 +2984,10 @@ UI_JS = """
     if (t.closest && t.closest('#preview_tool')) {
       syncPreviewToolClasses();
       syncOverlay();
-      // Server Apply sets preview_tool → print; close the crop accordion too.
+      // Leaving Frame tool closes the crop accordion — but not during the brief
+      // window after opening Crop (Gradio can echo the previous radio value).
       if (readPreviewTool() !== 'frame') {
+        if (Date.now() < (window.__cropEngageUntil || 0)) return;
         try { closeModule('mod_crop'); } catch (_) {}
         window.__cropBox = { x: 0, y: 0, w: 1, h: 1 };
       }
@@ -3014,7 +3018,16 @@ UI_JS = """
     const root = document.querySelector('#preview_tool');
     if (!root) return;
     const input = root.querySelector(`input[type="radio"][value="${tool}"]`);
-    if (input && !input.checked) {
+    if (!input || input.checked) {
+      syncPreviewToolClasses();
+      return;
+    }
+    // Prefer a real label click so Gradio/Svelte commits the value. Setting
+    // checked + dispatchEvent alone often loses the next render tick.
+    const label = input.closest('label');
+    if (label) {
+      label.click();
+    } else {
       input.checked = true;
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -3041,6 +3054,7 @@ UI_JS = """
   window.__drawerCollapsed = false;
   const applyDrawer = (name, { fromServer = false } = {}) => {
     const n = (name || 'ingest').toLowerCase();
+    const prev = (document.body.dataset.drawer || '').toLowerCase();
     if (!fromServer && document.body.dataset.drawer === n && !document.body.classList.contains('drawer-collapsed')) {
       document.body.classList.add('drawer-collapsed');
       window.__drawerCollapsed = true;
@@ -3058,11 +3072,14 @@ UI_JS = """
       b.classList.toggle('rail-active', id === n);
     });
     if (n === 'frame') {
+      window.__cropEngageUntil = Date.now() + 1000;
       setPreviewToolValue('frame');
       try { openModule('mod_crop'); } catch (_) {}
-    } else {
-      // Leaving Frame (Apply framing → Develop, or another rail) closes crop.
-      if (n === 'print' || readPreviewTool() === 'frame') {
+    } else if (prev === 'frame' && n !== 'frame') {
+      // Only when leaving the Frame rail — Modules crop must stay usable
+      // while Develop / Print / Upload drawers are active.
+      window.__cropEngageUntil = 0;
+      if (readPreviewTool() === 'frame') {
         setPreviewToolValue('print');
       }
       try { closeModule('mod_crop'); } catch (_) {}
@@ -3094,11 +3111,17 @@ UI_JS = """
       if (open) collapseOtherModules(id);
       if (id === 'mod_crop') {
         if (open) {
+          // Hold Frame tool through Gradio's radio reconcile so the accordion
+          // is not immediately closed by a stale preview_tool=print echo.
+          window.__cropEngageUntil = Date.now() + 1000;
           setPreviewToolValue('frame');
           syncOverlay();
-        } else if (readPreviewTool() === 'frame') {
-          setPreviewToolValue('print');
-          syncOverlay();
+        } else {
+          window.__cropEngageUntil = 0;
+          if (readPreviewTool() === 'frame') {
+            setPreviewToolValue('print');
+            syncOverlay();
+          }
         }
       } else if (id === 'mod_dodge_burn') {
         if (open) {
@@ -3382,9 +3405,13 @@ UI_JS = """
           });
         }, 0);
       } else if (act === 'crop') {
-        setTimeout(() => openModule('mod_crop'), 0);
+        setTimeout(() => {
+          window.__cropEngageUntil = Date.now() + 1000;
+          openModule('mod_crop');
+        }, 0);
       } else if (act === 'autostraighten') {
         setTimeout(() => {
+          window.__cropEngageUntil = Date.now() + 1000;
           openModule('mod_crop');
           waitForEl('#auto_straighten_btn:not(:disabled)', (btn) => btn.click());
         }, 0);
@@ -3392,6 +3419,7 @@ UI_JS = """
         // Never find buttons by label "Auto crop" — that matches this menu item
         // and recurses until the tab freezes.
         setTimeout(() => {
+          window.__cropEngageUntil = Date.now() + 1000;
           openModule('mod_crop');
           waitForEl('#auto_crop_btn:not(:disabled)', (autoBtn) => autoBtn.click());
         }, 0);
@@ -3513,6 +3541,9 @@ UI_JS = """
   };
   setInterval(syncDrawerFromBox, 400);
   applyDrawer(readActiveDrawer() || 'ingest', { fromServer: true });
+  // Avoid a second applyDrawer on the first poll (which used to close crop
+  // right after the user opened it during the initial 400ms window).
+  lastDrawerVal = readActiveDrawer() || 'ingest';
 
   // Camera roll HTML: real ✕ buttons (data-roll-remove) + frame clicks
   // (data-roll-switch). Write into off-screen Gradio inputs with the native
@@ -5584,8 +5615,12 @@ def swap_strip_slot(index: int):
 
 
 def on_preview_tool_change(tool: str, state=None):
-    """Update the live preview label for the active tool mode + lock state."""
-    return gr.update(label=_live_print_label(state, tool=str(tool or "print")))
+    """Update the live preview label and keep Crop accordion aligned with Frame tool."""
+    tool = str(tool or "print")
+    return (
+        gr.update(label=_live_print_label(state, tool=tool)),
+        gr.update(open=(tool == "frame")),
+    )
 
 
 def set_workspace_drawer(name: str):
@@ -5884,6 +5919,7 @@ def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
         gr.update(value="print"),
         "develop",
         crop_done_hint,
+        gr.update(open=False),
     )
 
 
@@ -5953,6 +5989,7 @@ def reset_crop_straighten(state):
         gr.update(value="frame"),
         "frame",
         reset_hint,
+        gr.update(open=True),
     )
 
 
@@ -8783,7 +8820,9 @@ def build_ui() -> gr.Blocks:
                     with gr.Column(elem_classes=["db_clock_hidden"]):
                         db_clock = gr.Timer(value=TICK_SECONDS, active=False)
 
-                with gr.Accordion("Crop & straighten", open=False, elem_id="mod_crop"):
+                with gr.Accordion(
+                    "Crop & straighten", open=False, elem_id="mod_crop"
+                ) as mod_crop_acc:
                     crop_hint = gr.Markdown(
                         "_Rotate if needed, auto-straighten / crop, then Apply._",
                         elem_id="crop_float_hint",
@@ -9357,7 +9396,7 @@ def build_ui() -> gr.Blocks:
         preview_tool.change(
             fn=on_preview_tool_change,
             inputs=[preview_tool, state],
-            outputs=[live_out],
+            outputs=[live_out, mod_crop_acc],
         )
 
         # Rail drawers are driven by #active_drawer (JS) + workflow auto-switch.
@@ -9383,7 +9422,7 @@ def build_ui() -> gr.Blocks:
             develop_acc, print_acc, state,
             straighten_deg, crop_rect, crop_ratio,
             # Apply exits Frame → print preview + Develop drawer + closes crop UI.
-            preview_tool, active_drawer, crop_hint,
+            preview_tool, active_drawer, crop_hint, mod_crop_acc,
         ]
         apply_framing_btn.click(
             fn=apply_crop_straighten,

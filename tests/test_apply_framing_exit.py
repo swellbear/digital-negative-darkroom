@@ -60,7 +60,7 @@ def test_apply_framing_bakes_crop_and_exits_frame_mode():
 
     # Center 50% box → left/top/right/bottom trims of 0.25 each.
     outs = mod.apply_crop_straighten(0.0, "0.25000,0.25000,0.50000,0.50000", "free", state)
-    assert len(outs) == 19
+    assert len(outs) == 20
 
     new_state = outs[12]
     assert new_state["geometry_base"].shape[0] < h0
@@ -77,6 +77,7 @@ def test_apply_framing_bakes_crop_and_exits_frame_mode():
     assert preview_tool.get("value") == "print"
     assert outs[17] == "develop"
     assert "Framing applied" in str(outs[18])
+    assert _update_dict(outs[19]).get("open") is False
 
 
 def test_reset_framing_return_arity_matches_apply():
@@ -86,16 +87,17 @@ def test_reset_framing_return_arity_matches_apply():
     framed = mod.apply_crop_straighten(0.0, "0.20000,0.20000,0.60000,0.60000", "free", state)
     state = framed[12]
     outs = mod.reset_crop_straighten(state)
-    assert len(outs) == 19
+    assert len(outs) == 20
     preview_tool = _update_dict(outs[16])
     assert preview_tool.get("value") == "frame"
     assert outs[17] == "frame"
     assert outs[14] == mod.DEFAULT_CROP_RECT
+    assert _update_dict(outs[19]).get("open") is True
 
 
 def test_frame_outputs_wire_preview_tool_and_drawer():
     source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
-    assert "preview_tool, active_drawer, crop_hint" in source
+    assert "preview_tool, active_drawer, crop_hint, mod_crop_acc" in source
     assert 'elem_id="apply_framing_btn"' in source
     assert "const closeModule = (id) =>" in source
     assert "writeCropRectBox()" in source
