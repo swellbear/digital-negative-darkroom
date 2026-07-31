@@ -47,6 +47,7 @@ from digital_negative.chemistry import (
 )
 from digital_negative.capture import FILTER_LABELS
 from digital_negative.curves import load_film_profile
+from digital_negative.color_development import color_negative_lightbox_preview
 from digital_negative.development import develop
 from digital_negative.digital_negative import DigitalNegative
 from digital_negative.display import (
@@ -4245,6 +4246,22 @@ def _split_summary(full: str) -> tuple[str, str]:
     return full, ""
 
 
+def _color_or_bw_negative_view(development) -> np.ndarray:
+    """u8 RGB for the Developed-negative strip: C-41 orange lightbox, not the scan invert.
+
+    ``positive_preview`` for C-41 is an inverted inspection positive — putting that
+    in the negative slot made Live print and Negative feel swapped.
+    """
+    spectral_t = getattr(development, "spectral_transmittance", None)
+    process = str(getattr(development, "color_process", None) or "").lower()
+    if spectral_t is not None and process == "c41":
+        return _to_rgb_u8(color_negative_lightbox_preview(spectral_t))
+    if spectral_t is not None:
+        # E-6 developed "film" is already a positive slide.
+        return _to_rgb_u8(development.positive_preview)
+    return _to_rgb_u8(negative_lightbox_preview(development.transmittance))
+
+
 _VIEWER_LABELS = {
     "live": "Commit preview (live) — theoretical print",
     "original": "Original photo — click Live print below to swap back",
@@ -5300,10 +5317,7 @@ def _run_live_develop_then_print(
         **tech,
     )
     live_rgb = _to_rgb_u8(printed.preview)
-    if getattr(development, "spectral_transmittance", None) is not None:
-        neg_full = _to_rgb_u8(development.positive_preview)
-    else:
-        neg_full = _to_rgb_u8(negative_lightbox_preview(development.transmittance))
+    neg_full = _color_or_bw_negative_view(development)
     neg_inspect = _downscale_rgb(neg_full, INSPECT_MAX_SIDE)
     neg_view = _downscale_rgb(neg_full, LIVE_MAX_SIDE)
     neg_ref = _downscale_rgb(neg_full, REF_MAX_SIDE)
@@ -5828,10 +5842,7 @@ def commit_develop(
         live_view = _downscale_rgb(
             _to_rgb_u8(development.positive_preview), LIVE_MAX_SIDE
         )
-    if getattr(development, "spectral_transmittance", None) is not None:
-        neg_full = _to_rgb_u8(development.positive_preview)
-    else:
-        neg_full = _to_rgb_u8(negative_lightbox_preview(development.transmittance))
+    neg_full = _color_or_bw_negative_view(development)
     neg_inspect = _downscale_rgb(neg_full, INSPECT_MAX_SIDE)
     neg_view = _downscale_rgb(neg_full, LIVE_MAX_SIDE)
     neg_ref = _downscale_rgb(neg_full, REF_MAX_SIDE)

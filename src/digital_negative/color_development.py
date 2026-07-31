@@ -95,7 +95,11 @@ def _apply_interimage(densities: np.ndarray, matrix: np.ndarray | None) -> np.nd
 
 
 def _preview_from_spectral_T(transmittance: np.ndarray, *, invert: bool) -> np.ndarray:
-    """Spectral T → display sRGB. invert=True for orange-masked neg lightbox look."""
+    """Spectral T → display sRGB.
+
+    ``invert=False`` — light-table view of the negative (C-41 orange mask).
+    ``invert=True`` — approximate positive scan / optical invert for inspection.
+    """
     xyz = spectral_to_xyz(transmittance)
     if invert:
         # Approximate optical print / scan invert for inspection.
@@ -107,6 +111,11 @@ def _preview_from_spectral_T(transmittance: np.ndarray, *, invert: bool) -> np.n
         xyz = xyz / max(float(np.percentile(xyz, 99.0)), 1e-4)
     rgb = encode_srgb(rgb_display_from_xyz(xyz))
     return np.clip(rgb, 0.0, 1.0).astype(np.float32)
+
+
+def color_negative_lightbox_preview(transmittance: np.ndarray) -> np.ndarray:
+    """C-41 spectral transmittance as seen on a light table (orange mask, not inverted)."""
+    return _preview_from_spectral_T(transmittance, invert=False)
 
 
 def develop_color(
