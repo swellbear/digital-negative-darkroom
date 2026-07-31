@@ -1385,6 +1385,23 @@ body.drawer-collapsed #drawer_host {
   max-width: 100% !important;
   min-width: 0 !important;
 }
+/* Gradio slider min/max captions overflow the 190px Modules column and spawn
+   a horizontal scrollbar under Straighten — same fix as the left drawer. */
+#module_panel .min_value,
+#module_panel .max_value,
+#module_panel .min-val,
+#module_panel .max-val,
+#module_panel span.min,
+#module_panel span.max {
+  display: none !important;
+}
+#module_panel [data-testid="slider"],
+#module_panel .slider-container,
+#module_panel .block.padded {
+  overflow-x: hidden !important;
+  max-width: 100% !important;
+  width: 100% !important;
+}
 body.module-collapsed #module_panel {
   flex-basis: 0 !important;
   width: 0 !important;
@@ -2181,6 +2198,13 @@ UI_JS = """
       try { acc.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
     }, 60);
   };
+  const closeModule = (id) => {
+    const acc = document.getElementById(id);
+    const lw = acc && acc.querySelector('.label-wrap');
+    if (!lw) return;
+    if (lw.classList.contains('open')) lw.click();
+    if (acc) acc.setAttribute('data-mod-open', '0');
+  };
   // Module accordion bodies mount lazily on first open, so a control inside
   // one may not exist in the DOM the instant its module opens. Poll briefly.
   const waitForEl = (selector, fn, tries = 10) => {
@@ -2799,12 +2823,25 @@ UI_JS = """
     window.addEventListener('resize', syncOverlay);
   };
 
+  // Flush the interactive box into #crop_rect before Gradio reads Apply inputs.
+  document.addEventListener('click', (e) => {
+    const t = e.target;
+    if (!(t instanceof Element)) return;
+    if (!t.closest || !t.closest('#apply_framing_btn')) return;
+    try { writeCropRectBox(); } catch (_) {}
+  }, true);
+
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (!(t instanceof Element)) return;
     if (t.closest && t.closest('#preview_tool')) {
       syncPreviewToolClasses();
       syncOverlay();
+      // Server Apply sets preview_tool → print; close the crop accordion too.
+      if (readPreviewTool() !== 'frame') {
+        try { closeModule('mod_crop'); } catch (_) {}
+        window.__cropBox = { x: 0, y: 0, w: 1, h: 1 };
+      }
       return;
     }
     if (!t.closest || !t.closest('#crop_ratio')) return;
@@ -2878,8 +2915,13 @@ UI_JS = """
     if (n === 'frame') {
       setPreviewToolValue('frame');
       try { openModule('mod_crop'); } catch (_) {}
-    } else if (n === 'print') {
-      setPreviewToolValue('print');
+    } else {
+      // Leaving Frame (Apply framing → Develop, or another rail) closes crop.
+      if (n === 'print' || readPreviewTool() === 'frame') {
+        setPreviewToolValue('print');
+      }
+      try { closeModule('mod_crop'); } catch (_) {}
+      window.__cropBox = { x: 0, y: 0, w: 1, h: 1 };
     }
   };
 
@@ -5042,7 +5084,11 @@ def rotate_working(turns_cw: int, state):
 
 
 def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
-    """Apply fine straighten + interactive crop box from the geometry base."""
+    """Apply fine straighten + interactive crop box from the geometry base.
+
+    Bakes the crop into the working DN / photo bases, refreshes the live
+    preview, exits Frame tool mode, and resets the crop UI to a full frame.
+    """
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
     state = _ensure_geometry_bases(state)
@@ -5072,9 +5118,11 @@ def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
         raise gr.Error("Cropped image is too small.")
 
     dn = state["dn"]
-    dn.image = framed
+    dn.image = np.asarray(framed).copy()
+    # New baseline — further Frame work / Reset starts from this crop.
+    state["geometry_base"] = np.asarray(framed).copy()
     ingest = dn.metadata.setdefault("ingest", {})
-    ingest["straighten_degrees"] = deg
+    ingest["straighten_degrees"] = 0.0
     ingest["crop"] = {
         "left": left,
         "top": top,
@@ -5082,6 +5130,7 @@ def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
         "bottom": bottom,
         "ratio": ratio,
         "rect": str(crop_rect or DEFAULT_CROP_RECT),
+        "applied": True,
     }
 
     orig_base = state.get("original_base")
@@ -5096,6 +5145,7 @@ def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
             fill=0.0,
         )
         orig_u8 = np.clip(orig_framed, 0, 255).astype(np.uint8)
+        state["original_base"] = orig_u8
         state["original_view"] = _downscale_rgb(orig_u8, LIVE_MAX_SIDE)
         state["original_inspect"] = _downscale_rgb(orig_u8, INSPECT_MAX_SIDE)
         state["original_ref"] = _downscale_rgb(orig_u8, REF_MAX_SIDE)
@@ -5132,12 +5182,16 @@ def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
         f"{_stage_banner('development', _locks(state), state)}\n\n"
         f"**Framed** — straighten {deg:+.2f}° · ratio `{ratio}` · "
         f"trim L{left*100:.0f}% T{top*100:.0f}% R{right*100:.0f}% B{bottom*100:.0f}%.  \n"
-        f"_Develop/Print unlocked — Commit Develop when the crop looks right._\n\n"
+        f"_Crop applied as the new preview. Develop/Print unlocked — "
+        f"**Commit Develop** when it looks right._\n\n"
         f"{_history_md(dn)}"
     )
     state["summary_cache"] = summary
     state["dirty"] = True
-    rect_echo = str(crop_rect or DEFAULT_CROP_RECT)
+    crop_done_hint = (
+        "_**Framing applied** — preview updated. Crop tool closed. "
+        "Open **Crop & straighten** again to refine._"
+    )
     return (
         _viewer_frame(state, live=state.get("live_rgb")),
         state.get("original_ref"),
@@ -5151,9 +5205,12 @@ def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
         gr.update(open=True),
         gr.update(open=True),
         state,
-        deg,
-        rect_echo,
-        ratio,
+        0.0,
+        DEFAULT_CROP_RECT,
+        "free",
+        gr.update(value="print"),
+        "develop",
+        crop_done_hint,
     )
 
 
@@ -5200,6 +5257,10 @@ def reset_crop_straighten(state):
         f"{_history_md(dn)}"
     )
     state["summary_cache"] = summary
+    reset_hint = (
+        "_Framing reset to full frame / 0°. Drag the box or **Auto crop** again, "
+        "then **Apply framing**._"
+    )
     return (
         _viewer_frame(state, live=state.get("live_rgb")),
         state.get("original_ref"),
@@ -5216,6 +5277,9 @@ def reset_crop_straighten(state):
         0.0,
         DEFAULT_CROP_RECT,
         "free",
+        gr.update(value="frame"),
+        "frame",
+        reset_hint,
     )
 
 
@@ -7912,7 +7976,11 @@ def build_ui() -> gr.Blocks:
                     )
                     with gr.Row():
                         apply_framing_btn = gr.Button(
-                            "Apply framing", interactive=False, variant="secondary", size="sm"
+                            "Apply framing",
+                            interactive=False,
+                            variant="secondary",
+                            size="sm",
+                            elem_id="apply_framing_btn",
                         )
                         reset_framing_btn = gr.Button("Reset framing", interactive=False, size="sm")
 
@@ -8425,6 +8493,8 @@ def build_ui() -> gr.Blocks:
             develop_btn, unlock_develop_btn, print_btn, unlock_print_btn,
             develop_acc, print_acc, state,
             straighten_deg, crop_rect, crop_ratio,
+            # Apply exits Frame → print preview + Develop drawer + closes crop UI.
+            preview_tool, active_drawer, crop_hint,
         ]
         apply_framing_btn.click(
             fn=apply_crop_straighten,
