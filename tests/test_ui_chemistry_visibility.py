@@ -46,7 +46,7 @@ def test_chemistry_mode_change_hides_mg_shows_cc():
     mod = _load_ui()
     outs = mod.on_chemistry_mode_change("color")
     # film, developer, minutes, ei, paper, help, 11 print vis, then Instant knobs…
-    assert len(outs) == 6 + 11 + 9
+    assert len(outs) == 6 + 11 + 10
     help_u = _upd(outs[5])
     assert "Color Chemistry" in str(help_u.get("value", ""))
     # print_grade is first visibility slot after help
@@ -65,13 +65,25 @@ def test_chemistry_mode_change_instant_shows_process_hides_print():
     if not mod.FILM_CHOICES_INSTANT:
         return
     outs = mod.on_chemistry_mode_change("instant")
-    assert len(outs) == 6 + 11 + 9
+    assert len(outs) == 6 + 11 + 10
     assert "Instant" in str(_upd(outs[5]).get("value", ""))
     assert _upd(outs[6]).get("visible") is False  # print_grade
     assert _upd(outs[17]).get("visible") is True  # process_temp
-    assert _upd(outs[24]).get("visible") is False  # print_drawer
-    assert "Commit pull" in str(_upd(outs[25]).get("value", ""))
+    assert _upd(outs[21]).get("visible") is False  # contrast_filter
+    assert _upd(outs[22]).get("visible") is False  # scene_exposure
+    assert _upd(outs[23]).get("visible") is False  # halation
+    assert _upd(outs[25]).get("visible") is False  # print_drawer
+    assert "Commit pull" in str(_upd(outs[26]).get("value", ""))
     assert _upd(outs[4]).get("visible") is False  # paper
+
+
+def test_develop_commit_row_outside_accordion():
+    """Commit pull must not sit inside the scrollable accordion (clips More)."""
+    source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
+    assert 'elem_id="develop_commit_row"' in source
+    assert "Outside the accordion so Instant" in source
+    assert "#drawer_host #drawer_develop.is-open" in source
+    assert "overflow-y: auto !important" in source.split("#drawer_host #drawer_develop #acc_develop")[1][:400]
 
 
 def test_path_and_strip_labels_for_e6_and_c41():
@@ -95,7 +107,7 @@ def test_path_and_strip_labels_for_e6_and_c41():
     assert "light table" in mod._viewer_label_for("negative", c41_state).lower()
 
     banner = mod._stage_banner("development", ["ingest"], e6_state)
-    assert "`E-6`" in banner
+    assert "**E-6**" in banner  # bold chip — markdown code was white-on-white
     assert "Live exploring" in banner
 
 

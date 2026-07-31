@@ -425,9 +425,9 @@ footer, .gradio-container footer {
   flex-wrap: nowrap !important;
   overflow-x: hidden !important;
   overflow-y: auto !important;
-  /* Extra bottom pad so Commit Print/Develop aren't clipped at the scroll end
-     (Color Print is tall: CC row + split-grade + strips). */
-  padding: 4px 6px 56px !important;
+  /* Commit rows are pinned under the stage accordion now — only a light
+     bottom pad is needed on the host itself. */
+  padding: 4px 6px 8px !important;
   box-sizing: border-box !important;
   border-right: 1px solid var(--dr-border) !important;
   background: var(--dr-bg-panel) !important;
@@ -436,20 +436,34 @@ footer, .gradio-container footer {
   scrollbar-gutter: stable !important;
   transition: flex-basis 0.18s ease, width 0.18s ease, max-width 0.18s ease, padding 0.18s ease, opacity 0.15s ease !important;
 }
-/* Keep stage commit actions reachable while scrolling a long Print drawer. */
+/* Commit / Unlock sit outside the stage accordion so opening Dev → More
+   never clips EI / shutter under a sticky bar — Instant's extra process
+   knobs made that especially easy to hit. */
+#drawer_host #drawer_develop.is-open,
+#drawer_host #drawer_print.is-open {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+#drawer_host #drawer_develop #acc_develop,
+#drawer_host #drawer_print #acc_print {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  padding-bottom: 12px !important;
+}
 #drawer_host #print_commit_row,
 #drawer_host #develop_commit_row {
-  position: sticky !important;
-  bottom: 0 !important;
+  position: static !important;
+  flex: 0 0 auto !important;
   z-index: 6 !important;
-  margin: 6px 0 0 !important;
-  padding: 6px 0 4px !important;
-  background: linear-gradient(
-    to bottom,
-    rgba(18, 18, 20, 0) 0%,
-    var(--dr-bg-panel) 28%,
-    var(--dr-bg-panel) 100%
-  ) !important;
+  margin: 0 !important;
+  padding: 8px 0 4px !important;
+  background: var(--dr-bg-panel) !important;
   border-top: 1px solid var(--dr-border) !important;
   gap: 4px !important;
 }
@@ -470,6 +484,11 @@ footer, .gradio-container footer {
   max-width: 100% !important;
   min-width: 0 !important;
   box-sizing: border-box !important;
+}
+/* Let Dev/Print fill the rail so their accordion can scroll above Commit. */
+#drawer_host > div {
+  height: 100% !important;
+  min-height: 0 !important;
 }
 #drawer_host .block,
 #drawer_host .form,
@@ -4281,6 +4300,7 @@ def on_chemistry_mode_change(mode: str, split_on=False):
             step=0.05,
         ),
         gr.update(visible=not is_instant),  # contrast_filter
+        gr.update(visible=not is_instant),  # scene_exposure (reciprocity; tank path)
         gr.update(visible=not is_instant),  # halation
         gr.update(visible=not is_instant),  # print_exposure
         gr.update(visible=not is_instant),  # print drawer host
@@ -8269,11 +8289,13 @@ def build_ui() -> gr.Blocks:
                             halation = gr.Slider(
                                 0.0, 1.5, value=0.0, step=0.05, label="Halation"
                             )
-                        with gr.Row(elem_id="develop_commit_row"):
-                            develop_btn = gr.Button(
-                                "Commit Develop", interactive=False, variant="primary", size="sm"
-                            )
-                            unlock_develop_btn = gr.Button("Unlock", interactive=False, size="sm")
+                    # Outside the accordion so Instant's tall Dev stack can scroll
+                    # without burying EI / shutter under Commit pull.
+                    with gr.Row(elem_id="develop_commit_row"):
+                        develop_btn = gr.Button(
+                            "Commit Develop", interactive=False, variant="primary", size="sm"
+                        )
+                        unlock_develop_btn = gr.Button("Unlock", interactive=False, size="sm")
 
                 with gr.Group(elem_id="drawer_print", elem_classes=["drawer-panel"]) as print_drawer:
                     with gr.Accordion("Print", open=True, elem_id="acc_print") as print_acc:
@@ -8357,11 +8379,6 @@ def build_ui() -> gr.Blocks:
                             border_frac = gr.Slider(
                                 0.0, 0.12, value=0.0, step=0.005, label="Border"
                             )
-                        with gr.Row(elem_id="print_commit_row"):
-                            print_btn = gr.Button(
-                                "Commit Print", interactive=False, variant="primary", size="sm"
-                            )
-                            unlock_print_btn = gr.Button("Unlock", interactive=False, size="sm")
                         # One visible trigger. With a single package it
                         # downloads straight away; with several it opens a
                         # popup listing them. The real DownloadButtons sit
@@ -8384,6 +8401,11 @@ def build_ui() -> gr.Blocks:
                         dl_pkg_negative = gr.DownloadButton(
                             "negative", size="sm", elem_id="dl_pkg_negative"
                         )
+                    with gr.Row(elem_id="print_commit_row"):
+                        print_btn = gr.Button(
+                            "Commit Print", interactive=False, variant="primary", size="sm"
+                        )
+                        unlock_print_btn = gr.Button("Unlock", interactive=False, size="sm")
 
                 with gr.Group(elem_id="drawer_frame", elem_classes=["drawer-panel"]):
                     with gr.Accordion("Frame", open=True, elem_id="acc_frame") as frame_acc:
@@ -8886,6 +8908,7 @@ def build_ui() -> gr.Blocks:
                 instant_warmth,
                 grain,
                 contrast_filter,
+                scene_exposure,
                 halation,
                 print_exposure,
                 print_drawer,
