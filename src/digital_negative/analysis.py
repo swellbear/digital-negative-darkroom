@@ -42,6 +42,14 @@ def reflectance_to_zone(reflectance: np.ndarray | float) -> np.ndarray | float:
     return np.clip(zone, 0.0, float(ZONE_COUNT - 1))
 
 
+def _as_mono_reflectance(reflectance: np.ndarray) -> np.ndarray:
+    """Collapse HxWx3 print reflectance to luminance for Zone tools."""
+    r = np.asarray(reflectance, dtype=np.float64)
+    if r.ndim >= 3 and r.shape[-1] >= 3:
+        return r[..., :3].mean(axis=-1)
+    return r
+
+
 def scene_log_exposure(dn: DigitalNegative, *, mid_log_e: float = 2.2) -> np.ndarray:
     """Scene relative log-E, anchored exactly as :func:`develop` does."""
     return linear_to_relative_log_exposure(dn.to_luminance(), mid_log_e=mid_log_e)
@@ -380,22 +388,36 @@ def curve_summary_markdown(report: CurveReport) -> str:
 
 
 
+def _scalar_at(plane: np.ndarray, y: int, x: int) -> float:
+    """Sample a mono or RGB plane as a single reflectance/density value."""
+    pix = plane[y, x]
+    arr = np.asarray(pix, dtype=np.float64)
+    if arr.ndim == 0:
+        return float(arr)
+    # Color prints: use mean channel reflectance as Zone meter luminance.
+    return float(arr.reshape(-1).mean())
+
+
 def spot_at(
     reflectance: np.ndarray | None,
     density: np.ndarray | None,
     nx: float,
     ny: float,
 ) -> dict[str, float | str]:
-    """Sample Zone / density under a normalised print pointer."""
+    """Sample Zone / density under a normalised print pointer.
+
+    Accepts mono (H×W) or color (H×W×3) reflectance / density maps.
+    """
     if reflectance is None or np.asarray(reflectance).size == 0:
         return {"ok": 0}
     r = np.asarray(reflectance, dtype=np.float64)
     h, w = r.shape[:2]
     x = int(np.clip(round(float(nx) * (w - 1)), 0, w - 1))
     y = int(np.clip(round(float(ny) * (h - 1)), 0, h - 1))
-    refl = float(r[y, x])
-    if density is not None and np.asarray(density).shape[:2] == (h, w):
-        dens = float(np.asarray(density, dtype=np.float64)[y, x])
+    refl = _scalar_at(r, y, x)
+    dens_arr = None if density is None else np.asarray(density, dtype=np.float64)
+    if dens_arr is not None and dens_arr.shape[:2] == (h, w):
+        dens = _scalar_at(dens_arr, y, x)
     else:
         dens = float(-np.log10(max(refl, 1e-6)))
     zone = float(reflectance_to_zone(refl))
@@ -434,7 +456,7 @@ def render_print_histogram(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    r = np.asarray(reflectance, dtype=np.float64).reshape(-1)
+    r = _as_mono_reflectance(reflectance).reshape(-1)
     r = r[np.isfinite(r)]
     if r.size == 0:
         return None
@@ -501,7 +523,8 @@ def suggest_tone_fit(
             "message": "No print yet — Commit Develop first.",
         }
 
-    zones = np.asarray(reflectance_to_zone(reflectance), dtype=np.float64).reshape(-1)
+    mono = _as_mono_reflectance(reflectance)
+    zones = np.asarray(reflectance_to_zone(mono), dtype=np.float64).reshape(-1)
     zones = zones[np.isfinite(zones)]
     if zones.size < 16:
         return {
@@ -603,7 +626,7 @@ def apply_clipping_overlay(
     rgb = np.asarray(preview_rgb)
     if reflectance is None or rgb.size == 0:
         return rgb
-    r = np.asarray(reflectance, dtype=np.float32)
+    r = _as_mono_reflectance(reflectance).astype(np.float32)
     if r.shape[:2] != rgb.shape[:2]:
         try:
             from PIL import Image

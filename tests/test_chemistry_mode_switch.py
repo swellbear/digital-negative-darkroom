@@ -37,7 +37,8 @@ def test_chemistry_mode_switch_keeps_minutes_in_slider_bounds():
     mod = _load_ui()
     # Simulate leaving Tri-X D-76 (7.75) and entering Color — previously Gradio
     # raised when max shrank to C-41's 5.5 while 7.75 was still in the payload.
-    film_u, dev_u, minutes_u, ei_u, paper_u = mod.on_chemistry_mode_change("color")
+    outs = mod.on_chemistry_mode_change("color")
+    film_u, dev_u, minutes_u, ei_u, paper_u = outs[:5]
     minutes = _update_dict(minutes_u)
     assert minutes.get("minimum") == mod._DEV_TIME_SLIDER_MIN
     assert minutes.get("maximum") == mod._DEV_TIME_SLIDER_MAX
@@ -49,8 +50,8 @@ def test_chemistry_mode_switch_keeps_minutes_in_slider_bounds():
     assert film.get("value") in {c[1] for c in mod.FILM_CHOICES_COLOR}
 
     # Round-trip back to B&W still keeps the wide stable span.
-    _f, _d, minutes_bw, _ei, _p = mod.on_chemistry_mode_change("bw")
-    minutes_bw = _update_dict(minutes_bw)
+    outs_bw = mod.on_chemistry_mode_change("bw")
+    minutes_bw = _update_dict(outs_bw[2])
     assert minutes_bw.get("maximum") == mod._DEV_TIME_SLIDER_MAX
     assert mod._DEV_TIME_SLIDER_MIN <= float(minutes_bw["value"]) <= mod._DEV_TIME_SLIDER_MAX
 

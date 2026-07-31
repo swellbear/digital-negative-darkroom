@@ -369,8 +369,23 @@ footer, .gradio-container footer {
   color: var(--dr-accent-strong) !important;
   background: var(--dr-accent-soft) !important;
   border-color: var(--dr-accent-border) !important;
+  box-shadow: inset 2px 0 0 0 var(--dr-accent-strong) !important;
+  font-weight: 650 !important;
+}
+#icon_rail button.rail-active .rail-label {
+  color: var(--dr-accent-strong) !important;
 }
 #icon_rail .rail-spacer { flex: 1 1 auto !important; min-height: 8px !important; }
+#chemistry_help {
+  margin: 0 0 6px !important;
+  padding: 0 !important;
+  font-size: var(--dr-fs-label) !important;
+  line-height: 1.25 !important;
+  color: var(--dr-text-dim) !important;
+}
+#chemistry_help p {
+  margin: 0 !important;
+}
 
 /* Drawer host — one panel visible; compressed.
    Keep every nested block inside the rail width — Gradio slider min/max
@@ -3225,8 +3240,8 @@ def _display_live_rgb(state, live=None):
 
 def read_spot(spot_pos, state):
     """Zone / density under the print pointer."""
-    if not state or state.get("print_draft") is None:
-        return "_Develop + print preview first, then hover the print._"
+    if not state or state.get("dn") is None:
+        return "_Add a photo and wait for Live print, then hover the print._"
     text = str(spot_pos or "").strip()
     if not text or "," not in text:
         return "_Hover the print for Zone / density._"
@@ -3236,6 +3251,10 @@ def read_spot(spot_pos, state):
     except Exception:
         return "_Hover the print for Zone / density._"
     refl, dens = _print_maps(state)
+    if refl is None:
+        if state.get("live_rgb") is not None:
+            return "_Live print is showing — wait a moment for the meter map, or nudge a Print control._"
+        return "_Wait for Live print, then hover the print._"
     return spot_markdown(spot_at(refl, dens, nx, ny))
 
 
@@ -3260,7 +3279,9 @@ def refresh_inspect_tools(clip_hi, clip_lo, state):
 def auto_fit_print_tones(print_exposure, print_grade, state):
     """One-click: pull blown / crushed tones back onto the paper."""
     if not state or state.get("print_draft") is None:
-        raise gr.Error("Run a print preview first (Commit Develop, then adjust Print).")
+        if state and state.get("live_rgb") is not None:
+            raise gr.Error("Print meter map not ready — nudge Base exposure once, then Fit again.")
+        raise gr.Error("Wait for Live print (Develop + Print controls), then Fit to paper.")
     refl, _ = _print_maps(state)
     fit = suggest_tone_fit(
         refl,
@@ -3273,7 +3294,7 @@ def auto_fit_print_tones(print_exposure, print_grade, state):
     # Leave the warning overlays on so the result is immediately readable.
     hist = _history_md(state["dn"]) if state.get("dn") is not None else ""
     summary = (
-        f"{_stage_banner(state.get('stage', 'print'), _locks(state))}\n\n"
+        f"{_stage_banner(state.get('stage', 'print'), _locks(state), state)}\n\n"
         f"{fit['message']}\n\n{hist}"
     )
     state = {
@@ -3543,7 +3564,7 @@ def on_developer_change(film_id: str, developer_id: str):
 
 
 def on_chemistry_mode_change(mode: str):
-    """Swap film/paper catalogs when toggling B&W vs Color Chemistry."""
+    """Swap film/paper catalogs and Print control visibility for B&W vs Color."""
     mode = str(mode or "bw").lower()
     if mode not in {"bw", "color"}:
         mode = "bw"
@@ -3565,12 +3586,31 @@ def on_chemistry_mode_change(mode: str):
     chem_id = default_chemistry_id(profile)
     chem_choices = chemistry_choices(profile)
     paper_id = paper_choices[0][1] if paper_choices else None
+    # Visibility for mode-specific Print controls (order matches wiring).
+    vis = []
+    for key in (
+        "print_grade",
+        "print_contrast",
+        "cc_cyan",
+        "cc_magenta",
+        "cc_yellow",
+        "split_grade",
+        "soft_grade",
+        "hard_grade",
+        "soft_seconds",
+        "hard_seconds",
+        "tone",
+    ):
+        show = _print_key_visible(mode, key)
+        vis.append(gr.update(visible=bool(show)))
     return (
         gr.update(choices=film_choices, value=film_id),
         gr.update(choices=chem_choices, value=chem_id),
         _chem_time_update(film_id, chem_id, reset_to_normal=True),
         gr.update(value=float(profile.iso)),
         gr.update(choices=paper_choices, value=paper_id),
+        gr.update(value=_chemistry_help_md(mode)),
+        *vis,
     )
 
 
@@ -3773,6 +3813,43 @@ _PRINT_CONTROL_KEYS = (
     "cc_yellow",
 )
 
+# Print controls that only apply in one chemistry mode (others stay shared).
+_BW_ONLY_PRINT_KEYS = frozenset(
+    {
+        "print_grade",
+        "print_contrast",
+        "split_grade",
+        "soft_grade",
+        "hard_grade",
+        "soft_seconds",
+        "hard_seconds",
+        "tone",
+    }
+)
+_COLOR_ONLY_PRINT_KEYS = frozenset({"cc_cyan", "cc_magenta", "cc_yellow"})
+
+
+def _chemistry_help_md(mode: str) -> str:
+    if str(mode or "bw").lower() == "color":
+        return (
+            "_**Color Chemistry** — Develop is C-41 / E-6; Print is RA-4 "
+            "(CC filtration) or slide finish._"
+        )
+    return (
+        "_**Black & White Chemistry** — Develop is tank chemistry; "
+        "Print is multigrade (MG grade / split-grade)._"
+    )
+
+
+def _print_key_visible(mode: str, key: str) -> bool | None:
+    """Return visibility for a print control key, or None to leave unchanged."""
+    is_color = str(mode or "bw").lower() == "color"
+    if key in _BW_ONLY_PRINT_KEYS:
+        return not is_color
+    if key in _COLOR_ONLY_PRINT_KEYS:
+        return is_color
+    return None
+
 
 def _default_controls_dict() -> dict:
     """Fresh Develop/Print defaults for a newly ingested roll frame."""
@@ -3895,16 +3972,25 @@ def _control_updates(state):
     )
     print_u = []
     for key in _PRINT_CONTROL_KEYS:
+        vis = _print_key_visible(mode, key)
         if key == "paper_id":
             pid = c.get("paper_id")
             pids = {x[1] for x in paper_choices}
             if pid not in pids and paper_choices:
                 pid = paper_choices[0][1]
-            print_u.append(
-                gr.update(choices=paper_choices, value=pid, interactive=print_on)
-            )
+            kwargs = {
+                "choices": paper_choices,
+                "value": pid,
+                "interactive": print_on,
+            }
+            if vis is not None:
+                kwargs["visible"] = vis
+            print_u.append(gr.update(**kwargs))
         else:
-            print_u.append(gr.update(value=c[key], interactive=print_on))
+            kwargs = {"value": c[key], "interactive": print_on}
+            if vis is not None:
+                kwargs["visible"] = vis
+            print_u.append(gr.update(**kwargs))
     return head + rest_dev + tuple(print_u)
 
 
@@ -4045,7 +4131,7 @@ def _build_ingest_frame(path: str | None) -> dict:
     original_inspect = _downscale_rgb(original_full, INSPECT_MAX_SIDE)
     original_ref = _downscale_rgb(original_full, REF_MAX_SIDE)
     summary = (
-        f"{_stage_banner('development', ['ingest'])}\n\n"
+        f"{_stage_banner('development', ['ingest'], state)}\n\n"
         f"**Upload locked** — `{dn.metadata['source']['original_filename']}`  \n"
         f"_Use the live preview tools: **Frame** to crop, **Inspect** to zoom._\n\n"
         f"{_history_md(dn)}"
@@ -4184,64 +4270,80 @@ def _history_md(dn) -> str:
     # Marker split by _split_summary; accordion already titled "Decision log".
     lines = [
         "---DECISION-LOG---",
-        "_Locked decisions only — exploring does not write here._",
+        "_Commits only — live exploration is not logged._",
         "",
     ]
     if not hist:
-        lines.append("_No locked decisions yet. Commit a stage to record it._")
+        lines.append("_No commits yet._")
     for i, h in enumerate(hist, 1):
         op = h.get("op", "?")
         if op == "ingest":
-            lines.append(f"{i}. **Upload** — `{_short_name(h.get('source'), keep=42)}`")
-        elif op == "develop":
-            chem = h.get("developer_name") or h.get("developer_id")
+            lines.append(f"{i}. **Upload** · `{_short_name(h.get('source'), keep=36)}`")
+        elif op in {"develop", "develop_color"}:
+            chem = h.get("developer_name") or h.get("developer_id") or "?"
             if h.get("development_minutes") is not None:
                 time_bit = f"{float(h['development_minutes']):g} min"
             else:
-                time_bit = f"rel={h.get('relative_time')}"
-            film = _short_name(h.get("film_profile_id"), keep=28)
+                time_bit = f"rel {h.get('relative_time')}"
+            film = _short_name(h.get("film_profile_id"), keep=24)
+            proc = h.get("process")
+            proc_bit = f" · {str(proc).upper()}" if proc else ""
             lines.append(
-                f"{i}. **Develop** — `{film}`  \n"
-                f"   {chem} · {time_bit} · N±={h.get('contrast_modifier')} · "
-                f"grain={h.get('grain_strength')}"
+                f"{i}. **Develop** · `{film}` · {chem} · {time_bit}"
+                f"{proc_bit} · N± {h.get('contrast_modifier')} · grain {h.get('grain_strength')}"
             )
-        elif op == "print":
+        elif op in {"print", "print_color"}:
             db = h.get("dodge_burn") or []
-            db_bit = f" · {len(db)} local pass(es)" if db else ""
+            db_bit = f" · {len(db)} local" if db else ""
             if h.get("base_exposure_seconds") is not None:
                 stops = float(h.get("overall_exposure", 0.0))
-                exp_bit = f"{float(h['base_exposure_seconds']):g}s (≈ {stops:+.2f} stops)"
+                exp_bit = f"{float(h['base_exposure_seconds']):g}s"
+                if stops:
+                    exp_bit += f" ({stops:+.2f} st)"
             else:
-                exp_bit = f"{h.get('overall_exposure'):+g} stops"
-            paper = _short_name(h.get("paper_id"), keep=28)
+                exp_bit = f"{h.get('overall_exposure'):+g} st"
+            paper = _short_name(h.get("paper_id"), keep=22)
+            # Color CC pack if present on the history / filtration.
+            cc = h.get("cc_cyan"), h.get("cc_magenta"), h.get("cc_yellow")
+            if any(v is not None for v in cc):
+                filt = (
+                    f"CC "
+                    f"C{float(h.get('cc_cyan') or 0):.0f}/"
+                    f"M{float(h.get('cc_magenta') or 0):.0f}/"
+                    f"Y{float(h.get('cc_yellow') or 0):.0f}"
+                )
+            elif h.get("grade") is not None:
+                filt = f"g{h.get('grade')}"
+            else:
+                filt = "—"
+            nudge = h.get("contrast")
+            nudge_bit = (
+                f" · filt {nudge}" if nudge not in (None, 0, 0.0) else ""
+            )
             lines.append(
-                f"{i}. **Print** — `{paper}`  \n"
-                f"   grade {h.get('grade')} · exp {exp_bit}"
-                + (f" · nudge={h.get('contrast')}" if h.get("contrast") not in (None, 0, 0.0) else "")
-                + db_bit
+                f"{i}. **Print** · `{paper}` · {filt} · {exp_bit}{nudge_bit}{db_bit}"
             )
         elif op == "unlock":
             stage = h.get("stage", "?")
             label = {"development": "Develop", "print": "Print", "ingest": "Upload"}.get(stage, stage)
-            lines.append(f"{i}. **← Unlocked {label}** — previous lock opened for revision")
+            lines.append(f"{i}. **Unlock {label}**")
         elif op == "rotate":
             lines.append(
-                f"{i}. **Rotate** — {h.get('degrees_cw'):+g}° "
-                f"(total {h.get('total_degrees')}° CW)"
+                f"{i}. **Rotate** · {h.get('degrees_cw'):+g}° "
+                f"(total {h.get('total_degrees')}°)"
             )
         elif op == "frame":
             ratio = h.get("ratio") or "free"
             lines.append(
-                f"{i}. **Crop & straighten** — "
-                f"straighten {float(h.get('straighten_degrees', 0)):+.2f}° · "
-                f"ratio `{ratio}` · "
-                f"trim L{float(h.get('crop_left', 0))*100:.0f}% "
-                f"T{float(h.get('crop_top', 0))*100:.0f}% "
-                f"R{float(h.get('crop_right', 0))*100:.0f}% "
-                f"B{float(h.get('crop_bottom', 0))*100:.0f}%"
+                f"{i}. **Frame** · {float(h.get('straighten_degrees', 0)):+.1f}° · "
+                f"`{ratio}` · "
+                f"L{float(h.get('crop_left', 0))*100:.0f} "
+                f"T{float(h.get('crop_top', 0))*100:.0f} "
+                f"R{float(h.get('crop_right', 0))*100:.0f} "
+                f"B{float(h.get('crop_bottom', 0))*100:.0f}"
             )
         elif op == "frame_reset":
-            lines.append(f"{i}. **Reset framing** — back to post-ingest / last 90° orientation")
+            lines.append(f"{i}. **Reset frame**")
         else:
             lines.append(f"{i}. **{op}**")
     locks = dn.metadata.get("ui_state", {}).get("locked_stages", [])
@@ -4250,15 +4352,50 @@ def _history_md(dn) -> str:
         if s in locks:
             lock_labels.append({"ingest": "Upload", "development": "Develop", "print": "Print"}[s])
     lines.append("")
-    lines.append(f"**Currently locked:** {', '.join(lock_labels) or '—'}")
-    lines.append(
-        f"**Process seed:** `{dn.metadata.get('process_seed')}`  \n"
-        f"_Mild tank variation; same seed = repeatable._"
-    )
+    lines.append(f"**Locked:** {', '.join(lock_labels) or '—'} · seed `{dn.metadata.get('process_seed')}`")
     return "\n".join(lines)
 
 
-def _stage_banner(stage: str, locked: list | None = None) -> str:
+def _path_label(state) -> str:
+    """Short chemistry path tag for the ritual banner (B&W / C-41 / E-6 / Color)."""
+    dev = (state or {}).get("development")
+    proc = getattr(dev, "color_process", None) if dev is not None else None
+    if proc is None:
+        proc = (state or {}).get("color_process")
+    proc = str(proc or "").lower()
+    if proc == "c41":
+        return "C-41"
+    if proc == "e6":
+        return "E-6"
+    mode = (state or {}).get("chemistry_mode")
+    if not mode:
+        mode = ((state or {}).get("controls") or {}).get("chemistry_mode")
+    if str(mode or "bw").lower() == "color":
+        return "Color"
+    return "B&W"
+
+
+def _film_strip_short_label(mode: str, state=None) -> str:
+    """Filmstrip chip label — E-6 uses Slide instead of Negative."""
+    if mode == "negative":
+        path = _path_label(state)
+        if path == "E-6":
+            return "Slide"
+        if path == "C-41":
+            return "Neg"
+        return "Negative"
+    return STRIP_SHORT_LABELS.get(mode, mode)
+
+
+def _viewer_label_for(mode: str, state=None) -> str:
+    if mode == "negative" and _path_label(state) == "E-6":
+        return "Developed slide — click Live print below to swap back"
+    if mode == "negative" and _path_label(state) == "C-41":
+        return "Developed negative (light table) — click Live print below to swap back"
+    return _VIEWER_LABELS.get(mode, _VIEWER_LABELS["live"])
+
+
+def _stage_banner(stage: str, locked: list | None = None, state=None) -> str:
     """Ritual progress: which stage you're working, which are locked."""
     steps = [("ingest", "Upload"), ("development", "Develop"), ("print", "Print")]
     order = {"ingest": 0, "development": 1, "print": 2}
@@ -4276,7 +4413,11 @@ def _stage_banner(stage: str, locked: list | None = None) -> str:
             parts.append(f"{n}. {label} — locked")
         else:
             parts.append(f"{n}. {label}")
-    return " → ".join(parts)
+    path = _path_label(state) if state is not None else None
+    banner = " → ".join(parts)
+    if path:
+        return f"{banner} · `{path}`"
+    return banner
 
 
 def _locks(state) -> list:
@@ -4359,7 +4500,7 @@ def _strip_updates(state, *, live=None, original=None, latent=None, neg=None):
             value=_mode_thumb(
                 state, mode, live=live, original=original, latent=latent, neg=neg
             ),
-            label=STRIP_SHORT_LABELS.get(mode, mode),
+            label=_film_strip_short_label(mode, state),
         )
         for mode in _strip_slots(state)
     ]
@@ -4383,7 +4524,7 @@ def _viewer_frame(state, live=None, original=None, latent=None, neg=None):
     else:
         mode = "live"
         img = _display_live_rgb(state, live=live)
-    return gr.update(value=img, label=_VIEWER_LABELS.get(mode, _VIEWER_LABELS["live"]))
+    return gr.update(value=img, label=_viewer_label_for(mode, state))
 
 
 def _inspect_frame(state, live=None):
@@ -4406,12 +4547,17 @@ def _inspect_frame(state, live=None):
         img = (state or {}).get("live_inspect")
         if img is None:
             img = live if live is not None else (state or {}).get("live_rgb")
-    label = {
-        "live": "Inspect — Live theoretical print (scroll-wheel zoom, drag to pan, double-click reset)",
-        "original": "Inspect — Original (scroll-wheel zoom, drag to pan, double-click reset)",
-        "latent": "Inspect — Latent DN (scroll-wheel zoom, drag to pan, double-click reset)",
-        "negative": "Inspect — Developed negative (scroll-wheel zoom, drag to pan, double-click reset)",
-    }.get(mode, "Inspect")
+    if mode == "negative" and _path_label(state) == "E-6":
+        label = "Inspect — Developed slide (scroll-wheel zoom, drag to pan, double-click reset)"
+    elif mode == "negative" and _path_label(state) == "C-41":
+        label = "Inspect — Developed negative / light table (scroll-wheel zoom, drag to pan, double-click reset)"
+    else:
+        label = {
+            "live": "Inspect — Live theoretical print (scroll-wheel zoom, drag to pan, double-click reset)",
+            "original": "Inspect — Original (scroll-wheel zoom, drag to pan, double-click reset)",
+            "latent": "Inspect — Latent DN (scroll-wheel zoom, drag to pan, double-click reset)",
+            "negative": "Inspect — Developed negative (scroll-wheel zoom, drag to pan, double-click reset)",
+        }.get(mode, "Inspect")
     return gr.update(value=img, label=label)
 
 
@@ -4462,13 +4608,18 @@ def swap_strip_slot(index: int):
         clicked = slots[index]
         slots[index] = state.get("viewer_mode", "live")
         state = {**state, "viewer_mode": clicked, "strip_slots": slots}
-        tip = {
-            "live": "_Live theoretical print. Use **Frame** to crop/straighten, **Inspect** to zoom._",
-            "original": "_Original in the preview — click it in the strip to swap back._",
-            "latent": "_Latent DN in the preview — click it in the strip to swap back._",
-            "negative": "_Developed negative in the preview — click it in the strip to swap back._",
-        }.get(clicked, "")
-        banner = _stage_banner(state.get("stage", "development"), _locks(state))
+        if clicked == "negative" and _path_label(state) == "E-6":
+            tip = "_Developed slide in the preview — click it in the strip to swap back._"
+        elif clicked == "negative" and _path_label(state) == "C-41":
+            tip = "_Orange light-table negative in the preview — click it in the strip to swap back._"
+        else:
+            tip = {
+                "live": "_Live theoretical print. Use **Frame** to crop/straighten, **Inspect** to zoom._",
+                "original": "_Original in the preview — click it in the strip to swap back._",
+                "latent": "_Latent DN in the preview — click it in the strip to swap back._",
+                "negative": "_Developed negative in the preview — click it in the strip to swap back._",
+            }.get(clicked, "")
+        banner = _stage_banner(state.get("stage", "development"), _locks(state), state)
         status = f"{banner}\n\n{tip}"
         slot_a, slot_b, slot_c = _strip_updates(state)
         return (
@@ -4637,7 +4788,7 @@ def rotate_working(turns_cw: int, state):
     )
     deg = ingest["rotation_degrees"]
     summary = (
-        f"{_stage_banner('development', _locks(state))}\n\n"
+        f"{_stage_banner('development', _locks(state), state)}\n\n"
         f"**Rotated {90 * int(turns_cw):+d}°** (total {deg}° CW).  \n"
         f"_Develop/Print unlocked — check orientation, then Commit Develop._\n\n"
         f"{_history_md(dn)}"
@@ -4751,7 +4902,7 @@ def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
         }
     )
     summary = (
-        f"{_stage_banner('development', _locks(state))}\n\n"
+        f"{_stage_banner('development', _locks(state), state)}\n\n"
         f"**Framed** — straighten {deg:+.2f}° · ratio `{ratio}` · "
         f"trim L{left*100:.0f}% T{top*100:.0f}% R{right*100:.0f}% B{bottom*100:.0f}%.  \n"
         f"_Develop/Print unlocked — Commit Develop when the crop looks right._\n\n"
@@ -4816,7 +4967,7 @@ def reset_crop_straighten(state):
         }
     )
     summary = (
-        f"{_stage_banner('development', _locks(state))}\n\n"
+        f"{_stage_banner('development', _locks(state), state)}\n\n"
         f"**Framing reset** — back to the last 90° orientation (no fine straighten/crop).  \n"
         f"_Develop/Print unlocked._\n\n"
         f"{_history_md(dn)}"
@@ -5080,7 +5231,7 @@ def commit_ingest(sample_path, file_obj, state):
     summary = state["summary_cache"]
     if n > 1 or added > 1:
         summary = (
-            f"{_stage_banner('development', ['ingest'])}\n\n"
+            f"{_stage_banner('development', ['ingest'], state)}\n\n"
             f"**Added {added} to Roll** — frame {new_index + 1}/{n} active  \n"
             f"`{state['dn'].metadata['source']['original_filename']}`  \n"
             f"_Open the **Roll** tab to switch or remove frames._\n\n"
@@ -5245,7 +5396,7 @@ def remove_from_roll(index_raw, state):
     state = {**roll[new_idx], "roll": roll, "roll_index": new_idx}
     n = len(roll)
     summary = (
-        f"{_stage_banner(state.get('stage', 'development'), _locks(state))}\n\n"
+        f"{_stage_banner(state.get('stage', 'development'), _locks(state), state)}\n\n"
         f"**Removed from roll** — frame {new_idx + 1}/{n} active  \n"
         f"`{state['dn'].metadata['source']['original_filename']}`\n\n"
         f"{_history_md(state['dn'])}"
@@ -5389,7 +5540,7 @@ def _run_live_develop_then_print(
             f"· ×{float(speed):.2f}"
         )
     summary = (
-        f"{_stage_banner('development', _locks(state))}\n\n"
+        f"{_stage_banner('development', _locks(state), state)}\n\n"
         f"**Live print** {live_rgb.shape[1]}×{live_rgb.shape[0]} ({quality_note}){mode_note}  \n"
         f"{profile.name} · {developer_id} · {float(development_minutes):g} min · "
         f"curve={curve_src} · N±={float(contrast):+.2f} · grain={float(grain):.2f}  \n"
@@ -5405,6 +5556,8 @@ def _run_live_develop_then_print(
         "chemistry_mode": str(chemistry_mode or "bw"),
         "live_rgb": live_rgb,
         "live_inspect": live_rgb,
+        # Spot / histogram / fit need the print maps, not only the RGB preview.
+        "print_draft": printed,
         "neg_ref": neg_ref,
         "neg_view": neg_view,
         "neg_inspect": neg_inspect,
@@ -5569,7 +5722,7 @@ def live_preview(
         db_note = f" · dodge/burn ×{len(strokes)}" if strokes else ""
         exposing = " · **EXPOSING**" if state.get("db_exposing") else ""
         summary = (
-            f"{_stage_banner('print', _locks(state))}\n\n"
+            f"{_stage_banner('print', _locks(state), state)}\n\n"
             f"**Print preview** {live_rgb.shape[1]}×{live_rgb.shape[0]} ({quality_note})  \n"
             f"{paper.name} · g{float(print_grade):.1f} · {_print_timer_label(print_exposure)} · "
             f"×{float(speed):.2f}{db_note}{exposing}\n\n{_history_md(state['dn'])}"
@@ -5897,7 +6050,7 @@ def commit_develop(
     process = getattr(development, "color_process", None)
     process_note = f" ({process.upper()})" if process else ""
     summary = (
-        f"{_stage_banner('print', locks)}\n\n"
+        f"{_stage_banner('print', locks, state)}\n\n"
         f"**Develop locked**{process_note} — refine Print below, then Commit Print.\n\n{_history_md(dn)}"
     )
     state = {
@@ -6099,7 +6252,7 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
     speed = dn.metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
     db_note = f" · {len(strokes)} dodge/burn pass(es)" if strokes else ""
     summary = (
-        f"{_stage_banner('print', locks)}\n\n"
+        f"{_stage_banner('print', locks, state)}\n\n"
         f"**Print locked** — {paper.name} · g{float(print_grade):.1f} · "
         f"{_print_timer_label(print_exposure)}{db_note}\n\n{_history_md(dn)}"
     )
@@ -6360,7 +6513,7 @@ def start_dodge_burn(
         f"{_pass_math_md(base_seconds, seconds, mode)}"
     )
     if state.get("dn") is not None:
-        summary = f"{_stage_banner('print', _locks(state))}\n\n{status}\n\n{_history_md(state['dn'])}"
+        summary = f"{_stage_banner('print', _locks(state), state)}\n\n{status}\n\n{_history_md(state['dn'])}"
     else:
         summary = status
     st, hi = _split_summary(summary)
@@ -6420,7 +6573,7 @@ def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, sta
         )
 
     summary = (
-        f"{_stage_banner('print', _locks(state))}\n\n"
+        f"{_stage_banner('print', _locks(state), state)}\n\n"
         f"{status_md}\n\n"
         f"**Print preview** {live_rgb.shape[1]}×{live_rgb.shape[0]}  \n"
         f"{paper.name} · g{float(print_grade):.1f} · {_print_timer_label(print_exposure)} · "
@@ -6583,7 +6736,7 @@ def unlock_develop(state):
     }
     state = reset_local_work(state)
     summary = (
-        f"{_stage_banner('development', _locks(state))}\n\n"
+        f"{_stage_banner('development', _locks(state), state)}\n\n"
         f"**Develop unlocked** — adjust Develop below, then Commit again.\n\n"
         f"{_history_md(dn)}"
     )
@@ -6781,7 +6934,7 @@ def guided_first_print(
         state = reset_local_work({**state})
 
     guide = (
-        f"{_stage_banner('print', _locks(state))}\n\n"
+        f"{_stage_banner('print', _locks(state), state)}\n\n"
         f"**First-print guide ready — you’re on the easel**  \n"
         f"1. Base timer **{float(print_exposure):g}s** (change if you want)  \n"
         f"2. Soft-oval card loaded — **scroll** over the print to resize  \n"
@@ -6851,7 +7004,7 @@ def unlock_print(state):
     _unlock_stage(dn, "print")
     state = {**state, "print": None, "stage": "print"}
     summary = (
-        f"{_stage_banner('print', _locks(state))}\n\n"
+        f"{_stage_banner('print', _locks(state), state)}\n\n"
         f"**Print unlocked** — adjust Print below, then Commit Print.\n\n"
         f"{_history_md(dn)}"
     )
@@ -7033,6 +7186,10 @@ def build_ui() -> gr.Blocks:
                             label="Chemistry",
                             elem_id="chemistry_mode",
                         )
+                        chemistry_help = gr.Markdown(
+                            _chemistry_help_md("bw"),
+                            elem_id="chemistry_help",
+                        )
                         film = gr.Dropdown(
                             choices=FILM_CHOICES_BW,
                             value=FILM_CHOICES_BW[0][1] if FILM_CHOICES_BW else None,
@@ -7082,26 +7239,48 @@ def build_ui() -> gr.Blocks:
                             2.0, 64.0, value=8.0, step=0.5, label="Base exposure (s)"
                         )
                         base_math_md = gr.Markdown(_base_math_md(8.0), elem_id="base_math")
-                        print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="MG grade")
-                        print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter")
+                        print_grade = gr.Slider(
+                            0.0, 5.0, value=2.5, step=0.5, label="MG grade", visible=True
+                        )
+                        print_contrast = gr.Slider(
+                            -1.0, 1.0, value=0.0, step=0.05, label="Filter", visible=True
+                        )
                         with gr.Row(elem_id="cc_row"):
-                            cc_cyan = gr.Slider(0, 100, value=0, step=1, label="CC Cyan")
-                            cc_magenta = gr.Slider(0, 100, value=0, step=1, label="CC Magenta")
-                            cc_yellow = gr.Slider(0, 100, value=0, step=1, label="CC Yellow")
-                        split_grade = gr.Checkbox(label="Split-grade", value=False)
+                            cc_cyan = gr.Slider(
+                                0, 100, value=0, step=1, label="CC Cyan", visible=False
+                            )
+                            cc_magenta = gr.Slider(
+                                0, 100, value=0, step=1, label="CC Magenta", visible=False
+                            )
+                            cc_yellow = gr.Slider(
+                                0, 100, value=0, step=1, label="CC Yellow", visible=False
+                            )
+                        split_grade = gr.Checkbox(
+                            label="Split-grade", value=False, visible=True
+                        )
                         with gr.Row():
-                            soft_grade = gr.Slider(0.0, 5.0, value=0.0, step=0.5, label="Soft grade")
-                            hard_grade = gr.Slider(0.0, 5.0, value=5.0, step=0.5, label="Hard grade")
+                            soft_grade = gr.Slider(
+                                0.0, 5.0, value=0.0, step=0.5, label="Soft grade", visible=True
+                            )
+                            hard_grade = gr.Slider(
+                                0.0, 5.0, value=5.0, step=0.5, label="Hard grade", visible=True
+                            )
                         with gr.Row():
-                            soft_seconds = gr.Slider(1.0, 64.0, value=4.5, step=0.5, label="Soft (s)")
-                            hard_seconds = gr.Slider(1.0, 64.0, value=3.5, step=0.5, label="Hard (s)")
+                            soft_seconds = gr.Slider(
+                                1.0, 64.0, value=4.5, step=0.5, label="Soft (s)", visible=True
+                            )
+                            hard_seconds = gr.Slider(
+                                1.0, 64.0, value=3.5, step=0.5, label="Hard (s)", visible=True
+                            )
                         test_strips = gr.Checkbox(label="Test strips", value=False)
                         with gr.Row():
                             test_bands = gr.Slider(3, 9, value=5, step=1, label="Bands")
                             test_stops = gr.Slider(0.25, 1.0, value=0.5, step=0.25, label="Band stops")
                         flash_stops = gr.Slider(0.0, 2.0, value=0.0, step=0.05, label="Flash (stops)")
                         dry_down = gr.Slider(0.0, 20.0, value=0.0, step=0.5, label="Dry-down %")
-                        tone = gr.Dropdown(choices=TONE_LABELS, value="none", label="Tone")
+                        tone = gr.Dropdown(
+                            choices=TONE_LABELS, value="none", label="Tone", visible=True
+                        )
                         border_frac = gr.Slider(0.0, 0.12, value=0.0, step=0.005, label="Border")
                         with gr.Row(elem_id="print_commit_row"):
                             print_btn = gr.Button(
@@ -7594,7 +7773,25 @@ def build_ui() -> gr.Blocks:
         chemistry_mode.change(
             fn=on_chemistry_mode_change,
             inputs=[chemistry_mode],
-            outputs=[film, developer, development_minutes, exposure_index, paper],
+            outputs=[
+                film,
+                developer,
+                development_minutes,
+                exposure_index,
+                paper,
+                chemistry_help,
+                print_grade,
+                print_contrast,
+                cc_cyan,
+                cc_magenta,
+                cc_yellow,
+                split_grade,
+                soft_grade,
+                hard_grade,
+                soft_seconds,
+                hard_seconds,
+                tone,
+            ],
         ).then(
             fn=live_preview_edit,
             inputs=preview_inputs,
