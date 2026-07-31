@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import base64
 import copy
+import html as html_lib
+import io
 import json
 import sys
 import tempfile
@@ -409,17 +412,17 @@ footer, .gradio-container footer {
   flex: 0 0 40px !important;
   box-sizing: border-box !important;
 }
-/* Camera roll tab — vertical frame list in its own drawer. */
+/* Camera roll tab — server-rendered HTML list (✕ is a real button). */
 #drawer_roll #camera_roll {
   max-width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
 }
-#drawer_roll #camera_roll .grid-wrap,
-#drawer_roll #camera_roll .grid-container,
-#drawer_roll #camera_roll ul,
-#drawer_roll #camera_roll .gallery-container {
+#drawer_roll #camera_roll .roll-list {
   display: flex !important;
   flex-direction: column !important;
-  flex-wrap: nowrap !important;
   gap: 6px !important;
   overflow-x: hidden !important;
   overflow-y: auto !important;
@@ -427,13 +430,15 @@ footer, .gradio-container footer {
   padding: 0 !important;
   margin: 0 !important;
 }
-#drawer_roll #camera_roll .thumbnail-item,
-#drawer_roll #camera_roll .gallery-item,
-#drawer_roll #camera_roll li {
+#drawer_roll #camera_roll .roll-empty {
+  color: var(--dr-text-dim) !important;
+  font-size: var(--dr-fs-label) !important;
+  padding: 8px 2px !important;
+}
+#drawer_roll #camera_roll .roll-item {
+  position: relative !important;
   width: 100% !important;
-  max-width: 100% !important;
   height: 88px !important;
-  min-height: 88px !important;
   margin: 0 !important;
   padding: 0 !important;
   border: 1px solid var(--dr-border) !important;
@@ -442,9 +447,34 @@ footer, .gradio-container footer {
   overflow: hidden !important;
   box-sizing: border-box !important;
   cursor: pointer !important;
-  position: relative !important;
 }
-/* Hover ✕ to remove a frame — injected by the UI script. */
+#drawer_roll #camera_roll .roll-item.is-active {
+  border-color: var(--dr-accent) !important;
+  box-shadow: inset 0 0 0 1px var(--dr-accent) !important;
+}
+#drawer_roll #camera_roll .roll-item img {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  pointer-events: none !important;
+}
+#drawer_roll #camera_roll .roll-cap {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  margin: 0 !important;
+  padding: 3px 5px !important;
+  font-size: 0.62rem !important;
+  line-height: 1.15 !important;
+  color: var(--dr-text) !important;
+  background: rgba(12, 12, 14, 0.86) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  pointer-events: none !important;
+}
 #drawer_roll #camera_roll .roll-x {
   position: absolute !important;
   top: 5px !important;
@@ -465,11 +495,8 @@ footer, .gradio-container footer {
   cursor: pointer !important;
   opacity: 0 !important;
   transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease !important;
-  pointer-events: auto !important;
 }
-#drawer_roll #camera_roll .thumbnail-item:hover .roll-x,
-#drawer_roll #camera_roll .gallery-item:hover .roll-x,
-#drawer_roll #camera_roll li:hover .roll-x {
+#drawer_roll #camera_roll .roll-item:hover .roll-x {
   opacity: 1 !important;
 }
 #drawer_roll #camera_roll .roll-x:hover {
@@ -477,49 +504,24 @@ footer, .gradio-container footer {
   border-color: transparent !important;
   color: #fff !important;
 }
-#drawer_roll #camera_roll .thumbnail-item.selected,
-#drawer_roll #camera_roll .gallery-item.selected,
-#drawer_roll #camera_roll li.selected,
-#drawer_roll #camera_roll [aria-selected="true"] {
-  border-color: var(--dr-accent) !important;
-  box-shadow: inset 0 0 0 1px var(--dr-accent) !important;
-}
-#drawer_roll #camera_roll img {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover !important;
-}
-#drawer_roll #camera_roll .label,
-#drawer_roll #camera_roll figcaption,
-#drawer_roll #camera_roll .caption {
-  position: absolute !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  margin: 0 !important;
-  padding: 3px 5px !important;
-  font-size: 0.62rem !important;
-  line-height: 1.15 !important;
-  color: var(--dr-text) !important;
-  background: rgba(12, 12, 14, 0.86) !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  pointer-events: none !important;
-}
-#drawer_roll #camera_roll .label-wrap,
-#drawer_roll #camera_roll [data-testid="block-label"],
-#drawer_roll #camera_roll .icon-button-wrapper,
-#drawer_roll #camera_roll .icon-button,
-#drawer_roll #camera_roll .top-panel,
-#drawer_roll #camera_roll .download,
-#drawer_roll #camera_roll .icon-wrap {
-  display: none !important;
-}
 #drawer_roll #roll_meta {
   margin: 0 0 6px !important;
   font-size: var(--dr-fs-label) !important;
   color: var(--dr-text-dim) !important;
+}
+/* Park Gradio triggers off-screen but keep them mounted (not visible=False),
+   so JS value writes + clicks still reach the backend. */
+#roll_remove_index,
+#roll_remove,
+#roll_switch_index,
+#roll_switch,
+#roll_pending_index {
+  position: absolute !important;
+  left: -9999px !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
 }
 
 /* Save-before-switch prompt — fixed overlay above the darkroom. */
@@ -2916,13 +2918,21 @@ UI_JS = """
   setInterval(syncDrawerFromBox, 400);
   applyDrawer(readActiveDrawer() || 'ingest', { fromServer: true });
 
-  // Camera roll: inject a hover ✕ on each thumb that removes that frame.
-  const writeHiddenBox = (rootId, value) => {
+  // Camera roll HTML: real ✕ buttons (data-roll-remove) + frame clicks
+  // (data-roll-switch). Write into off-screen Gradio inputs with the native
+  // value setter so Svelte/Gradio actually records the change.
+  const setGradioValue = (rootId, value) => {
     const root = document.querySelector(rootId);
-    const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+    if (!root) return false;
+    const box = root.querySelector('textarea, input');
     if (!box) return false;
-    box.value = String(value);
-    box.dispatchEvent(new Event('input', { bubbles: true }));
+    const proto = box.tagName === 'TEXTAREA'
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (desc && desc.set) desc.set.call(box, String(value));
+    else box.value = String(value);
+    box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
     box.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
   };
@@ -2931,80 +2941,37 @@ UI_JS = """
     const btn = root && (root.querySelector('button') || root);
     if (btn && typeof btn.click === 'function') btn.click();
   };
-  const writeRollRemoveIndex = (index) =>
-    // Unique token so Gradio always sees a value change (removing "0" twice, etc.).
-    writeHiddenBox('#roll_remove_index', String(index) + ':' + Date.now());
-  const clickRollRemove = () => clickHiddenBtn('#roll_remove');
-  const writeRollSwitchIndex = (index) => writeHiddenBox('#roll_switch_index', index);
-  const clickRollSwitch = () => clickHiddenBtn('#roll_switch');
-  const rollThumbNodes = (root) => {
-    if (!root) return [];
-    const nodes = root.querySelectorAll(
-      '.thumbnail-item, .gallery-item, li.gallery-item, .grid-wrap > button, .grid-container > button, .grid-wrap > div, .grid-container > div'
-    );
-    return Array.from(nodes).filter((el) => el.querySelector && el.querySelector('img'));
-  };
-  const decorateRollThumbs = () => {
-    const root = document.querySelector('#camera_roll');
-    if (!root) return;
-    const thumbs = rollThumbNodes(root);
-    thumbs.forEach((thumb, index) => {
-      if (!thumb.dataset.rollSwitchBound) {
-        thumb.dataset.rollSwitchBound = '1';
-        thumb.addEventListener('click', (e) => {
-          if (e.target && e.target.closest && e.target.closest('.roll-x')) return;
-          e.preventDefault();
-          e.stopPropagation();
-          if (!writeRollSwitchIndex(index)) return;
-          setTimeout(clickRollSwitch, 0);
-        }, true);
-      }
-      let x = thumb.querySelector(':scope > .roll-x, .roll-x');
-      if (!x) {
-        const cs = getComputedStyle(thumb);
-        if (cs.position === 'static') thumb.style.position = 'relative';
-        x = document.createElement('button');
-        x.type = 'button';
-        x.className = 'roll-x';
-        x.textContent = '×';
-        thumb.appendChild(x);
-      }
-      // Refresh index each decorate pass — gallery DOM can be recycled.
-      x.setAttribute('aria-label', 'Remove frame ' + (index + 1));
-      x.title = 'Remove';
-      x.dataset.rollIndex = String(index);
-      if (x.dataset.rollRemoveBound === '1') return;
-      x.dataset.rollRemoveBound = '1';
-      x.addEventListener('pointerdown', (e) => {
+  if (!window.__rollClickBound) {
+    window.__rollClickBound = true;
+    document.addEventListener('click', (e) => {
+      const t = e.target;
+      if (!t || !t.closest) return;
+      const rm = t.closest('#camera_roll [data-roll-remove]');
+      if (rm) {
         e.preventDefault();
         e.stopPropagation();
-      });
-      x.addEventListener('click', (e) => {
+        const idx = rm.getAttribute('data-roll-remove');
+        if (idx == null) return;
+        // Unique token so repeated removes of the same index still change().
+        // Prefer the textbox .change listener only — also clicking the button
+        // would double-fire and delete two frames.
+        if (!setGradioValue('#roll_remove_index', idx + ':' + Date.now())) {
+          setTimeout(() => clickHiddenBtn('#roll_remove'), 0);
+        }
+        return;
+      }
+      const sw = t.closest('#camera_roll [data-roll-switch]');
+      if (sw) {
         e.preventDefault();
         e.stopPropagation();
-        const idx = parseInt(x.dataset.rollIndex || String(index), 10);
-        if (!Number.isFinite(idx)) return;
-        if (!writeRollRemoveIndex(idx)) return;
-        // Textbox .change is the primary trigger; button click is a fallback.
-        setTimeout(clickRollRemove, 0);
-      });
-    });
-  };
-  const ensureRollObserver = () => {
-    const root = document.querySelector('#camera_roll');
-    if (!root || root.dataset.rollObs === '1' || !window.MutationObserver) return;
-    root.dataset.rollObs = '1';
-    new MutationObserver(() => decorateRollThumbs()).observe(root, {
-      childList: true,
-      subtree: true,
-    });
-  };
-  decorateRollThumbs();
-  ensureRollObserver();
-  setInterval(() => {
-    decorateRollThumbs();
-    ensureRollObserver();
-  }, 800);
+        const idx = sw.getAttribute('data-roll-switch');
+        if (idx == null) return;
+        if (setGradioValue('#roll_switch_index', idx)) {
+          setTimeout(() => clickHiddenBtn('#roll_switch'), 0);
+        }
+      }
+    }, true);
+  }
 
   // Fit the live print stage to remaining #preview_col space.
   // Do NOT MutationObserver 'style' — writing heights would re-enter forever.
@@ -3612,10 +3579,34 @@ def _mark_dirty(state, controls: dict | None = None):
     return {**state, **updates}
 
 
+def _roll_thumb_data_url(rgb) -> str:
+    """Small JPEG data-URL for the HTML camera-roll list."""
+    if rgb is None:
+        return ""
+    arr = np.asarray(rgb)
+    if arr.dtype != np.uint8:
+        arr = np.clip(arr, 0, 255).astype(np.uint8)
+    if arr.ndim == 2:
+        arr = np.stack([arr, arr, arr], axis=-1)
+    from PIL import Image
+
+    im = Image.fromarray(arr[..., :3])
+    im.thumbnail((160, 96))
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", quality=72)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def _roll_gallery_update(state):
-    """Thumbnails + captions for the Roll drawer."""
+    """Server-rendered roll HTML — each frame has a real ✕ button."""
     roll = (state or {}).get("roll") or []
-    items = []
+    if not roll:
+        return '<div class="roll-empty">No frames yet.</div>'
+    try:
+        active = int((state or {}).get("roll_index", 0))
+    except (TypeError, ValueError):
+        active = 0
+    parts = ['<div class="roll-list">']
     for i, frame in enumerate(roll):
         thumb = frame.get("original_view")
         if thumb is None:
@@ -3627,11 +3618,19 @@ def _roll_gallery_update(state):
         if dn is not None:
             raw = dn.metadata.get("source", {}).get("original_filename") or name
             name = Path(str(raw)).name
-        items.append((thumb, f"{i + 1}. {name}"))
-    idx = (state or {}).get("roll_index")
-    if not roll or idx is None or int(idx) < 0:
-        return gr.update(value=items, selected_index=None)
-    return gr.update(value=items, selected_index=int(idx))
+        safe = html_lib.escape(name)
+        sel = " is-active" if i == active else ""
+        src = _roll_thumb_data_url(thumb)
+        parts.append(
+            f'<div class="roll-item{sel}" data-roll-switch="{i}" title="{safe}">'
+            f'<img src="{src}" alt="{safe}" draggable="false" />'
+            f'<span class="roll-cap">{i + 1}. {safe}</span>'
+            f'<button type="button" class="roll-x" data-roll-remove="{i}" '
+            f'title="Remove" aria-label="Remove frame {i + 1}">×</button>'
+            f"</div>"
+        )
+    parts.append("</div>")
+    return "".join(parts)
 
 
 def _roll_meta_md(state) -> str:
@@ -6490,43 +6489,38 @@ def build_ui() -> gr.Blocks:
                             _roll_meta_md(None),
                             elem_id="roll_meta",
                         )
-                        roll_gallery = gr.Gallery(
-                            label="Frames",
-                            columns=1,
-                            height=420,
-                            object_fit="cover",
-                            preview=False,
-                            allow_preview=False,
-                            show_label=False,
+                        roll_gallery = gr.HTML(
+                            value=_roll_gallery_update(None),
                             elem_id="camera_roll",
                         )
-                        # Hidden triggers for per-thumb ✕ / click-to-switch (UI script).
-                        # Keep Remove interactive — Gradio ignores clicks on disabled buttons,
-                        # which broke the hover ✕ path when interactive stayed False.
+                        # Off-screen triggers (CSS-parked, not visible=False) so JS
+                        # can write values Gradio will actually submit.
                         roll_remove_index = gr.Textbox(
                             value="",
-                            visible=False,
+                            show_label=False,
+                            interactive=True,
                             elem_id="roll_remove_index",
                         )
                         remove_roll_btn = gr.Button(
                             "Remove",
-                            visible=False,
                             interactive=True,
                             elem_id="roll_remove",
                         )
                         roll_switch_index = gr.Textbox(
                             value="-1",
-                            visible=False,
+                            show_label=False,
+                            interactive=True,
                             elem_id="roll_switch_index",
                         )
                         roll_switch_btn = gr.Button(
                             "Switch",
-                            visible=False,
+                            interactive=True,
                             elem_id="roll_switch",
                         )
                         roll_pending_index = gr.Number(
                             value=-1,
-                            visible=False,
+                            show_label=False,
+                            interactive=True,
                             elem_id="roll_pending_index",
                         )
 
@@ -7001,16 +6995,6 @@ def build_ui() -> gr.Blocks:
             fn=commit_ingest,
             inputs=[sample, file_in, state],
             outputs=ingest_outputs,
-        ).then(
-            fn=live_preview_high,
-            inputs=preview_inputs,
-            outputs=preview_outputs,
-        )
-
-        roll_gallery.select(
-            fn=select_roll_frame,
-            inputs=[state],
-            outputs=roll_switch_outputs,
         ).then(
             fn=live_preview_high,
             inputs=preview_inputs,
