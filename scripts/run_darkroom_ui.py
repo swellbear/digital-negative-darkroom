@@ -367,12 +367,38 @@ footer, .gradio-container footer {
   flex-wrap: nowrap !important;
   overflow-x: hidden !important;
   overflow-y: auto !important;
-  padding: 4px 6px 6px !important;
+  /* Extra bottom pad so Commit Print/Develop aren't clipped at the scroll end
+     (Color Print is tall: CC row + split-grade + strips). */
+  padding: 4px 6px 56px !important;
   box-sizing: border-box !important;
   border-right: 1px solid var(--dr-border) !important;
   background: var(--dr-bg-panel) !important;
   z-index: 35 !important;
+  overscroll-behavior: contain !important;
+  scrollbar-gutter: stable !important;
   transition: flex-basis 0.18s ease, width 0.18s ease, max-width 0.18s ease, padding 0.18s ease, opacity 0.15s ease !important;
+}
+/* Keep stage commit actions reachable while scrolling a long Print drawer. */
+#drawer_host #print_commit_row,
+#drawer_host #develop_commit_row {
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 6 !important;
+  margin: 6px 0 0 !important;
+  padding: 6px 0 4px !important;
+  background: linear-gradient(
+    to bottom,
+    rgba(18, 18, 20, 0) 0%,
+    var(--dr-bg-panel) 28%,
+    var(--dr-bg-panel) 100%
+  ) !important;
+  border-top: 1px solid var(--dr-border) !important;
+  gap: 4px !important;
+}
+#drawer_host #print_commit_row button,
+#drawer_host #develop_commit_row button {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
 }
 #drawer_host,
 #drawer_host .drawer-panel,
@@ -635,7 +661,10 @@ body.drawer-collapsed #drawer_host {
 .drawer-panel [data-testid="accordion-content"] {
   display: block !important;
   overflow-x: hidden !important;
+  overflow-y: visible !important;
   max-width: 100% !important;
+  /* Room below the last control so sticky commit row + scroll end clear. */
+  padding-bottom: 8px !important;
 }
 .drawer-panel .gr-accordion {
   margin: 0 !important;
@@ -7015,7 +7044,7 @@ def build_ui() -> gr.Blocks:
                             label="Scene shutter (s)",
                         )
                         halation = gr.Slider(0.0, 1.5, value=0.0, step=0.05, label="Halation")
-                        with gr.Row():
+                        with gr.Row(elem_id="develop_commit_row"):
                             develop_btn = gr.Button(
                                 "Commit Develop", interactive=False, variant="primary", size="sm"
                             )
@@ -7053,7 +7082,7 @@ def build_ui() -> gr.Blocks:
                         dry_down = gr.Slider(0.0, 20.0, value=0.0, step=0.5, label="Dry-down %")
                         tone = gr.Dropdown(choices=TONE_LABELS, value="none", label="Tone")
                         border_frac = gr.Slider(0.0, 0.12, value=0.0, step=0.005, label="Border")
-                        with gr.Row():
+                        with gr.Row(elem_id="print_commit_row"):
                             print_btn = gr.Button(
                                 "Commit Print", interactive=False, variant="primary", size="sm"
                             )
