@@ -80,3 +80,36 @@ def test_path_and_strip_labels_for_e6_and_c41():
 
     banner = mod._stage_banner("development", ["ingest"], e6_state)
     assert "`E-6`" in banner
+    assert "Live exploring" in banner
+
+
+def test_live_vs_committed_viewer_and_banner():
+    mod = _load_ui()
+
+    class _DN:
+        def __init__(self, locks):
+            self.metadata = {"ui_state": {"locked_stages": list(locks)}}
+
+    exploring = {"dn": _DN(["ingest"]), "chemistry_mode": "bw"}
+    committed = {"dn": _DN(["ingest", "development", "print"]), "chemistry_mode": "bw"}
+
+    assert "not committed" in mod._viewer_label_for("live", exploring).lower()
+    assert mod._viewer_label_for("live", committed).startswith("Committed print")
+    assert "Live exploring" in mod._stage_banner("development", ["ingest"], exploring)
+    assert "Committed" in mod._stage_banner("print", ["ingest", "development", "print"], committed)
+    assert mod._lock_status_label(exploring) == "Live exploring"
+    assert mod._lock_status_label(committed) == "Committed"
+    assert "easel" in mod._live_print_label(exploring, tool="print")
+    assert _upd(mod.on_preview_tool_change("frame", committed)).get("label", "").startswith(
+        "Committed print"
+    )
+
+
+def test_advanced_dodge_burn_is_quarantined():
+    mod = _load_ui()
+    assert mod.ADVANCED_DODGE_BURN_LABEL.startswith("Advanced")
+    source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
+    assert "ADVANCED_DODGE_BURN_LABEL," in source
+    assert 'elem_id="mod_dodge_burn"' in source
+    assert "Modules → Advanced" in source
+    assert "Default path: paper → exposure → filtration" in source
