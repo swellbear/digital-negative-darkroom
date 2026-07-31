@@ -3608,7 +3608,58 @@ def _chem_time_update(film_id: str, developer_id: str, *, reset_to_normal: bool 
     )
 
 
-def on_film_change(film_id: str):
+def _film_choice_ids(mode: str) -> set[str]:
+    mode = str(mode or "bw").lower()
+    choices = FILM_CHOICES_COLOR if mode == "color" else FILM_CHOICES_BW
+    return {c[1] for c in choices}
+
+
+def _paper_choice_ids(mode: str) -> set[str]:
+    mode = str(mode or "bw").lower()
+    choices = PAPER_CHOICES_COLOR if mode == "color" else PAPER_CHOICES_BW
+    return {c[1] for c in choices}
+
+
+def _coerce_film_id(film_id: str | None, mode: str) -> str:
+    """Map a film id into the active chemistry catalog (B&W ↔ Color swap safe)."""
+    mode = str(mode or "bw").lower()
+    if mode not in {"bw", "color"}:
+        mode = "bw"
+    choices = FILM_CHOICES_COLOR if mode == "color" else FILM_CHOICES_BW
+    ids = {c[1] for c in choices}
+    if film_id and str(film_id) in ids:
+        return str(film_id)
+    if mode == "color":
+        for _label, fid in choices:
+            try:
+                if str(_film_profile(fid).type).lower() == "color_negative":
+                    return fid
+            except Exception:
+                continue
+    if not choices:
+        raise gr.Error("No film profiles for that chemistry mode.")
+    return choices[0][1]
+
+
+def _coerce_paper_id(paper_id: str | None, mode: str) -> str | None:
+    mode = str(mode or "bw").lower()
+    choices = PAPER_CHOICES_COLOR if mode == "color" else PAPER_CHOICES_BW
+    ids = {c[1] for c in choices}
+    if paper_id and str(paper_id) in ids:
+        return str(paper_id)
+    return choices[0][1] if choices else None
+
+
+def on_film_change(film_id: str, chemistry_mode: str = "bw"):
+    """Refresh developer / time / EI for the selected film.
+
+    When Chemistry flips B&W ↔ Color, Gradio often re-fires this with the
+    *previous* catalog's film id against the new choices. Ignore that stale
+    event — ``on_chemistry_mode_change`` already wrote the correct film + chem.
+    """
+    mode = str(chemistry_mode or "bw").lower()
+    if film_id not in _film_choice_ids(mode):
+        return gr.skip(), gr.skip(), gr.skip()
     profile = _film_profile(film_id)
     chem_id = default_chemistry_id(profile)
     choices = chemistry_choices(profile)
@@ -3619,7 +3670,10 @@ def on_film_change(film_id: str):
     )
 
 
-def on_developer_change(film_id: str, developer_id: str):
+def on_developer_change(film_id: str, developer_id: str, chemistry_mode: str = "bw"):
+    mode = str(chemistry_mode or "bw").lower()
+    if film_id not in _film_choice_ids(mode):
+        return gr.skip()
     return _chem_time_update(film_id, developer_id, reset_to_normal=True)
 
 
@@ -3632,20 +3686,11 @@ def on_chemistry_mode_change(mode: str, split_on=False):
     paper_choices = PAPER_CHOICES_COLOR if mode == "color" else PAPER_CHOICES_BW
     if not film_choices:
         raise gr.Error("No film profiles for that chemistry mode.")
-    film_id = film_choices[0][1]
-    if mode == "color":
-        # Prefer a C-41 negative stock as the default color entry point.
-        for _label, fid in film_choices:
-            try:
-                if str(_film_profile(fid).type).lower() == "color_negative":
-                    film_id = fid
-                    break
-            except Exception:
-                continue
+    film_id = _coerce_film_id(None, mode)
     profile = _film_profile(film_id)
     chem_id = default_chemistry_id(profile)
     chem_choices = chemistry_choices(profile)
-    paper_id = paper_choices[0][1] if paper_choices else None
+    paper_id = _coerce_paper_id(None, mode)
     # Visibility for mode-specific Print controls (order matches wiring).
     vis = []
     for key in (
@@ -5783,6 +5828,20 @@ def live_preview(
     mark_dirty=True when the user edited controls (not after a roll switch restore).
     """
     max_side = DRAG_MAX_SIDE if quality == "drag" else LIVE_MAX_SIDE
+    # Chemistry catalog swaps can leave one event with a B&W film id while
+    # mode is already Color (or the reverse) — coerce before develop/print.
+    mode = str(chemistry_mode or "bw").lower()
+    film_id = _coerce_film_id(film_id, mode)
+    paper_id = _coerce_paper_id(paper_id, mode)
+    if film_id not in _film_choice_ids(mode):
+        film_id = _coerce_film_id(None, mode)
+    try:
+        profile = _film_profile(film_id)
+        chem_ids = {cid for _label, cid in chemistry_choices(profile)}
+        if str(developer_id) not in chem_ids:
+            developer_id = default_chemistry_id(profile)
+    except Exception:
+        pass
     controls = _capture_controls(
         chemistry_mode,
         film_id,
@@ -7389,11 +7448,15 @@ def build_ui() -> gr.Blocks:
                             choices=FILM_CHOICES_BW,
                             value=FILM_CHOICES_BW[0][1] if FILM_CHOICES_BW else None,
                             label="Film",
+                            # B&W ↔ Color catalog swaps race: Gradio may still
+                            # hold the previous mode's id for one event.
+                            allow_custom_value=True,
                         )
                         developer = gr.Dropdown(
                             choices=_INIT_DEV_CHOICES,
                             value=_INIT_DEV_ID,
                             label="Developer",
+                            allow_custom_value=True,
                         )
                         development_minutes = gr.Slider(
                             _DEV_TIME_SLIDER_MIN,
@@ -7437,6 +7500,7 @@ def build_ui() -> gr.Blocks:
                             choices=PAPER_CHOICES_BW,
                             value=PAPER_CHOICES_BW[0][1] if PAPER_CHOICES_BW else None,
                             label="Paper",
+                            allow_custom_value=True,
                         )
                         print_exposure = gr.Slider(
                             2.0, 64.0, value=8.0, step=0.5, label="Base exposure (s)"
@@ -8132,7 +8196,7 @@ def build_ui() -> gr.Blocks:
         # Film / developer swap chemistry list + datasheet-normal minutes, then refresh.
         film.change(
             fn=on_film_change,
-            inputs=[film],
+            inputs=[film, chemistry_mode],
             outputs=[developer, development_minutes, exposure_index],
         ).then(
             fn=live_preview_edit,
@@ -8141,7 +8205,7 @@ def build_ui() -> gr.Blocks:
         )
         developer.change(
             fn=on_developer_change,
-            inputs=[film, developer],
+            inputs=[film, developer, chemistry_mode],
             outputs=[development_minutes],
         ).then(
             fn=live_preview_edit,
