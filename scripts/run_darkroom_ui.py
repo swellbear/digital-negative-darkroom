@@ -7250,8 +7250,11 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
     paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
     strokes = list(state.get("db_strokes") or [])
     dn.metadata.setdefault("print", {})["dodge_burn"] = strokes
+    # Prefer spectral T (same as Live) — mono transmittance makes C-41/RA-4
+    # commit prints wash out / false-colour vs the theoretical preview.
+    t_print = _print_transmittance(development)
     result = print_negative(
-        development.transmittance,
+        t_print,
         dn,
         paper,
         base_exposure_seconds=float(print_exposure),
@@ -7557,9 +7560,9 @@ def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, sta
 
     t = state.get("transmittance_proxy")
     if t is None:
-        full = state["development_full"].transmittance
-        step = max(1, int(np.ceil(max(full.shape) / LIVE_MAX_SIDE)))
-        t = np.ascontiguousarray(full[::step, ::step])
+        full = _print_transmittance(state["development_full"])
+        step = max(1, int(np.ceil(max(full.shape[:2]) / LIVE_MAX_SIDE)))
+        t = np.ascontiguousarray(full[::step, ::step, ...])
         state = {**state, "transmittance_proxy": t}
 
     paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
