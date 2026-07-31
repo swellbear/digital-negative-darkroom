@@ -435,10 +435,12 @@ def spot_at(
 def spot_markdown(sample: dict[str, float | str]) -> str:
     if not sample.get("ok"):
         return "_Hover the print for Zone / density._"
+    # Avoid markdown `code` chips — Gradio's light code fill washes out on the
+    # dark spot float (white-on-white Zone / D / R). Bold keeps values readable.
     return (
-        f"**Spot** Zone `{sample['zone_label']}`"
-        f" ({float(sample['zone']):.1f}) · D `{float(sample['density']):.2f}`"
-        f" · R `{float(sample['reflectance']):.3f}`"
+        f"**Spot** Zone **{sample['zone_label']}**"
+        f" ({float(sample['zone']):.1f}) · D **{float(sample['density']):.2f}**"
+        f" · R **{float(sample['reflectance']):.3f}**"
     )
 
 
