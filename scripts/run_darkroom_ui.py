@@ -2920,7 +2920,9 @@ UI_JS = """
 
   // Camera roll HTML: real ✕ buttons (data-roll-remove) + frame clicks
   // (data-roll-switch). Write into off-screen Gradio inputs with the native
-  // value setter so Svelte/Gradio actually records the change.
+  // value setter so Svelte/Gradio actually records the change — then the
+  // textbox .change handlers run (do NOT also click the button; that races
+  // and often submits the previous index).
   const setGradioValue = (rootId, value) => {
     const root = document.querySelector(rootId);
     if (!root) return false;
@@ -2946,27 +2948,27 @@ UI_JS = """
     document.addEventListener('click', (e) => {
       const t = e.target;
       if (!t || !t.closest) return;
-      const rm = t.closest('#camera_roll [data-roll-remove]');
+      // Match the attributes directly — nested "#camera_roll [data-…]" in
+      // closest() is unreliable across Gradio's wrapper DOM.
+      const rm = t.closest('[data-roll-remove]');
       if (rm) {
         e.preventDefault();
         e.stopPropagation();
         const idx = rm.getAttribute('data-roll-remove');
         if (idx == null) return;
-        // Unique token so repeated removes of the same index still change().
-        // Prefer the textbox .change listener only — also clicking the button
-        // would double-fire and delete two frames.
         if (!setGradioValue('#roll_remove_index', idx + ':' + Date.now())) {
           setTimeout(() => clickHiddenBtn('#roll_remove'), 0);
         }
         return;
       }
-      const sw = t.closest('#camera_roll [data-roll-switch]');
+      const sw = t.closest('[data-roll-switch]');
       if (sw) {
         e.preventDefault();
         e.stopPropagation();
         const idx = sw.getAttribute('data-roll-switch');
         if (idx == null) return;
-        if (setGradioValue('#roll_switch_index', idx)) {
+        // Tokenized so re-clicking the same frame still fires .change.
+        if (!setGradioValue('#roll_switch_index', idx + ':' + Date.now())) {
           setTimeout(() => clickHiddenBtn('#roll_switch'), 0);
         }
       }
@@ -4733,12 +4735,21 @@ def _roll_switch_bundle(state, *, drawer="roll", modal_visible=False, pending=-1
 
 def begin_roll_switch(index_raw, state):
     """Start a frame switch — prompt when the current frame has unsaved work."""
+    # Careful: index 0 is valid — never use `index_raw or ""`.
+    if index_raw is None:
+        raw = ""
+    else:
+        raw = str(index_raw).strip()
+    # Ignore empty/-1 from the hidden textbox mounting or resets.
+    if raw == "" or raw == "-1":
+        if not state or state.get("dn") is None:
+            return _roll_switch_bundle(None, modal_visible=False, pending=-1)
+        return _roll_switch_bundle(
+            state, drawer="roll", modal_visible=False, pending=-1, restore_controls=False
+        )
     if not state or not state.get("roll"):
         return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
-    try:
-        target = int(str(index_raw).strip())
-    except (TypeError, ValueError):
-        return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
+    target = _parse_roll_index(raw, fallback=-1)
     current = int(state.get("roll_index", -1))
     if target < 0 or target >= len(state.get("roll") or []):
         return _roll_switch_bundle(state, drawer="roll", modal_visible=False, pending=-1)
@@ -7001,6 +7012,17 @@ def build_ui() -> gr.Blocks:
             outputs=preview_outputs,
         )
 
+        # Primary path: JS writes index:token → textbox .change (same as remove).
+        # Button click is only a fallback; do not fire both (stale-index race).
+        roll_switch_index.change(
+            fn=begin_roll_switch,
+            inputs=[roll_switch_index, state],
+            outputs=roll_switch_outputs,
+        ).then(
+            fn=live_preview_high,
+            inputs=preview_inputs,
+            outputs=preview_outputs,
+        )
         roll_switch_btn.click(
             fn=begin_roll_switch,
             inputs=[roll_switch_index, state],

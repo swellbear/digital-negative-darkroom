@@ -61,12 +61,16 @@ def test_clean_switch_activates_target_frame():
     assert state["roll_index"] == 1
     assert not mod._is_dirty(state)
 
-    outs = mod.begin_roll_switch(0, state)
+    outs = mod.begin_roll_switch("0:click", state)
     state = _state_from(outs)
     assert state["roll_index"] == 0
     assert outs[-1] == -1  # pending cleared
     # modal visibility update
     assert getattr(outs[-2], "get", lambda *_: None)("visible", False) is False or outs[-2]["visible"] is False
+
+    # Blank change events must be ignored (textbox mount).
+    outs = mod.begin_roll_switch("", state)
+    assert _state_from(outs)["roll_index"] == 0
 
 
 def test_dirty_switch_prompts_then_save():
@@ -75,7 +79,7 @@ def test_dirty_switch_prompts_then_save():
     state = _state_from(mod.commit_ingest(None, [path, path], None))
     state = {**state, "dirty": True, "summary_cache": "UNSAVED-EDIT"}
 
-    outs = mod.begin_roll_switch(0, state)
+    outs = mod.begin_roll_switch("0:click", state)
     state = _state_from(outs)
     assert state["roll_index"] == 1  # still on current
     assert outs[-1] == 0  # pending target
@@ -99,7 +103,7 @@ def test_dirty_switch_discard_keeps_last_saved():
     state = mod._sync_active_into_roll({**state, "summary_cache": "SAVED", "dirty": False})
     state = {**state, "dirty": True, "summary_cache": "UNSAVED-EDIT"}
 
-    outs = mod.begin_roll_switch(0, state)
+    outs = mod.begin_roll_switch("0:click", state)
     assert outs[-2]["visible"] is True
     state = _state_from(outs)
 
