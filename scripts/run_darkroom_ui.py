@@ -1639,7 +1639,7 @@ UI_JS = """
     log: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
     new: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   };
-  const RAIL_LABELS = { ingest: 'Ingest', develop: 'Dev', print: 'Print', frame: 'Frame', log: 'Log', new: 'New' };
+  const RAIL_LABELS = { ingest: 'Upload', develop: 'Dev', print: 'Print', frame: 'Frame', log: 'Log', new: 'New', roll: 'Roll' };
   const svgWrap = (inner) =>
     `<svg class="rail-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`;
   const installRailIcons = () => {
@@ -2931,7 +2931,9 @@ UI_JS = """
     const btn = root && (root.querySelector('button') || root);
     if (btn && typeof btn.click === 'function') btn.click();
   };
-  const writeRollRemoveIndex = (index) => writeHiddenBox('#roll_remove_index', index);
+  const writeRollRemoveIndex = (index) =>
+    // Unique token so Gradio always sees a value change (removing "0" twice, etc.).
+    writeHiddenBox('#roll_remove_index', String(index) + ':' + Date.now());
   const clickRollRemove = () => clickHiddenBtn('#roll_remove');
   const writeRollSwitchIndex = (index) => writeHiddenBox('#roll_switch_index', index);
   const clickRollSwitch = () => clickHiddenBtn('#roll_switch');
@@ -2957,15 +2959,22 @@ UI_JS = """
           setTimeout(clickRollSwitch, 0);
         }, true);
       }
-      if (thumb.querySelector(':scope > .roll-x, .roll-x')) return;
-      const cs = getComputedStyle(thumb);
-      if (cs.position === 'static') thumb.style.position = 'relative';
-      const x = document.createElement('button');
-      x.type = 'button';
-      x.className = 'roll-x';
+      let x = thumb.querySelector(':scope > .roll-x, .roll-x');
+      if (!x) {
+        const cs = getComputedStyle(thumb);
+        if (cs.position === 'static') thumb.style.position = 'relative';
+        x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'roll-x';
+        x.textContent = '×';
+        thumb.appendChild(x);
+      }
+      // Refresh index each decorate pass — gallery DOM can be recycled.
       x.setAttribute('aria-label', 'Remove frame ' + (index + 1));
       x.title = 'Remove';
-      x.textContent = '×';
+      x.dataset.rollIndex = String(index);
+      if (x.dataset.rollRemoveBound === '1') return;
+      x.dataset.rollRemoveBound = '1';
       x.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -2973,11 +2982,12 @@ UI_JS = """
       x.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (!writeRollRemoveIndex(index)) return;
-        // Let Gradio pick up the textbox value before the click.
+        const idx = parseInt(x.dataset.rollIndex || String(index), 10);
+        if (!Number.isFinite(idx)) return;
+        if (!writeRollRemoveIndex(idx)) return;
+        // Textbox .change is the primary trigger; button click is a fallback.
         setTimeout(clickRollRemove, 0);
       });
-      thumb.appendChild(x);
     });
   };
   const ensureRollObserver = () => {
@@ -3627,7 +3637,7 @@ def _roll_gallery_update(state):
 def _roll_meta_md(state) -> str:
     roll = (state or {}).get("roll") or []
     if not roll:
-        return "_No frames yet — add photos from **Ingest**._"
+        return "_No frames yet — add photos from **Upload**._"
     idx = int(state.get("roll_index", 0)) + 1
     dn = (state or {}).get("dn")
     name = ""
@@ -3680,7 +3690,7 @@ def _build_ingest_frame(path: str | None) -> dict:
     original_ref = _downscale_rgb(original_full, REF_MAX_SIDE)
     summary = (
         f"{_stage_banner('development', ['ingest'])}\n\n"
-        f"**Ingest locked** — `{dn.metadata['source']['original_filename']}`  \n"
+        f"**Upload locked** — `{dn.metadata['source']['original_filename']}`  \n"
         f"_Use the live preview tools: **Frame** to crop, **Inspect** to zoom._\n\n"
         f"{_history_md(dn)}"
     )
@@ -3826,7 +3836,7 @@ def _history_md(dn) -> str:
     for i, h in enumerate(hist, 1):
         op = h.get("op", "?")
         if op == "ingest":
-            lines.append(f"{i}. **Ingest** — `{_short_name(h.get('source'), keep=42)}`")
+            lines.append(f"{i}. **Upload** — `{_short_name(h.get('source'), keep=42)}`")
         elif op == "develop":
             chem = h.get("developer_name") or h.get("developer_id")
             if h.get("development_minutes") is not None:
@@ -3856,7 +3866,7 @@ def _history_md(dn) -> str:
             )
         elif op == "unlock":
             stage = h.get("stage", "?")
-            label = {"development": "Develop", "print": "Print", "ingest": "Ingest"}.get(stage, stage)
+            label = {"development": "Develop", "print": "Print", "ingest": "Upload"}.get(stage, stage)
             lines.append(f"{i}. **← Unlocked {label}** — previous lock opened for revision")
         elif op == "rotate":
             lines.append(
@@ -3882,7 +3892,7 @@ def _history_md(dn) -> str:
     lock_labels = []
     for s in ("ingest", "development", "print"):
         if s in locks:
-            lock_labels.append({"ingest": "Ingest", "development": "Develop", "print": "Print"}[s])
+            lock_labels.append({"ingest": "Upload", "development": "Develop", "print": "Print"}[s])
     lines.append("")
     lines.append(f"**Currently locked:** {', '.join(lock_labels) or '—'}")
     lines.append(
@@ -3894,7 +3904,7 @@ def _history_md(dn) -> str:
 
 def _stage_banner(stage: str, locked: list | None = None) -> str:
     """Ritual progress: which stage you're working, which are locked."""
-    steps = [("ingest", "Ingest"), ("development", "Develop"), ("print", "Print")]
+    steps = [("ingest", "Upload"), ("development", "Develop"), ("print", "Print")]
     order = {"ingest": 0, "development": 1, "print": 2}
     cur = order.get(stage, -1)
     locked_set = set(locked or [])
@@ -4567,8 +4577,8 @@ def _roll_session_outputs(state, *, drawer: str | None = "roll"):
     empty = {"roll": [], "roll_index": -1}
     if not state or state.get("dn") is None:
         summary = (
-            "**1. Ingest — working** → 2. Develop → 3. Print\n\n"
-            "*Add photos from **Ingest** — they collect in the **Roll** tab.*"
+            "**1. Upload — working** → 2. Develop → 3. Print\n\n"
+            "*Add photos from **Upload** — they collect in the **Roll** tab.*"
         )
         return (
             None,
@@ -4607,10 +4617,16 @@ def _roll_session_outputs(state, *, drawer: str | None = "roll"):
     summary = state.get("summary_cache") or ""
     n = len(state.get("roll") or [])
     idx = int(state.get("roll_index", 0)) + 1
-    if n > 1 and "**Ingest locked**" in summary:
+    if n > 1 and "**Upload locked**" in summary:
+        summary = summary.replace(
+            "**Upload locked**",
+            f"**Upload locked** (frame {idx}/{n})",
+            1,
+        )
+    elif n > 1 and "**Ingest locked**" in summary:
         summary = summary.replace(
             "**Ingest locked**",
-            f"**Ingest locked** (frame {idx}/{n})",
+            f"**Upload locked** (frame {idx}/{n})",
             1,
         )
     elif n > 1 and "frame " not in summary.split("\n", 1)[0]:
@@ -4793,16 +4809,33 @@ def cancel_roll_switch(state):
     )
 
 
+def _parse_roll_index(index_raw, fallback: int = -1) -> int:
+    """Accept plain ints or 'index:token' from the hover-✕ UI script."""
+    raw = str(index_raw or "").strip()
+    if not raw or raw == "-1":
+        return int(fallback)
+    head = raw.split(":", 1)[0].strip()
+    try:
+        return int(head)
+    except (TypeError, ValueError):
+        return int(fallback)
+
+
 def remove_from_roll(index_raw, state):
     """Drop a frame from the camera roll (hover ✕ passes the index)."""
+    raw = str(index_raw or "").strip()
+    # Ignore empty/-1 from the hidden textbox mounting or resets — never
+    # fall back to "delete whatever is active" on a blank change event.
+    if not raw or raw == "-1":
+        if not state or state.get("dn") is None:
+            return _roll_session_outputs(None)
+        return _roll_session_outputs(state, drawer="roll")
+
     state = _ensure_roll(state or {})
     if state.get("dn") is not None and state.get("roll"):
         state = _sync_active_into_roll(state)
     roll = list(state.get("roll") or [])
-    try:
-        idx = int(str(index_raw).strip())
-    except (TypeError, ValueError):
-        idx = int(state.get("roll_index", -1))
+    idx = _parse_roll_index(raw, fallback=-1)
     if not roll or idx < 0 or idx >= len(roll):
         if not roll or state.get("dn") is None:
             return _roll_session_outputs(None)
@@ -6344,7 +6377,7 @@ def unlock_print(state):
 
 def reset_session():
     summary = (
-        "**1. Ingest — working** → 2. Develop → 3. Print\n\n"
+        "**1. Upload — working** → 2. Develop → 3. Print\n\n"
         "*Add photos to the camera roll to begin.*"
     )
     on, off = gr.update(interactive=True), gr.update(interactive=False)
@@ -6404,7 +6437,7 @@ def build_ui() -> gr.Blocks:
             # ——— Icon rail ———
             with gr.Column(scale=0, elem_id="icon_rail", min_width=56):
                 rail_ingest = gr.Button(
-                    "⬇\nIngest", elem_id="rail_ingest", size="sm",
+                    "⬇\nUpload", elem_id="rail_ingest", size="sm",
                     elem_classes=["rail-btn", "rail-active"],
                 )
                 rail_roll = gr.Button(
@@ -6428,14 +6461,14 @@ def build_ui() -> gr.Blocks:
             # ——— Drawer panels (one visible) ———
             with gr.Column(scale=0, elem_id="drawer_host", min_width=0):
                 with gr.Group(elem_id="drawer_ingest", elem_classes=["drawer-panel", "is-open"]):
-                    with gr.Accordion("Ingest", open=True, elem_id="acc_ingest") as ingest_acc:
+                    with gr.Accordion("Upload", open=True, elem_id="acc_ingest") as ingest_acc:
                         sample = gr.Dropdown(
                             choices=SAMPLE_CHOICES,
                             value=default_sample,
                             label="Sample",
                         )
                         file_in = gr.File(
-                            label="Upload",
+                            label="Photos",
                             file_count="multiple",
                             file_types=[
                                 ".arw", ".cr2", ".cr3", ".nef", ".dng", ".raf", ".orf", ".rw2",
@@ -6468,15 +6501,17 @@ def build_ui() -> gr.Blocks:
                             elem_id="camera_roll",
                         )
                         # Hidden triggers for per-thumb ✕ / click-to-switch (UI script).
+                        # Keep Remove interactive — Gradio ignores clicks on disabled buttons,
+                        # which broke the hover ✕ path when interactive stayed False.
                         roll_remove_index = gr.Textbox(
-                            value="-1",
+                            value="",
                             visible=False,
                             elem_id="roll_remove_index",
                         )
                         remove_roll_btn = gr.Button(
                             "Remove",
                             visible=False,
-                            interactive=False,
+                            interactive=True,
                             elem_id="roll_remove",
                         )
                         roll_switch_index = gr.Textbox(
@@ -6622,8 +6657,8 @@ def build_ui() -> gr.Blocks:
                 # Stage + recipe readout floats over the print rather than
                 # taking a slice of the drawer above the controls.
                 status = gr.Markdown(
-                    "**1. Ingest — working** → 2. Develop → 3. Print  \n"
-                    "_Commit Ingest to begin._",
+                    "**1. Upload — working** → 2. Develop → 3. Print  \n"
+                    "_Add photos from **Upload** to begin._",
                     elem_id="ritual_status",
                 )
                 spot_readout = gr.Markdown(
@@ -7018,6 +7053,17 @@ def build_ui() -> gr.Blocks:
             outputs=roll_switch_outputs,
         )
 
+        # Primary path: JS writes index:token into the textbox (always a new value).
+        roll_remove_index.change(
+            fn=remove_from_roll,
+            inputs=[roll_remove_index, state],
+            outputs=ingest_outputs,
+        ).then(
+            fn=live_preview_high,
+            inputs=preview_inputs,
+            outputs=preview_outputs,
+        )
+        # Fallback if only the hidden button receives the click.
         remove_roll_btn.click(
             fn=remove_from_roll,
             inputs=[roll_remove_index, state],

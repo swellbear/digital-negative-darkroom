@@ -57,16 +57,22 @@ def test_camera_roll_add_switch_remove():
     assert state["dn"] is state["roll"][0]["dn"]
 
     # Remove a non-active middle/first frame by index (hover ✕ path).
-    outs = mod.remove_from_roll(0, state)
+    outs = mod.remove_from_roll("0:test", state)
     state = _state_from(outs)
     assert len(state["roll"]) == 2
     assert state["roll_index"] == 0
 
     while state.get("dn") is not None:
-        outs = mod.remove_from_roll(state["roll_index"], state)
+        outs = mod.remove_from_roll(f"{state['roll_index']}:t", state)
         state = _state_from(outs)
     assert state["roll"] == []
     assert state["roll_index"] == -1
+
+    # Blank textbox change must not delete anything.
+    state = _state_from(mod.commit_ingest(None, [path], None))
+    before = len(state["roll"])
+    state = _state_from(mod.remove_from_roll("", state))
+    assert len(state["roll"]) == before
 
 
 def test_remove_non_active_frame_keeps_selection():
@@ -75,7 +81,7 @@ def test_remove_non_active_frame_keeps_selection():
     state = _state_from(mod.commit_ingest(None, [path, path, path], None))
     assert state["roll_index"] == 2
     # Delete frame 0 while working on frame 2 → active becomes 1.
-    state = _state_from(mod.remove_from_roll(0, state))
+    state = _state_from(mod.remove_from_roll("0:x", state))
     assert len(state["roll"]) == 2
     assert state["roll_index"] == 1
 
