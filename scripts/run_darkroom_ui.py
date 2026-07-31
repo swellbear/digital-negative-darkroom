@@ -3562,39 +3562,65 @@ def _capture_controls(
 
 _CONTROL_COUNT = 25
 
+# Develop recipe controls — Commit Develop sets these interactive=False.
+_DEV_CONTROL_KEYS = (
+    "film_id",
+    "developer_id",
+    "development_minutes",
+    "contrast",
+    "grain",
+    "exposure_index",
+    "contrast_filter",
+    "scene_exposure",
+    "halation",
+)
+# Print controls — Commit Print sets the core ones interactive=False.
+_PRINT_CONTROL_KEYS = (
+    "paper_id",
+    "print_exposure",
+    "print_grade",
+    "print_contrast",
+    "split_grade",
+    "soft_grade",
+    "hard_grade",
+    "soft_seconds",
+    "hard_seconds",
+    "test_strips",
+    "test_bands",
+    "test_stops",
+    "flash_stops",
+    "dry_down",
+    "tone",
+    "border_frac",
+)
+
 
 def _control_updates(state):
-    """gr.update values to restore a frame's saved Develop/Print controls."""
+    """Restore per-frame Develop/Print values and lock-matched interactivity.
+
+    Commit Develop disables the film/developer controls. Switching to an
+    undeveloped roll frame must turn them back on, or that photo cannot be
+    developed until the whole session is reset.
+    """
     c = (state or {}).get("controls") or {}
-    if not c:
-        return tuple(gr.skip() for _ in range(_CONTROL_COUNT))
-    return (
-        c.get("film_id", gr.skip()),
-        c.get("developer_id", gr.skip()),
-        c.get("development_minutes", gr.skip()),
-        c.get("contrast", gr.skip()),
-        c.get("grain", gr.skip()),
-        c.get("exposure_index", gr.skip()),
-        c.get("contrast_filter", gr.skip()),
-        c.get("scene_exposure", gr.skip()),
-        c.get("halation", gr.skip()),
-        c.get("paper_id", gr.skip()),
-        c.get("print_exposure", gr.skip()),
-        c.get("print_grade", gr.skip()),
-        c.get("print_contrast", gr.skip()),
-        c.get("split_grade", gr.skip()),
-        c.get("soft_grade", gr.skip()),
-        c.get("hard_grade", gr.skip()),
-        c.get("soft_seconds", gr.skip()),
-        c.get("hard_seconds", gr.skip()),
-        c.get("test_strips", gr.skip()),
-        c.get("test_bands", gr.skip()),
-        c.get("test_stops", gr.skip()),
-        c.get("flash_stops", gr.skip()),
-        c.get("dry_down", gr.skip()),
-        c.get("tone", gr.skip()),
-        c.get("border_frac", gr.skip()),
+    has_dn = bool(state and state.get("dn") is not None)
+    dev_on = (not _locked(state, "development")) if has_dn else True
+    print_on = (not _locked(state, "print")) if has_dn else True
+
+    def one(key: str, *, interactive: bool):
+        kwargs = {"interactive": bool(interactive)}
+        if key in c:
+            kwargs["value"] = c[key]
+        return gr.update(**kwargs)
+
+    return tuple(one(k, interactive=dev_on) for k in _DEV_CONTROL_KEYS) + tuple(
+        one(k, interactive=print_on) for k in _PRINT_CONTROL_KEYS
     )
+
+
+def _session_with_controls(state, *, drawer: str | None = "roll"):
+    """Roll/ingest session outputs plus Develop/Print control restore."""
+    return (*_roll_session_outputs(state, drawer=drawer), *_control_updates(state))
 
 
 def _is_dirty(state) -> bool:
@@ -4747,13 +4773,20 @@ def commit_ingest(sample_path, file_obj, state):
         state["summary_cache"] = summary
         roll[new_index] = _frame_payload(state)
         state["roll"] = roll
-    return _roll_session_outputs(state, drawer="roll")
+    return _session_with_controls(state, drawer="roll")
 
 
 def _roll_switch_bundle(state, *, drawer="roll", modal_visible=False, pending=-1, restore_controls=True):
     """Session UI + control restore + save-prompt modal for frame switches."""
     base = _roll_session_outputs(state, drawer=drawer)
-    ctrls = _control_updates(state) if restore_controls else tuple(gr.skip() for _ in range(_CONTROL_COUNT))
+    if restore_controls:
+        ctrls = _control_updates(state)
+    elif state and state.get("dn") is not None:
+        # Keep current slider values, but refresh interactive flags from locks.
+        # Otherwise Commit Develop leaves film controls stuck off after a switch.
+        ctrls = _control_updates({**state, "controls": {}})
+    else:
+        ctrls = tuple(gr.skip() for _ in range(_CONTROL_COUNT))
     return (
         *base,
         *ctrls,
@@ -4867,8 +4900,8 @@ def remove_from_roll(index_raw, state):
     # fall back to "delete whatever is active" on a blank change event.
     if not raw or raw == "-1":
         if not state or state.get("dn") is None:
-            return _roll_session_outputs(None)
-        return _roll_session_outputs(state, drawer="roll")
+            return _session_with_controls(None)
+        return _session_with_controls(state, drawer="roll")
 
     state = _ensure_roll(state or {})
     if state.get("dn") is not None and state.get("roll"):
@@ -4877,13 +4910,13 @@ def remove_from_roll(index_raw, state):
     idx = _parse_roll_index(raw, fallback=-1)
     if not roll or idx < 0 or idx >= len(roll):
         if not roll or state.get("dn") is None:
-            return _roll_session_outputs(None)
-        return _roll_session_outputs(state, drawer="roll")
+            return _session_with_controls(None)
+        return _session_with_controls(state, drawer="roll")
 
     active = int(state.get("roll_index", 0))
     roll.pop(idx)
     if not roll:
-        return _roll_session_outputs(None)
+        return _session_with_controls(None)
     if active == idx:
         new_idx = min(idx, len(roll) - 1)
     elif active > idx:
@@ -4901,7 +4934,7 @@ def remove_from_roll(index_raw, state):
     state["summary_cache"] = summary
     roll[new_idx] = _frame_payload(state)
     state["roll"] = roll
-    return _roll_session_outputs(state, drawer="roll")
+    return _session_with_controls(state, drawer="roll")
 
 
 def _run_live_develop_then_print(
@@ -7015,7 +7048,10 @@ def build_ui() -> gr.Blocks:
             tone,
             border_frac,
         ]
-        roll_switch_outputs = ingest_outputs + control_outputs + [
+        # Ingest/remove also restore Develop/Print interactivity — otherwise a
+        # prior Commit Develop leaves film controls disabled on the new frame.
+        session_control_outputs = ingest_outputs + control_outputs
+        roll_switch_outputs = session_control_outputs + [
             roll_save_modal,
             roll_pending_index,
         ]
@@ -7023,7 +7059,7 @@ def build_ui() -> gr.Blocks:
         ingest_btn.click(
             fn=commit_ingest,
             inputs=[sample, file_in, state],
-            outputs=ingest_outputs,
+            outputs=session_control_outputs,
         ).then(
             fn=live_preview_high,
             inputs=preview_inputs,
@@ -7034,7 +7070,7 @@ def build_ui() -> gr.Blocks:
         file_in.upload(
             fn=commit_ingest,
             inputs=[sample, file_in, state],
-            outputs=ingest_outputs,
+            outputs=session_control_outputs,
         ).then(
             fn=live_preview_high,
             inputs=preview_inputs,
@@ -7092,7 +7128,7 @@ def build_ui() -> gr.Blocks:
         roll_remove_index.change(
             fn=remove_from_roll,
             inputs=[roll_remove_index, state],
-            outputs=ingest_outputs,
+            outputs=session_control_outputs,
         ).then(
             fn=live_preview_high,
             inputs=preview_inputs,
@@ -7102,7 +7138,7 @@ def build_ui() -> gr.Blocks:
         remove_roll_btn.click(
             fn=remove_from_roll,
             inputs=[roll_remove_index, state],
-            outputs=ingest_outputs,
+            outputs=session_control_outputs,
         ).then(
             fn=live_preview_high,
             inputs=preview_inputs,
