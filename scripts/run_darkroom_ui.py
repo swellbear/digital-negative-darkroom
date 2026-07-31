@@ -4320,6 +4320,10 @@ def on_chemistry_mode_change(mode: str, split_on=False):
             value=float(profile.defaults.get("warmth", 0.0)),
         ),
         gr.update(
+            visible=is_instant,
+            value=bool(profile.defaults.get("card_border", True)),
+        ),
+        gr.update(
             label="Diffusion" if is_instant else "Grain",
             value=(
                 float(profile.defaults.get("diffusion", 0.14))
@@ -4644,6 +4648,7 @@ def _default_controls_dict() -> dict:
         "process_temp_c": 21.0,
         "instant_chroma": 1.0,
         "instant_warmth": 0.0,
+        "instant_border": True,
     }
 
 
@@ -6377,6 +6382,7 @@ def _run_live_develop_then_print(
         dev_m["warmth"] = float(ctrl.get("instant_warmth", profile.defaults.get("warmth", 0.0)))
         # Grain slider is remapped to diffusion in Instant mode.
         dev_m["diffusion"] = float(grain)
+        dev_m["card_border"] = bool(ctrl.get("instant_border", True))
     development = develop(
         proxy,
         profile,
@@ -6539,6 +6545,7 @@ def live_preview(
     process_temp_c,
     instant_chroma,
     instant_warmth,
+    instant_border,
     state,
     quality: str = "high",
     mark_dirty: bool = False,
@@ -6601,6 +6608,7 @@ def live_preview(
     controls["process_temp_c"] = float(process_temp_c if process_temp_c is not None else 21.0)
     controls["instant_chroma"] = float(instant_chroma if instant_chroma is not None else 1.0)
     controls["instant_warmth"] = float(instant_warmth if instant_warmth is not None else 0.0)
+    controls["instant_border"] = bool(True if instant_border is None else instant_border)
 
     if not state or state.get("dn") is None:
         return _pack_preview(None, None, None, None, "*Commit Ingest first.*", state)
@@ -6810,6 +6818,7 @@ def live_preview_drag(
     process_temp_c,
     instant_chroma,
     instant_warmth,
+    instant_border,
     state,
 ):
     return live_preview(
@@ -6845,6 +6854,7 @@ def live_preview_drag(
         process_temp_c,
         instant_chroma,
         instant_warmth,
+        instant_border,
         state,
         quality="drag",
         mark_dirty=True,
@@ -6885,6 +6895,7 @@ def live_preview_high(
     process_temp_c,
     instant_chroma,
     instant_warmth,
+    instant_border,
     state,
 ):
     return live_preview(
@@ -6920,6 +6931,7 @@ def live_preview_high(
         process_temp_c,
         instant_chroma,
         instant_warmth,
+        instant_border,
         state,
         quality="high",
         mark_dirty=False,
@@ -6960,6 +6972,7 @@ def live_preview_edit(
     process_temp_c,
     instant_chroma,
     instant_warmth,
+    instant_border,
     state,
 ):
     return live_preview(
@@ -6995,6 +7008,7 @@ def live_preview_edit(
         process_temp_c,
         instant_chroma,
         instant_warmth,
+        instant_border,
         state,
         quality="high",
         mark_dirty=True,
@@ -7020,6 +7034,7 @@ def commit_develop(
         dev_m["chroma"] = float(ctrl.get("instant_chroma", 1.0))
         dev_m["warmth"] = float(ctrl.get("instant_warmth", 0.0))
         dev_m["diffusion"] = float(grain)
+        dev_m["card_border"] = bool(ctrl.get("instant_border", True))
     development = develop(
         dn,
         profile,
@@ -8313,6 +8328,12 @@ def build_ui() -> gr.Blocks:
                             visible=False,
                             elem_id="instant_warmth",
                         )
+                        instant_border = gr.Checkbox(
+                            label="Polaroid border",
+                            value=True,
+                            visible=False,
+                            elem_id="instant_border",
+                        )
                         with gr.Accordion(
                             "More",
                             open=False,
@@ -8781,6 +8802,7 @@ def build_ui() -> gr.Blocks:
             process_temp,
             instant_chroma,
             instant_warmth,
+            instant_border,
             state,
         ]
         preview_outputs = [
@@ -8951,6 +8973,7 @@ def build_ui() -> gr.Blocks:
                 process_temp,
                 instant_chroma,
                 instant_warmth,
+                instant_border,
                 grain,
                 contrast_filter,
                 scene_exposure,
@@ -9006,6 +9029,7 @@ def build_ui() -> gr.Blocks:
             process_temp,
             instant_chroma,
             instant_warmth,
+            instant_border,
         ):
             # Drag = fast lower-res; release/change = commit-quality preview
             ctrl.input(fn=live_preview_drag, inputs=preview_inputs, outputs=preview_outputs)

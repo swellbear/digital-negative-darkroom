@@ -282,6 +282,7 @@ def process_instant(
         "chroma": chroma,
         "warmth": warmth,
         "diffusion": diff,
+        "card_border": bool(border),
         "exposure_index": ei,
         "chemistry_mode": "instant",
     }
