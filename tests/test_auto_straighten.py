@@ -22,12 +22,30 @@ def _striped_frame(h: int = 240, w: int = 320) -> np.ndarray:
     return np.clip(img + rng.normal(0, 0.015, img.shape), 0, 1).astype(np.float32)
 
 
+def _vertical_mullion_frame(h: int = 280, w: int = 360) -> np.ndarray:
+    """Building-like vertical window mullions — the case Auto used to miss."""
+    xx = np.linspace(0, 1, w, dtype=np.float32)[None, :]
+    bands = np.where((xx * 22).astype(int) % 2 == 0, 0.9, 0.18).astype(np.float32)
+    img = np.broadcast_to(bands, (h, w)).copy()
+    # Soft horizontal sill near the bottom (weaker than mullions).
+    img[int(h * 0.72) : int(h * 0.76), :] = 0.55
+    rng = np.random.default_rng(2)
+    return np.clip(img + rng.normal(0, 0.02, img.shape), 0, 1).astype(np.float32)
+
+
 def test_estimate_straighten_recovers_tilt():
     level = _striped_frame()
     # Tilt the content so a +2.5° CW straighten levels it again.
     tilted = straighten_image(level, -2.5)
     est = estimate_straighten_degrees(tilted, max_degrees=8.0, step=0.25)
     assert abs(est - 2.5) <= 0.75
+
+
+def test_estimate_straighten_recovers_vertical_mullion_tilt():
+    level = _vertical_mullion_frame()
+    tilted = straighten_image(level, -3.0)
+    est = estimate_straighten_degrees(tilted, max_degrees=8.0, step=0.25)
+    assert abs(est - 3.0) <= 0.75
 
 
 def test_level_image_stays_near_zero():

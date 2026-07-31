@@ -1362,6 +1362,29 @@ body.drawer-collapsed #drawer_host {
   z-index: 35 !important;
   transition: flex-basis 0.16s ease, width 0.16s ease, padding 0.16s ease, opacity 0.14s ease !important;
 }
+/* Kill the spurious horizontal scrollbar in Modules (crop row / long labels). */
+#module_panel,
+#module_panel .gr-accordion,
+#module_panel .form,
+#module_panel .block,
+#module_panel .wrap,
+#module_panel .styler,
+#module_panel > div {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  overflow-x: hidden !important;
+}
+#module_panel *::-webkit-scrollbar:horizontal {
+  height: 0 !important;
+  display: none !important;
+}
+#module_panel #mod_crop button,
+#module_panel #mod_crop .wrap,
+#module_panel #mod_crop .form {
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
 body.module-collapsed #module_panel {
   flex-basis: 0 !important;
   width: 0 !important;
@@ -5247,11 +5270,22 @@ def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
     return rect, hint
 
 
+def preview_straighten_adjust(straighten_deg, state):
+    """Live Frame preview — rotate the stage as the straighten slider moves."""
+    if not state or state.get("dn") is None:
+        return gr.update()
+    img = _framing_stage_preview(state, straighten_deg)
+    if img is None:
+        return gr.update()
+    return gr.update(value=img)
+
+
 def suggest_auto_straighten(state):
-    """Set the straighten slider from detected horizontal structure."""
+    """Set the straighten slider from detected axis-aligned structure."""
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
     state = _ensure_geometry_bases(state)
+    # Prefer the photo the user is framing; fall back to geometry base.
     src = state.get("original_base")
     if src is None:
         src = state.get("geometry_base")
@@ -5259,13 +5293,18 @@ def suggest_auto_straighten(state):
         raise gr.Error("No framing base to analyze.")
     deg = estimate_straighten_degrees(np.asarray(src))
     if abs(deg) < 0.15:
-        hint = "_Auto straighten — already level (0.0°). Adjust the slider if you disagree._"
+        hint = (
+            "_Auto straighten — no clear tilt found (0.0°). "
+            "Use the slider if the verticals still look off, then **Apply framing**._"
+        )
     else:
         hint = (
-            f"_Auto straighten — **{deg:+.2f}°**. "
+            f"_Auto straighten — **{deg:+.2f}°** (levels horizontals & verticals). "
             f"Tweak if needed, then **Apply framing** (or Auto crop next)._"
         )
-    return float(deg), hint
+    preview = _framing_stage_preview(state, deg)
+    live_u = gr.update(value=preview) if preview is not None else gr.update()
+    return float(deg), hint, live_u
 
 
 def rotate_cw(state):
@@ -8404,7 +8443,17 @@ def build_ui() -> gr.Blocks:
         auto_straighten_btn.click(
             fn=suggest_auto_straighten,
             inputs=[state],
-            outputs=[straighten_deg, crop_hint],
+            outputs=[straighten_deg, crop_hint, live_out],
+        )
+        straighten_deg.input(
+            fn=preview_straighten_adjust,
+            inputs=[straighten_deg, state],
+            outputs=[live_out],
+        )
+        straighten_deg.change(
+            fn=preview_straighten_adjust,
+            inputs=[straighten_deg, state],
+            outputs=[live_out],
         )
         auto_crop_btn.click(
             fn=suggest_auto_crop,
