@@ -293,13 +293,13 @@ footer, .gradio-container footer {
 
 /* Icon rail — darktable-style: flat, quiet, accent only on the active stage */
 #icon_rail {
-  flex: 0 0 42px !important;
-  width: 42px !important;
-  max-width: 42px !important;
+  flex: 0 0 48px !important;
+  width: 48px !important;
+  max-width: 48px !important;
   display: flex !important;
   flex-direction: column !important;
   gap: 1px !important;
-  padding: 3px 3px 4px !important;
+  padding: 3px 2px 4px !important;
   box-sizing: border-box !important;
   border-right: 1px solid var(--dr-border) !important;
   background: var(--dr-bg-app) !important;
@@ -307,19 +307,22 @@ footer, .gradio-container footer {
   overflow: hidden !important;
 }
 #icon_rail button {
-  min-height: 38px !important;
-  height: 38px !important;
+  min-height: 40px !important;
+  height: 40px !important;
   width: 100% !important;
+  max-width: 100% !important;
   padding: 3px 1px 2px !important;
-  font-size: 0.48rem !important;
+  font-size: 0.45rem !important;
   line-height: 1 !important;
   white-space: pre-line !important;
   border-radius: 6px !important;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   color: var(--dr-text-dim) !important;
   background: transparent !important;
   border: 1px solid transparent !important;
   box-shadow: none !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
   transition: background 0.12s ease, color 0.12s ease !important;
 }
 #icon_rail button:hover {
@@ -331,11 +334,16 @@ footer, .gradio-container footer {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 1px;
+  width: 100%;
+  height: 16px;
+  margin-bottom: 2px;
+  flex: 0 0 16px;
 }
 #icon_rail button .rail-svg {
-  width: 16px;
-  height: 16px;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
   stroke: currentColor;
   fill: none;
   stroke-width: 1.7;
@@ -345,8 +353,17 @@ footer, .gradio-container footer {
 }
 #icon_rail button .rail-label {
   display: block;
-  font-size: 0.48rem;
-  line-height: 1;
+  width: 100%;
+  max-width: 100%;
+  font-size: 0.45rem !important;
+  line-height: 1.05 !important;
+  letter-spacing: -0.02em !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: clip !important;
+  box-sizing: border-box !important;
+  padding: 0 1px !important;
 }
 #icon_rail button.rail-active {
   color: var(--dr-accent-strong) !important;
@@ -1707,13 +1724,15 @@ UI_JS = """
   // ——— Minimal lucide-style line icons for the rail (no icon font needed) ———
   const RAIL_ICONS = {
     ingest: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+    // Film-strip — was missing, so Roll kept a tiny unicode glyph vs 16px SVGs.
+    roll: '<rect x="2" y="2" width="20" height="20" rx="2.2"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="12" x2="7" y2="12"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="17" y1="12" x2="22" y2="12"/><line x1="17" y1="17" x2="22" y2="17"/>',
     develop: '<path d="M14 2v6a2 2 0 0 0 .24.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.75-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.45 15h11.1"/><path d="M8.5 2h7"/>',
     print: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>',
     frame: '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
     log: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
     new: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   };
-  const RAIL_LABELS = { ingest: 'Upload', develop: 'Dev', print: 'Print', frame: 'Frame', log: 'Log', new: 'New', roll: 'Roll' };
+  const RAIL_LABELS = { ingest: 'Upload', roll: 'Roll', develop: 'Dev', print: 'Print', frame: 'Frame', log: 'Log', new: 'New' };
   const svgWrap = (inner) =>
     `<svg class="rail-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`;
   const installRailIcons = () => {
@@ -6914,7 +6933,7 @@ def build_ui() -> gr.Blocks:
 
         with gr.Row(elem_id="main_workspace", equal_height=False):
             # ——— Icon rail ———
-            with gr.Column(scale=0, elem_id="icon_rail", min_width=56):
+            with gr.Column(scale=0, elem_id="icon_rail", min_width=48):
                 rail_ingest = gr.Button(
                     "⬇\nUpload", elem_id="rail_ingest", size="sm",
                     elem_classes=["rail-btn", "rail-active"],
@@ -6935,7 +6954,9 @@ def build_ui() -> gr.Blocks:
                     "☰\nLog", elem_id="rail_log", size="sm", elem_classes=["rail-btn"]
                 )
                 gr.HTML('<div class="rail-spacer"></div>')
-                reset_btn = gr.Button("+\nNew", elem_id="rail_new", size="sm")
+                reset_btn = gr.Button(
+                    "+\nNew", elem_id="rail_new", size="sm", elem_classes=["rail-btn"]
+                )
 
             # ——— Drawer panels (one visible) ———
             with gr.Column(scale=0, elem_id="drawer_host", min_width=0):
