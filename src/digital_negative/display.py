@@ -127,7 +127,7 @@ def original_photo_preview(path: str | Path | None = None, *, dn_image: np.ndarr
 
     This is *not* the Digital Negative:
     - Camera raw → camera-WB sRGB demosaic with a normal display TRC
-    - JPEG/TIFF/PNG → pixels as stored
+    - JPEG/TIFF/PNG/HEIC → pixels with EXIF/HEIF orientation applied
     - Synthetic / no path → display-mapped scene from the DN image
     """
     if path:
@@ -149,7 +149,17 @@ def original_photo_preview(path: str | Path | None = None, *, dn_image: np.ndarr
                     highlight_mode=rawpy.HighlightMode.Clip,
                 )
             return np.ascontiguousarray(rgb)
+        # Match ingest: phone JPEGs/HEICs often store pixels sideways and tag
+        # the true upright orientation in EXIF. Without this, camera-roll
+        # thumbs (which prefer original_view) show sideways while the live
+        # develop/print preview — built from the EXIF-aware DN — looks correct.
+        from PIL import ImageOps
+
+        from .ingest import _ensure_heif_support
+
+        _ensure_heif_support()
         with Image.open(path) as im:
+            im = ImageOps.exif_transpose(im)
             return np.asarray(im.convert("RGB"), dtype=np.uint8)
 
     # Synthetic / fallback: display-map DN luminance (or RGB) for a readable source view

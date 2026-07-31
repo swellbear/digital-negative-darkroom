@@ -352,6 +352,32 @@ def test_original_photo_preview_synthetic_is_rgb():
     assert rgb.dtype == np.uint8
 
 
+def test_original_photo_preview_honors_exif_orientation(tmp_path):
+    """Phone JPEGs store sideways pixels + Orientation tag; preview must upright them."""
+    from PIL import Image
+
+    from digital_negative.display import original_photo_preview
+
+    # Stored as tall 60×100 with a red marker in the file's top-left corner.
+    # Orientation 6 = "Rotate 90 CW" → upright frame is 100×60 with the marker
+    # at the top-right (same transform ingest applies via ImageOps.exif_transpose).
+    im = Image.new("RGB", (60, 100), (10, 10, 10))
+    for y in range(20):
+        for x in range(8):
+            im.putpixel((x, y), (255, 0, 0))
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    path = tmp_path / "phone_portrait.jpg"
+    im.save(path, exif=exif)
+
+    rgb = original_photo_preview(path)
+    assert rgb.shape == (60, 100, 3)
+    assert rgb.dtype == np.uint8
+    # Marker should land near the upright top-right, not the raw top-left.
+    assert int(rgb[5, -5, 0]) > 200
+    assert int(rgb[5, 5, 0]) < 40
+
+
 def test_rotate_image_clockwise_swaps_axes():
     from digital_negative.display import rotate_image
 
