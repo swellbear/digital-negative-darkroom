@@ -113,3 +113,44 @@ def test_advanced_dodge_burn_is_quarantined():
     assert 'elem_id="mod_dodge_burn"' in source
     assert "Modules → Advanced" in source
     assert "Default path: paper → exposure → filtration" in source
+
+
+def test_drawer_width_and_progressive_disclosure():
+    mod = _load_ui()
+    assert mod.DRAWER_WIDTH_PX >= 240
+    assert f"--dr-drawer-width: {mod.DRAWER_WIDTH_PX}px" in mod.UI_CSS
+    assert "var(--dr-drawer-width)" in mod.UI_CSS
+    source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
+    assert 'elem_id="acc_develop_more"' in source
+    assert 'elem_id="acc_print_more"' in source
+    assert "drawer-more" in source
+    assert 'elem_id="how_darkroom_works"' in source
+    assert "How this darkroom works" in mod.HOW_DARKROOM_WORKS_MD
+    assert "Live preview" in mod.HOW_DARKROOM_WORKS_MD
+
+
+def test_split_grade_children_hidden_until_enabled():
+    mod = _load_ui()
+    assert mod._split_grade_child_visible(False, "bw") is False
+    assert mod._split_grade_child_visible(True, "bw") is True
+    assert mod._split_grade_child_visible(True, "color") is False
+
+    outs = mod.on_split_grade_toggle(False, "bw")
+    assert all(_upd(u).get("visible") is False for u in outs)
+    outs_on = mod.on_split_grade_toggle(True, "bw")
+    assert all(_upd(u).get("visible") is True for u in outs_on)
+
+    bands, stops = mod.on_test_strips_toggle(False)
+    assert _upd(bands).get("visible") is False
+    assert _upd(stops).get("visible") is False
+    bands_on, stops_on = mod.on_test_strips_toggle(True)
+    assert _upd(bands_on).get("visible") is True
+    assert _upd(stops_on).get("visible") is True
+
+    # Chemistry mode change with split off keeps soft/hard hidden.
+    outs_bw = mod.on_chemistry_mode_change("bw", split_on=False)
+    # soft_grade is the 7th visibility slot after help (index 5 + 1+1+3+1 = 11 → soft)
+    # help=5, grade=6, contrast=7, cc_c=8, cc_m=9, cc_y=10, split=11, soft=12
+    assert _upd(outs_bw[12]).get("visible") is False
+    outs_split = mod.on_chemistry_mode_change("bw", split_on=True)
+    assert _upd(outs_split[12]).get("visible") is True

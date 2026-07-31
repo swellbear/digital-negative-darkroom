@@ -130,6 +130,15 @@ CHEMISTRY_MODE_LABELS = [
 LIVE_PRINT_LABEL = "Live theoretical print — not committed"
 LIVE_WAVE_LABEL = "→ WAVE YOUR CARD OVER THIS PRINT ←"
 ADVANCED_DODGE_BURN_LABEL = "Advanced · Dodge & burn"
+# Stage drawer width (px) — keep in sync with --dr-drawer-width in UI_CSS.
+DRAWER_WIDTH_PX = 260
+HOW_DARKROOM_WORKS_MD = (
+    "**How this darkroom works**\n\n"
+    "- **Live preview** is exploratory until you Commit a stage.\n"
+    "- **Commit** locks that stage into the Digital Negative; **Unlock** revises it.\n"
+    "- Default print path: paper → exposure → filtration → **Commit Print** "
+    "(Advanced tools are optional)."
+)
 
 # Filled after helper defs below (film-specific chemistry dropdown + minutes).
 _INIT_DEV_CHOICES: list = []
@@ -162,6 +171,8 @@ UI_CSS = """
   --dr-accent-contrast: #20140a !important;
   --dr-radius: 9px !important;
   --dr-font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Helvetica, Arial, sans-serif !important;
+  /* Stage drawer width — wide enough for film names / N± without crowding. */
+  --dr-drawer-width: 260px !important;
   /* One type scale for both side panels so labels stay on a single line. */
   --dr-fs-label: 0.62rem !important;
   --dr-fs-control: 0.63rem !important;
@@ -396,10 +407,16 @@ footer, .gradio-container footer {
    Keep every nested block inside the rail width — Gradio slider min/max
    rows and wide number boxes were forcing horizontal scrollbars. */
 #drawer_host {
-  flex: 0 0 188px !important;
-  width: 188px !important;
-  max-width: 188px !important;
+  flex: 0 0 var(--dr-drawer-width) !important;
+  width: var(--dr-drawer-width) !important;
+  max-width: var(--dr-drawer-width) !important;
   min-width: 0 !important;
+  /* Slightly roomier type than the module rail — primary Develop/Print scan. */
+  --dr-fs-label: 0.72rem !important;
+  --dr-fs-control: 0.74rem !important;
+  --dr-fs-note: 0.66rem !important;
+  --dr-fs-title: 0.68rem !important;
+  --dr-fs-tiny: 0.60rem !important;
   height: 100% !important;
   flex-wrap: nowrap !important;
   overflow-x: hidden !important;
@@ -690,11 +707,31 @@ body.drawer-collapsed #drawer_host {
 .drawer-panel { display: none !important; }
 .drawer-panel.is-open { display: block !important; }
 .drawer-panel .gr-accordion > .label-wrap {
-  display: none !important; /* rail is the chrome */
+  display: none !important; /* rail is the chrome for stage drawers */
 }
-/* Because that header is hidden, a collapsed accordion is a dead end: the
-   drawer renders as an empty box with no way to reopen it. The ritual still
-   sends open=False as stages lock, so pin drawer content open regardless. */
+/* Nested "More" sections keep a visible header and can collapse. */
+.drawer-panel .gr-accordion.drawer-more > .label-wrap,
+.drawer-panel #acc_develop_more > .label-wrap,
+.drawer-panel #acc_print_more > .label-wrap {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin: 8px 0 4px !important;
+  padding: 4px 2px !important;
+  border-top: 1px solid var(--dr-border) !important;
+  color: var(--dr-text-dim) !important;
+  font-size: var(--dr-fs-label) !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  background: transparent !important;
+}
+.drawer-panel .gr-accordion.drawer-more > .label-wrap .icon svg,
+.drawer-panel #acc_develop_more > .label-wrap .icon svg,
+.drawer-panel #acc_print_more > .label-wrap .icon svg {
+  stroke: var(--dr-text-dim) !important;
+}
+/* Because stage headers are hidden, a collapsed stage accordion is a dead
+   end — pin stage content open. Nested More must still be able to close. */
 .drawer-panel [data-testid="accordion-content"] {
   display: block !important;
   overflow-x: hidden !important;
@@ -703,6 +740,24 @@ body.drawer-collapsed #drawer_host {
   /* Room below the last control so sticky commit row + scroll end clear. */
   padding-bottom: 8px !important;
 }
+.drawer-panel .drawer-more > .label-wrap:not(.open) ~ [data-testid="accordion-content"],
+.drawer-panel #acc_develop_more > .label-wrap:not(.open) ~ [data-testid="accordion-content"],
+.drawer-panel #acc_print_more > .label-wrap:not(.open) ~ [data-testid="accordion-content"] {
+  display: none !important;
+}
+#how_darkroom_works {
+  margin: 8px 0 0 !important;
+  padding: 0 !important;
+  color: var(--dr-text-dim) !important;
+  font-size: var(--dr-fs-note) !important;
+  line-height: 1.35 !important;
+}
+#how_darkroom_works p,
+#how_darkroom_works ul {
+  margin: 0 0 4px !important;
+  padding-left: 1.1em !important;
+}
+#how_darkroom_works li { margin: 0 0 2px !important; }
 .drawer-panel .gr-accordion {
   margin: 0 !important;
   border: none !important;
@@ -3568,7 +3623,7 @@ def on_developer_change(film_id: str, developer_id: str):
     return _chem_time_update(film_id, developer_id, reset_to_normal=True)
 
 
-def on_chemistry_mode_change(mode: str):
+def on_chemistry_mode_change(mode: str, split_on=False):
     """Swap film/paper catalogs and Print control visibility for B&W vs Color."""
     mode = str(mode or "bw").lower()
     if mode not in {"bw", "color"}:
@@ -3606,7 +3661,10 @@ def on_chemistry_mode_change(mode: str):
         "hard_seconds",
         "tone",
     ):
-        show = _print_key_visible(mode, key)
+        if key in {"soft_grade", "hard_grade", "soft_seconds", "hard_seconds"}:
+            show = _split_grade_child_visible(split_on, mode)
+        else:
+            show = _print_key_visible(mode, key)
         vis.append(gr.update(visible=bool(show)))
     return (
         gr.update(choices=film_choices, value=film_id),
@@ -3856,6 +3914,30 @@ def _print_key_visible(mode: str, key: str) -> bool | None:
     return None
 
 
+def _split_grade_child_visible(split_on, chemistry_mode: str = "bw") -> bool:
+    """Soft/hard grade & seconds only when Split-grade is on in B&W."""
+    if str(chemistry_mode or "bw").lower() == "color":
+        return False
+    return bool(split_on)
+
+
+def on_split_grade_toggle(split_on, chemistry_mode: str = "bw"):
+    """Show split-grade child sliders only when the technique is active."""
+    show = _split_grade_child_visible(split_on, chemistry_mode)
+    return (
+        gr.update(visible=show),
+        gr.update(visible=show),
+        gr.update(visible=show),
+        gr.update(visible=show),
+    )
+
+
+def on_test_strips_toggle(test_strips_on):
+    """Show band controls only when test strips are enabled."""
+    show = bool(test_strips_on)
+    return gr.update(visible=show), gr.update(visible=show)
+
+
 def _default_controls_dict() -> dict:
     """Fresh Develop/Print defaults for a newly ingested roll frame."""
     return {
@@ -3977,7 +4059,12 @@ def _control_updates(state):
     )
     print_u = []
     for key in _PRINT_CONTROL_KEYS:
-        vis = _print_key_visible(mode, key)
+        if key in {"soft_grade", "hard_grade", "soft_seconds", "hard_seconds"}:
+            vis = _split_grade_child_visible(c.get("split_grade"), mode)
+        elif key in {"test_bands", "test_stops"}:
+            vis = bool(c.get("test_strips"))
+        else:
+            vis = _print_key_visible(mode, key)
         if key == "paper_id":
             pid = c.get("paper_id")
             pids = {x[1] for x in paper_choices}
@@ -7240,6 +7327,10 @@ def build_ui() -> gr.Blocks:
                             "_Photos land in the **Roll** tab._",
                             elem_id="ingest_hint",
                         )
+                        gr.Markdown(
+                            HOW_DARKROOM_WORKS_MD,
+                            elem_id="how_darkroom_works",
+                        )
 
                 with gr.Group(elem_id="drawer_roll", elem_classes=["drawer-panel"]):
                     with gr.Accordion("Camera roll", open=True, elem_id="acc_roll") as roll_acc:
@@ -7313,19 +7404,27 @@ def build_ui() -> gr.Blocks:
                         )
                         contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Contrast")
                         grain = gr.Slider(0.0, 2.5, value=1.0, step=0.05, label="Grain")
-                        exposure_index = gr.Slider(
-                            25, 6400, value=400, step=25, label="Exposure index (EI)"
-                        )
-                        contrast_filter = gr.Dropdown(
-                            choices=FILTER_LABELS,
-                            value="none",
-                            label="Contrast filter",
-                        )
-                        scene_exposure = gr.Slider(
-                            0.01, 60.0, value=0.01, step=0.01,
-                            label="Scene shutter (s)",
-                        )
-                        halation = gr.Slider(0.0, 1.5, value=0.0, step=0.05, label="Halation")
+                        with gr.Accordion(
+                            "More",
+                            open=False,
+                            elem_id="acc_develop_more",
+                            elem_classes=["drawer-more"],
+                        ):
+                            exposure_index = gr.Slider(
+                                25, 6400, value=400, step=25, label="Exposure index (EI)"
+                            )
+                            contrast_filter = gr.Dropdown(
+                                choices=FILTER_LABELS,
+                                value="none",
+                                label="Contrast filter",
+                            )
+                            scene_exposure = gr.Slider(
+                                0.01, 60.0, value=0.01, step=0.01,
+                                label="Scene shutter (s)",
+                            )
+                            halation = gr.Slider(
+                                0.0, 1.5, value=0.0, step=0.05, label="Halation"
+                            )
                         with gr.Row(elem_id="develop_commit_row"):
                             develop_btn = gr.Button(
                                 "Commit Develop", interactive=False, variant="primary", size="sm"
@@ -7359,33 +7458,60 @@ def build_ui() -> gr.Blocks:
                             cc_yellow = gr.Slider(
                                 0, 100, value=0, step=1, label="CC Yellow", visible=False
                             )
-                        split_grade = gr.Checkbox(
-                            label="Split-grade", value=False, visible=True
+                        gr.Markdown(
+                            "_Default path: paper → exposure → filtration → **Commit Print**. "
+                            "Optional techniques under **More**; dodge/burn under "
+                            "**Modules → Advanced** (after Develop is locked)._",
+                            elem_id="db_hint",
                         )
-                        with gr.Row():
-                            soft_grade = gr.Slider(
-                                0.0, 5.0, value=0.0, step=0.5, label="Soft grade", visible=True
+                        with gr.Accordion(
+                            "More",
+                            open=False,
+                            elem_id="acc_print_more",
+                            elem_classes=["drawer-more"],
+                        ):
+                            split_grade = gr.Checkbox(
+                                label="Split-grade", value=False, visible=True
                             )
-                            hard_grade = gr.Slider(
-                                0.0, 5.0, value=5.0, step=0.5, label="Hard grade", visible=True
+                            with gr.Row(elem_id="split_grade_row"):
+                                soft_grade = gr.Slider(
+                                    0.0, 5.0, value=0.0, step=0.5,
+                                    label="Soft grade", visible=False,
+                                )
+                                hard_grade = gr.Slider(
+                                    0.0, 5.0, value=5.0, step=0.5,
+                                    label="Hard grade", visible=False,
+                                )
+                            with gr.Row(elem_id="split_seconds_row"):
+                                soft_seconds = gr.Slider(
+                                    1.0, 64.0, value=4.5, step=0.5,
+                                    label="Soft (s)", visible=False,
+                                )
+                                hard_seconds = gr.Slider(
+                                    1.0, 64.0, value=3.5, step=0.5,
+                                    label="Hard (s)", visible=False,
+                                )
+                            test_strips = gr.Checkbox(label="Test strips", value=False)
+                            with gr.Row(elem_id="test_strips_row"):
+                                test_bands = gr.Slider(
+                                    3, 9, value=5, step=1, label="Bands", visible=False
+                                )
+                                test_stops = gr.Slider(
+                                    0.25, 1.0, value=0.5, step=0.25,
+                                    label="Band stops", visible=False,
+                                )
+                            flash_stops = gr.Slider(
+                                0.0, 2.0, value=0.0, step=0.05, label="Flash (stops)"
                             )
-                        with gr.Row():
-                            soft_seconds = gr.Slider(
-                                1.0, 64.0, value=4.5, step=0.5, label="Soft (s)", visible=True
+                            dry_down = gr.Slider(
+                                0.0, 20.0, value=0.0, step=0.5, label="Dry-down %"
                             )
-                            hard_seconds = gr.Slider(
-                                1.0, 64.0, value=3.5, step=0.5, label="Hard (s)", visible=True
+                            tone = gr.Dropdown(
+                                choices=TONE_LABELS, value="none", label="Tone", visible=True
                             )
-                        test_strips = gr.Checkbox(label="Test strips", value=False)
-                        with gr.Row():
-                            test_bands = gr.Slider(3, 9, value=5, step=1, label="Bands")
-                            test_stops = gr.Slider(0.25, 1.0, value=0.5, step=0.25, label="Band stops")
-                        flash_stops = gr.Slider(0.0, 2.0, value=0.0, step=0.05, label="Flash (stops)")
-                        dry_down = gr.Slider(0.0, 20.0, value=0.0, step=0.5, label="Dry-down %")
-                        tone = gr.Dropdown(
-                            choices=TONE_LABELS, value="none", label="Tone", visible=True
-                        )
-                        border_frac = gr.Slider(0.0, 0.12, value=0.0, step=0.005, label="Border")
+                            border_frac = gr.Slider(
+                                0.0, 0.12, value=0.0, step=0.005, label="Border"
+                            )
                         with gr.Row(elem_id="print_commit_row"):
                             print_btn = gr.Button(
                                 "Commit Print", interactive=False, variant="primary", size="sm"
@@ -7412,12 +7538,6 @@ def build_ui() -> gr.Blocks:
                         )
                         dl_pkg_negative = gr.DownloadButton(
                             "negative", size="sm", elem_id="dl_pkg_negative"
-                        )
-                        gr.Markdown(
-                            "_Default path: paper → exposure → filtration → **Commit Print**. "
-                            "Dodge/burn is optional under **Modules → Advanced** "
-                            "(only after Develop is locked)._",
-                            elem_id="db_hint",
                         )
 
                 with gr.Group(elem_id="drawer_frame", elem_classes=["drawer-panel"]):
@@ -7888,7 +8008,7 @@ def build_ui() -> gr.Blocks:
         )
         chemistry_mode.change(
             fn=on_chemistry_mode_change,
-            inputs=[chemistry_mode],
+            inputs=[chemistry_mode, split_grade],
             outputs=[
                 film,
                 developer,
@@ -7912,6 +8032,17 @@ def build_ui() -> gr.Blocks:
             fn=live_preview_edit,
             inputs=preview_inputs,
             outputs=preview_outputs,
+        )
+
+        split_grade.change(
+            fn=on_split_grade_toggle,
+            inputs=[split_grade, chemistry_mode],
+            outputs=[soft_grade, hard_grade, soft_seconds, hard_seconds],
+        )
+        test_strips.change(
+            fn=on_test_strips_toggle,
+            inputs=[test_strips],
+            outputs=[test_bands, test_stops],
         )
 
         for ctrl in (
