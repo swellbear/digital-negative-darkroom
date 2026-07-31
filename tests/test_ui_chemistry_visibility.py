@@ -38,24 +38,40 @@ def test_print_key_visibility_bw_vs_color():
     assert mod._print_key_visible("color", "cc_magenta") is True
     assert mod._print_key_visible("color", "tone") is False
     assert mod._print_key_visible("bw", "paper_id") is None
+    assert mod._print_key_visible("instant", "print_grade") is False
+    assert mod._print_key_visible("instant", "cc_cyan") is False
 
 
 def test_chemistry_mode_change_hides_mg_shows_cc():
     mod = _load_ui()
     outs = mod.on_chemistry_mode_change("color")
-    # film, developer, minutes, ei, paper, help, then 11 visibility updates
-    assert len(outs) == 6 + 11
+    # film, developer, minutes, ei, paper, help, 11 print vis, then Instant knobs…
+    assert len(outs) == 6 + 11 + 9
     help_u = _upd(outs[5])
     assert "Color Chemistry" in str(help_u.get("value", ""))
     # print_grade is first visibility slot after help
     assert _upd(outs[6]).get("visible") is False  # print_grade
     assert _upd(outs[8]).get("visible") is True  # cc_cyan
-    assert _upd(outs[-1]).get("visible") is False  # tone
+    assert _upd(outs[16]).get("visible") is False  # tone
 
     outs_bw = mod.on_chemistry_mode_change("bw")
     assert _upd(outs_bw[6]).get("visible") is True
     assert _upd(outs_bw[8]).get("visible") is False
     assert "Black & White" in str(_upd(outs_bw[5]).get("value", ""))
+
+
+def test_chemistry_mode_change_instant_shows_process_hides_print():
+    mod = _load_ui()
+    if not mod.FILM_CHOICES_INSTANT:
+        return
+    outs = mod.on_chemistry_mode_change("instant")
+    assert len(outs) == 6 + 11 + 9
+    assert "Instant" in str(_upd(outs[5]).get("value", ""))
+    assert _upd(outs[6]).get("visible") is False  # print_grade
+    assert _upd(outs[17]).get("visible") is True  # process_temp
+    assert _upd(outs[24]).get("visible") is False  # print_drawer
+    assert "Commit pull" in str(_upd(outs[25]).get("value", ""))
+    assert _upd(outs[4]).get("visible") is False  # paper
 
 
 def test_path_and_strip_labels_for_e6_and_c41():

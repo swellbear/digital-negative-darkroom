@@ -1,0 +1,383 @@
+{
+  "id": "polaroid-sx70-instant-v1",
+  "name": "Polaroid SX-70",
+  "type": "instant_integral_color",
+  "version": "1.0",
+  "iso": 160,
+  "manufacturer": "Polaroid (SX-70 / Time Zero lineage)",
+  "grain_scale": 0.95,
+  "source": {
+    "document": "SX-70 / Time Zero published speed and process character; H&D authored as a softer, slower sibling of the T-600 family (public process aims).",
+    "reference_url": "https://en.wikipedia.org/wiki/Polaroid_SX-70",
+    "process": "integral_instant",
+    "digitization_date": "2026-07-31",
+    "digitization_notes": "Level-3 parametric sibling of polaroid-600-instant-v1 \u2014 lower ISO, longer develop, slightly softer contrast and richer diffusion. Not a licensed digitization."
+  },
+  "curve": {
+    "x_label": "relative_log_exposure",
+    "y_label": "reflection_density",
+    "base_plus_fog": 0.08,
+    "points": [
+      [
+        0.5,
+        0.1398
+      ],
+      [
+        0.722,
+        0.1709
+      ],
+      [
+        0.944,
+        0.2146
+      ],
+      [
+        1.167,
+        0.2745
+      ],
+      [
+        1.389,
+        0.354
+      ],
+      [
+        1.611,
+        0.4551
+      ],
+      [
+        1.833,
+        0.5767
+      ],
+      [
+        2.056,
+        0.7128
+      ],
+      [
+        2.278,
+        0.8532
+      ],
+      [
+        2.5,
+        0.9843
+      ],
+      [
+        2.722,
+        1.0927
+      ],
+      [
+        2.944,
+        1.1682
+      ],
+      [
+        3.167,
+        1.2054
+      ],
+      [
+        3.389,
+        1.2053
+      ],
+      [
+        3.611,
+        1.1752
+      ],
+      [
+        3.833,
+        1.1276
+      ],
+      [
+        4.056,
+        1.0754
+      ],
+      [
+        4.278,
+        1.0286
+      ],
+      [
+        4.5,
+        0.9917
+      ]
+    ]
+  },
+  "instant": {
+    "format": "integral",
+    "normal_temp_c": 21.0,
+    "normal_minutes": 5.0,
+    "border": {
+      "left": 0.08,
+      "right": 0.08,
+      "top": 0.08,
+      "bottom": 0.22
+    },
+    "layers": {
+      "red": [
+        [
+          0.5,
+          0.1305
+        ],
+        [
+          0.722,
+          0.1591
+        ],
+        [
+          0.944,
+          0.1982
+        ],
+        [
+          1.167,
+          0.2506
+        ],
+        [
+          1.389,
+          0.3188
+        ],
+        [
+          1.611,
+          0.4047
+        ],
+        [
+          1.833,
+          0.5081
+        ],
+        [
+          2.056,
+          0.6256
+        ],
+        [
+          2.278,
+          0.7506
+        ],
+        [
+          2.5,
+          0.8732
+        ],
+        [
+          2.722,
+          0.9822
+        ],
+        [
+          2.944,
+          1.0669
+        ],
+        [
+          3.167,
+          1.1196
+        ],
+        [
+          3.389,
+          1.1374
+        ],
+        [
+          3.611,
+          1.1232
+        ],
+        [
+          3.833,
+          1.0863
+        ],
+        [
+          4.056,
+          1.0391
+        ],
+        [
+          4.278,
+          0.993
+        ],
+        [
+          4.5,
+          0.9547
+        ]
+      ],
+      "green": [
+        [
+          0.5,
+          0.1386
+        ],
+        [
+          0.722,
+          0.1693
+        ],
+        [
+          0.944,
+          0.2122
+        ],
+        [
+          1.167,
+          0.2711
+        ],
+        [
+          1.389,
+          0.3493
+        ],
+        [
+          1.611,
+          0.449
+        ],
+        [
+          1.833,
+          0.5695
+        ],
+        [
+          2.056,
+          0.7056
+        ],
+        [
+          2.278,
+          0.8472
+        ],
+        [
+          2.5,
+          0.9811
+        ],
+        [
+          2.722,
+          1.0931
+        ],
+        [
+          2.944,
+          1.1723
+        ],
+        [
+          3.167,
+          1.2123
+        ],
+        [
+          3.389,
+          1.2138
+        ],
+        [
+          3.611,
+          1.184
+        ],
+        [
+          3.833,
+          1.1357
+        ],
+        [
+          4.056,
+          1.0826
+        ],
+        [
+          4.278,
+          1.0351
+        ],
+        [
+          4.5,
+          0.9978
+        ]
+      ],
+      "blue": [
+        [
+          0.5,
+          0.1502
+        ],
+        [
+          0.722,
+          0.1843
+        ],
+        [
+          0.944,
+          0.2333
+        ],
+        [
+          1.167,
+          0.3018
+        ],
+        [
+          1.389,
+          0.3939
+        ],
+        [
+          1.611,
+          0.5116
+        ],
+        [
+          1.833,
+          0.6524
+        ],
+        [
+          2.056,
+          0.8073
+        ],
+        [
+          2.278,
+          0.9617
+        ],
+        [
+          2.5,
+          1.0985
+        ],
+        [
+          2.722,
+          1.2028
+        ],
+        [
+          2.944,
+          1.2655
+        ],
+        [
+          3.167,
+          1.2843
+        ],
+        [
+          3.389,
+          1.2647
+        ],
+        [
+          3.611,
+          1.2185
+        ],
+        [
+          3.833,
+          1.1607
+        ],
+        [
+          4.056,
+          1.1044
+        ],
+        [
+          4.278,
+          1.0576
+        ],
+        [
+          4.5,
+          1.0225
+        ]
+      ]
+    },
+    "temp_family": {
+      "cold_c": 13.0,
+      "normal_c": 21.0,
+      "hot_c": 35.0,
+      "cold_contrast_scale": 0.8,
+      "hot_contrast_scale": 1.15,
+      "cold_dmax_scale": 0.88,
+      "hot_dmax_scale": 1.04,
+      "cold_time_scale": 1.8,
+      "hot_time_scale": 0.65
+    },
+    "look": {
+      "saturation": 1.02,
+      "warmth": 0.06,
+      "diffusion": 0.18
+    }
+  },
+  "chemistries": [
+    {
+      "id": "pod",
+      "name": "Integral reagent pod",
+      "normal_minutes": 5.0,
+      "time_min": 2.0,
+      "time_max": 12.0,
+      "character": "balanced",
+      "is_base": true
+    }
+  ],
+  "defaults": {
+    "developer_id": "pod",
+    "development_minutes": 5.0,
+    "contrast_modifier": 0.0,
+    "grain_strength": 0.95,
+    "process_temp_c": 21.0,
+    "chroma": 1.0,
+    "warmth": 0.0,
+    "diffusion": 0.18
+  }
+}

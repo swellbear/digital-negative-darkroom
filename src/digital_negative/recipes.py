@@ -31,7 +31,7 @@ def build_recipe(
     extras: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     mode = str(chemistry_mode or "bw").lower()
-    if mode not in {"bw", "color"}:
+    if mode not in {"bw", "color", "instant"}:
         mode = "bw"
     recipe: dict[str, Any] = {
         "digital_negative_recipe_version": RECIPE_VERSION,

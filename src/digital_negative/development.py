@@ -93,7 +93,36 @@ def develop(
     Capture realism knobs (EI, contrast filter, reciprocity, halation) shift
     where the scene sits on the curve before chemistry runs.
     """
-    from .spectral import is_color_film_type, spectral_to_xyz
+    from .spectral import is_color_film_type, is_instant_film_type, spectral_to_xyz
+
+    if is_instant_film_type(profile.type):
+        from .instant_process import develop_instant_as_result
+
+        # Instant extras travel via dn.metadata / kwargs from the UI preview path.
+        ingest = dn.metadata.get("ingest", {})
+        dev_meta = dn.metadata.get("development", {})
+        return develop_instant_as_result(
+            dn,
+            profile,
+            process_temp_c=float(dev_meta.get("process_temp_c", 21.0)),
+            process_minutes=(
+                float(development_minutes)
+                if development_minutes is not None
+                else dev_meta.get("development_minutes")
+            ),
+            contrast_modifier=(
+                float(contrast_modifier)
+                if contrast_modifier is not None
+                else float(dev_meta.get("contrast_modifier", 0.0))
+            ),
+            chroma=float(dev_meta.get("chroma", 1.0)),
+            warmth=float(dev_meta.get("warmth", 0.0)),
+            diffusion=dev_meta.get("diffusion"),
+            exposure_index=exposure_index,
+            scene_exposure_seconds=scene_exposure_seconds,
+            mid_log_e=mid_log_e,
+            commit=commit,
+        )
 
     if is_color_film_type(profile.type):
         from .color_development import develop_color

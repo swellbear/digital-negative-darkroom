@@ -36,7 +36,9 @@ def default_profiles_dir() -> Path:
 
 
 def list_film_profiles(*, chemistry_mode: str | None = None) -> list[Path]:
-    """List film profiles, optionally filtered by ``bw`` / ``color`` chemistry mode."""
+    """List film profiles, optionally filtered by ``bw`` / ``color`` / ``instant``."""
+    from .spectral import COLOR_FILM_TYPES, INSTANT_FILM_TYPES
+
     paths = sorted(default_profiles_dir().glob("*-v1.json"))
     if chemistry_mode is None:
         return paths
@@ -48,20 +50,28 @@ def list_film_profiles(*, chemistry_mode: str | None = None) -> list[Path]:
         except Exception:
             continue
         ftype = str(data.get("type", "bw")).lower()
-        is_color = ftype in {"color_negative", "color_slide", "color_ra4"}
+        is_color = ftype in COLOR_FILM_TYPES
+        is_instant = ftype in INSTANT_FILM_TYPES
         if mode == "color" and is_color:
             out.append(path)
-        elif mode == "bw" and not is_color:
+        elif mode == "instant" and is_instant:
+            out.append(path)
+        elif mode == "bw" and not is_color and not is_instant:
             out.append(path)
     return out
 
 
 def list_paper_profiles(*, chemistry_mode: str | None = None) -> list[Path]:
-    """List paper profiles, optionally filtered by ``bw`` / ``color`` chemistry mode."""
+    """List paper profiles, optionally filtered by ``bw`` / ``color`` chemistry mode.
+
+    Instant mode has no enlarger paper — returns an empty list.
+    """
     paths = sorted(default_papers_dir().glob("*-v1.json"))
     if chemistry_mode is None:
         return paths
     mode = str(chemistry_mode).lower()
+    if mode == "instant":
+        return []
     out: list[Path] = []
     for path in paths:
         try:

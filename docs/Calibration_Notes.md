@@ -109,3 +109,24 @@ First named batch (2026-07-31). All stocks document public datasheet sources in 
 | Portra 160 / 400 / 800, E100, Provia 100F, Velvia 50 | Authored spectral / logistic layer curves inspired by published process aims — **not** licensed Kodak/Fujifilm digitizations or LUTs |
 
 Prefer densitometer or WebPlotDigitizer re-digitization of official plots before a second large catalog expansion.
+
+---
+
+## Instant / Polaroid catalog (integral) — Level-3 appearance
+
+Third chemistry mode **Instant / Polaroid** (2026-07-31). Integral packs only — expose → reagent pod → finished card (no enlarger paper). Engine: `src/digital_negative/instant_process.py`.
+
+| Profile | Basis |
+|---------|-------|
+| Polaroid 600 | Public T-600 family H&D / spectral / temp sheets (ISO ~640, ~3 min @ 70°F) — authored Level-3 curves, not a licensed digitization |
+| Polaroid SX-70 | Parametric slower/softer sibling (ISO ~160, longer process) |
+| Polaroid i-Type | Modern 600-like bias on the T-600 scaffold (little open densitometry) |
+| Polaroid B&W 600 | Mono integral H&D + temp family |
+
+**Parked for Instant v2:** peel-apart Type 55 (+/−) — excellent classic datasheets exist, but the ritual (peel time, clearing bath, usable negative) is a different product path.
+
+**Where to change when calibrating Instant**
+
+- RGB/mono print H&D + temp family → `profiles/films/*instant*.json` → `instant.layers` / `instant.temp_family`
+- Diffusion / border / look defaults → same profile `instant.look` / `instant.border`
+- Engine → `src/digital_negative/instant_process.py`
