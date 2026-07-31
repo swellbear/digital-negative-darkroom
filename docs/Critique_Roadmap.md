@@ -65,4 +65,10 @@ Runs **after** UI trust, not instead of it. B&W Develop → Print authenticity f
 
 ---
 
+## Parked (do not start)
+
+**Scan-corpus / ML calibration model** — using public 35mm negative scans (or a trained appearance model) to bulk up Level-3 feel. Interesting as a later Level-3 appearance bench fed by **owned or properly licensed** paired captures + datasheets; **not** scraped web training. Tabled 2026-07-31 until Product P1 hand calibration is underway.
+
+---
+
 *Fill Calibration_Notes.md after side-by-side sessions; implement those notes before expanding the profile catalog.*
