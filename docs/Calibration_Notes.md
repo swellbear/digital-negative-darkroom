@@ -61,3 +61,33 @@ _(Things that looked fine — do not touch)_
 - [ ] Re-check the same scene in the live UI
 - [ ] Confirm no regression on pull / soft grade / Standard developer
 - [ ] Update Critique_Roadmap.md status if this cycle closes
+
+---
+
+## Color chemistry targets (spectral C-41 / E-6 / RA-4)
+
+Use the same side-by-side discipline as B&W once Color Chemistry mode is active.
+
+| Field | Value |
+|-------|-------|
+| Date | |
+| Scene / raw file | |
+| Color path | C-41 → RA-4 / E-6 slide |
+| Film profile in app | e.g. Color Neg 400 (spectral) |
+| Real-world reference | color-neg scan / RA-4 print / slide |
+| Lighting notes | |
+
+**What to judge first**
+
+- Orange mask / lightbox invert of C-41 negatives (does skin/sky polarity feel right?)
+- Push +1 vs Pull −1 on C-41 (contrast and grain, not just density)
+- RA-4 CC filtration: does adding Magenta / Cyan / Yellow move the print the expected way?
+- E-6 slide finish: positive polarity, saturation, highlight roll-off
+- Confirm B&W Chemistry mode is unchanged after color work
+
+**Where to change when calibrating**
+
+- Film layer curves / mask / interimage → `profiles/films/*spectral*.json`
+- Dye peaks / sensitivity widths → same profile `spectral.layers`
+- RA-4 paper toe/shoulder / dye peaks → `profiles/papers/ra4-glossy-v1.json`
+- Engine behavior → `src/digital_negative/color_development.py`, `color_print.py`, `spectral.py`

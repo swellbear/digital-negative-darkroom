@@ -1,0 +1,413 @@
+{
+  "id": "ektachrome-100-spectral-v1",
+  "name": "Color Slide 100 (spectral)",
+  "type": "color_slide",
+  "version": "1.0",
+  "iso": 100,
+  "manufacturer": "Generic / datasheet-inspired",
+  "grain_scale": 0.55,
+  "source": {
+    "document": "Public E-6 process overview + published dye-peak regions for modern slide films (composite authored profile).",
+    "process": "E-6",
+    "digitization_date": "2026-07-31",
+    "digitization_notes": "Reversal is modeled as density inversion around a per-layer pivot after first-developer-equivalent exposure. Not a licensed Kodak Ektachrome digitization.",
+    "chemistry_notes": "e6_standard / e6_push1 parameterized via CI-style minutes."
+  },
+  "curve": {
+    "x_label": "relative_log_exposure",
+    "y_label": "density",
+    "base_plus_fog": 0.12,
+    "points": [
+      [
+        0.5,
+        0.277
+      ],
+      [
+        0.733,
+        0.341
+      ],
+      [
+        0.967,
+        0.428
+      ],
+      [
+        1.2,
+        0.542
+      ],
+      [
+        1.433,
+        0.688
+      ],
+      [
+        1.667,
+        0.865
+      ],
+      [
+        1.9,
+        1.071
+      ],
+      [
+        2.133,
+        1.295
+      ],
+      [
+        2.367,
+        1.523
+      ],
+      [
+        2.6,
+        1.74
+      ],
+      [
+        2.833,
+        1.935
+      ],
+      [
+        3.067,
+        2.099
+      ],
+      [
+        3.3,
+        2.23
+      ],
+      [
+        3.533,
+        2.332
+      ],
+      [
+        3.767,
+        2.409
+      ],
+      [
+        4.0,
+        2.465
+      ]
+    ]
+  },
+  "defaults": {
+    "developer_id": "e6_standard",
+    "development_minutes": 6.0,
+    "relative_time": 1.0,
+    "contrast_modifier": 0.0,
+    "grain_strength": 0.7
+  },
+  "spectral": {
+    "layer_order": [
+      "cyan",
+      "magenta",
+      "yellow"
+    ],
+    "mask": {
+      "cyan": 0.0,
+      "magenta": 0.0,
+      "yellow": 0.0
+    },
+    "interimage": [
+      [
+        1.0,
+        -0.08,
+        -0.05
+      ],
+      [
+        -0.06,
+        1.0,
+        -0.06
+      ],
+      [
+        -0.04,
+        -0.07,
+        1.0
+      ]
+    ],
+    "layers": {
+      "cyan": {
+        "sensitivity_peak_nm": 640,
+        "sensitivity_width_nm": 36,
+        "sensitivity_gain": 1.0,
+        "dye_peak_nm": 650,
+        "dye_width_nm": 44,
+        "dye_peak_density": 1.0,
+        "curve": {
+          "base_plus_fog": 0.1,
+          "points": [
+            [
+              0.5,
+              0.237
+            ],
+            [
+              0.733,
+              0.296
+            ],
+            [
+              0.967,
+              0.377
+            ],
+            [
+              1.2,
+              0.487
+            ],
+            [
+              1.433,
+              0.628
+            ],
+            [
+              1.667,
+              0.804
+            ],
+            [
+              1.9,
+              1.009
+            ],
+            [
+              2.133,
+              1.234
+            ],
+            [
+              2.367,
+              1.464
+            ],
+            [
+              2.6,
+              1.682
+            ],
+            [
+              2.833,
+              1.876
+            ],
+            [
+              3.067,
+              2.037
+            ],
+            [
+              3.3,
+              2.164
+            ],
+            [
+              3.533,
+              2.261
+            ],
+            [
+              3.767,
+              2.332
+            ],
+            [
+              4.0,
+              2.383
+            ]
+          ]
+        }
+      },
+      "magenta": {
+        "sensitivity_peak_nm": 550,
+        "sensitivity_width_nm": 34,
+        "sensitivity_gain": 1.0,
+        "dye_peak_nm": 545,
+        "dye_width_nm": 42,
+        "dye_peak_density": 1.0,
+        "curve": {
+          "base_plus_fog": 0.11,
+          "points": [
+            [
+              0.5,
+              0.238
+            ],
+            [
+              0.733,
+              0.296
+            ],
+            [
+              0.967,
+              0.378
+            ],
+            [
+              1.2,
+              0.489
+            ],
+            [
+              1.433,
+              0.637
+            ],
+            [
+              1.667,
+              0.822
+            ],
+            [
+              1.9,
+              1.041
+            ],
+            [
+              2.133,
+              1.284
+            ],
+            [
+              2.367,
+              1.532
+            ],
+            [
+              2.6,
+              1.766
+            ],
+            [
+              2.833,
+              1.972
+            ],
+            [
+              3.067,
+              2.141
+            ],
+            [
+              3.3,
+              2.273
+            ],
+            [
+              3.533,
+              2.371
+            ],
+            [
+              3.767,
+              2.441
+            ],
+            [
+              4.0,
+              2.492
+            ]
+          ]
+        }
+      },
+      "yellow": {
+        "sensitivity_peak_nm": 450,
+        "sensitivity_width_nm": 36,
+        "sensitivity_gain": 1.0,
+        "dye_peak_nm": 450,
+        "dye_width_nm": 46,
+        "dye_peak_density": 1.0,
+        "curve": {
+          "base_plus_fog": 0.1,
+          "points": [
+            [
+              0.5,
+              0.256
+            ],
+            [
+              0.733,
+              0.318
+            ],
+            [
+              0.967,
+              0.399
+            ],
+            [
+              1.2,
+              0.506
+            ],
+            [
+              1.433,
+              0.64
+            ],
+            [
+              1.667,
+              0.803
+            ],
+            [
+              1.9,
+              0.989
+            ],
+            [
+              2.133,
+              1.191
+            ],
+            [
+              2.367,
+              1.397
+            ],
+            [
+              2.6,
+              1.593
+            ],
+            [
+              2.833,
+              1.77
+            ],
+            [
+              3.067,
+              1.921
+            ],
+            [
+              3.3,
+              2.043
+            ],
+            [
+              3.533,
+              2.138
+            ],
+            [
+              3.767,
+              2.211
+            ],
+            [
+              4.0,
+              2.265
+            ]
+          ]
+        }
+      }
+    }
+  },
+  "chemistries": [
+    {
+      "id": "e6_standard",
+      "name": "E-6 Standard",
+      "normal_minutes": 6.0,
+      "time_min": 5.0,
+      "time_max": 9.0,
+      "temperature_c": 38.0,
+      "is_base": true,
+      "character": "balanced",
+      "ci_points": [
+        [
+          5.0,
+          0.55
+        ],
+        [
+          6.0,
+          0.65
+        ],
+        [
+          7.5,
+          0.78
+        ],
+        [
+          9.0,
+          0.9
+        ]
+      ]
+    },
+    {
+      "id": "e6_push1",
+      "name": "E-6 Push +1",
+      "normal_minutes": 8.0,
+      "time_min": 6.5,
+      "time_max": 11.0,
+      "temperature_c": 38.0,
+      "is_base": false,
+      "character": "vigorous",
+      "ci_points": [
+        [
+          6.5,
+          0.7
+        ],
+        [
+          8.0,
+          0.82
+        ],
+        [
+          10.0,
+          0.95
+        ]
+      ]
+    }
+  ],
+  "reciprocity": {
+    "model": "none"
+  }
+}

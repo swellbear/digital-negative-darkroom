@@ -26,6 +26,10 @@ class DevelopmentResult:
     positive_preview: np.ndarray
     log_exposure: np.ndarray
     profile: FilmProfile
+    # Color spectral path (None for B&W)
+    spectral_transmittance: np.ndarray | None = None
+    color_process: str | None = None
+    dye_concentrations: np.ndarray | None = None
 
 
 def linear_to_relative_log_exposure(
@@ -89,6 +93,41 @@ def develop(
     Capture realism knobs (EI, contrast filter, reciprocity, halation) shift
     where the scene sits on the curve before chemistry runs.
     """
+    from .spectral import is_color_film_type, spectral_to_xyz
+
+    if is_color_film_type(profile.type):
+        from .color_development import develop_color
+
+        color = develop_color(
+            dn,
+            profile,
+            relative_time=relative_time,
+            development_minutes=development_minutes,
+            contrast_modifier=contrast_modifier,
+            grain_strength=grain_strength,
+            developer_id=developer_id,
+            mid_log_e=mid_log_e,
+            process_variation=process_variation,
+            exposure_index=exposure_index,
+            scene_exposure_seconds=scene_exposure_seconds,
+            halation=halation,
+            commit=commit,
+        )
+        # Mono proxies for strip / legacy B&W helpers (Y of spectral T).
+        xyz = spectral_to_xyz(color.transmittance)
+        t_y = np.clip(xyz[..., 1], 0.0, None).astype(np.float32)
+        dens_y = (-np.log10(np.maximum(t_y, 1e-6))).astype(np.float32)
+        return DevelopmentResult(
+            density=dens_y,
+            transmittance=t_y,
+            positive_preview=color.positive_preview,
+            log_exposure=color.log_exposure.mean(axis=-1).astype(np.float32),
+            profile=color.profile,
+            spectral_transmittance=color.transmittance,
+            color_process=color.process,
+            dye_concentrations=color.dye_concentrations,
+        )
+
     dev = dn.metadata.setdefault("development", {})
     ingest = dn.metadata.setdefault("ingest", {})
     developer = str(
