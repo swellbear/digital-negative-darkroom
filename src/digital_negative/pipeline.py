@@ -35,12 +35,46 @@ def default_profiles_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "profiles" / "films"
 
 
-def list_film_profiles() -> list[Path]:
-    return sorted(default_profiles_dir().glob("*-v1.json"))
+def list_film_profiles(*, chemistry_mode: str | None = None) -> list[Path]:
+    """List film profiles, optionally filtered by ``bw`` / ``color`` chemistry mode."""
+    paths = sorted(default_profiles_dir().glob("*-v1.json"))
+    if chemistry_mode is None:
+        return paths
+    mode = str(chemistry_mode).lower()
+    out: list[Path] = []
+    for path in paths:
+        try:
+            data = __import__("json").loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        ftype = str(data.get("type", "bw")).lower()
+        is_color = ftype in {"color_negative", "color_slide", "color_ra4"}
+        if mode == "color" and is_color:
+            out.append(path)
+        elif mode == "bw" and not is_color:
+            out.append(path)
+    return out
 
 
-def list_paper_profiles() -> list[Path]:
-    return sorted(default_papers_dir().glob("*-v1.json"))
+def list_paper_profiles(*, chemistry_mode: str | None = None) -> list[Path]:
+    """List paper profiles, optionally filtered by ``bw`` / ``color`` chemistry mode."""
+    paths = sorted(default_papers_dir().glob("*-v1.json"))
+    if chemistry_mode is None:
+        return paths
+    mode = str(chemistry_mode).lower()
+    out: list[Path] = []
+    for path in paths:
+        try:
+            data = __import__("json").loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        ptype = str(data.get("type", "bw_multigrade")).lower()
+        is_color = ptype in {"color_ra4", "color"}
+        if mode == "color" and is_color:
+            out.append(path)
+        elif mode == "bw" and not is_color:
+            out.append(path)
+    return out
 
 
 def _resolve_profile(directory: Path, profile_id: str) -> Path:

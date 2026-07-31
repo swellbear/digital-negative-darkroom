@@ -1,0 +1,437 @@
+{
+  "id": "portra-400-spectral-v1",
+  "name": "Color Neg 400 (spectral)",
+  "type": "color_negative",
+  "version": "1.0",
+  "iso": 400,
+  "manufacturer": "Generic / datasheet-inspired",
+  "grain_scale": 0.85,
+  "source": {
+    "document": "Public C-41 process aims + published dye-peak wavelengths for consumer color-negative stocks (composite, not a licensed Kodak/Fujifilm digitization).",
+    "process": "C-41",
+    "digitization_date": "2026-07-31",
+    "digitization_notes": "Spectral sensitivities and dye peaks are authored Gaussians centered on commonly published coupler absorption regions (cyan~640\u2013650nm, magenta~540\u2013550nm, yellow~440\u2013450nm). Characteristic curves are synthetic logistic families for push/pull \u2014 replace with densitometer data when available.",
+    "chemistry_notes": "c41_standard / c41_push1 / c41_pull1 map minutes to relative_time via CI-style points."
+  },
+  "curve": {
+    "x_label": "relative_log_exposure",
+    "y_label": "density",
+    "base_plus_fog": 0.18,
+    "points": [
+      [
+        0.5,
+        0.356
+      ],
+      [
+        0.733,
+        0.415
+      ],
+      [
+        0.967,
+        0.489
+      ],
+      [
+        1.2,
+        0.581
+      ],
+      [
+        1.433,
+        0.692
+      ],
+      [
+        1.667,
+        0.822
+      ],
+      [
+        1.9,
+        0.966
+      ],
+      [
+        2.133,
+        1.12
+      ],
+      [
+        2.367,
+        1.276
+      ],
+      [
+        2.6,
+        1.427
+      ],
+      [
+        2.833,
+        1.566
+      ],
+      [
+        3.067,
+        1.688
+      ],
+      [
+        3.3,
+        1.791
+      ],
+      [
+        3.533,
+        1.875
+      ],
+      [
+        3.767,
+        1.942
+      ],
+      [
+        4.0,
+        1.994
+      ]
+    ]
+  },
+  "defaults": {
+    "developer_id": "c41_standard",
+    "development_minutes": 3.25,
+    "relative_time": 1.0,
+    "contrast_modifier": 0.0,
+    "grain_strength": 0.9
+  },
+  "spectral": {
+    "layer_order": [
+      "cyan",
+      "magenta",
+      "yellow"
+    ],
+    "mask": {
+      "cyan": 0.12,
+      "magenta": 0.55,
+      "yellow": 0.18
+    },
+    "interimage": [
+      [
+        1.0,
+        -0.06,
+        -0.04
+      ],
+      [
+        -0.05,
+        1.0,
+        -0.05
+      ],
+      [
+        -0.03,
+        -0.06,
+        1.0
+      ]
+    ],
+    "layers": {
+      "cyan": {
+        "sensitivity_peak_nm": 645,
+        "sensitivity_width_nm": 42,
+        "sensitivity_gain": 1.0,
+        "dye_peak_nm": 650,
+        "dye_width_nm": 48,
+        "dye_peak_density": 1.0,
+        "curve": {
+          "base_plus_fog": 0.16,
+          "points": [
+            [
+              0.5,
+              0.346
+            ],
+            [
+              0.733,
+              0.405
+            ],
+            [
+              0.967,
+              0.478
+            ],
+            [
+              1.2,
+              0.569
+            ],
+            [
+              1.433,
+              0.677
+            ],
+            [
+              1.667,
+              0.802
+            ],
+            [
+              1.9,
+              0.94
+            ],
+            [
+              2.133,
+              1.087
+            ],
+            [
+              2.367,
+              1.236
+            ],
+            [
+              2.6,
+              1.38
+            ],
+            [
+              2.833,
+              1.513
+            ],
+            [
+              3.067,
+              1.631
+            ],
+            [
+              3.3,
+              1.732
+            ],
+            [
+              3.533,
+              1.815
+            ],
+            [
+              3.767,
+              1.882
+            ],
+            [
+              4.0,
+              1.935
+            ]
+          ]
+        }
+      },
+      "magenta": {
+        "sensitivity_peak_nm": 545,
+        "sensitivity_width_nm": 38,
+        "sensitivity_gain": 1.0,
+        "dye_peak_nm": 545,
+        "dye_width_nm": 46,
+        "dye_peak_density": 1.0,
+        "curve": {
+          "base_plus_fog": 0.17,
+          "points": [
+            [
+              0.5,
+              0.34
+            ],
+            [
+              0.733,
+              0.398
+            ],
+            [
+              0.967,
+              0.474
+            ],
+            [
+              1.2,
+              0.569
+            ],
+            [
+              1.433,
+              0.685
+            ],
+            [
+              1.667,
+              0.821
+            ],
+            [
+              1.9,
+              0.974
+            ],
+            [
+              2.133,
+              1.137
+            ],
+            [
+              2.367,
+              1.304
+            ],
+            [
+              2.6,
+              1.464
+            ],
+            [
+              2.833,
+              1.61
+            ],
+            [
+              3.067,
+              1.737
+            ],
+            [
+              3.3,
+              1.844
+            ],
+            [
+              3.533,
+              1.931
+            ],
+            [
+              3.767,
+              1.999
+            ],
+            [
+              4.0,
+              2.051
+            ]
+          ]
+        }
+      },
+      "yellow": {
+        "sensitivity_peak_nm": 445,
+        "sensitivity_width_nm": 40,
+        "sensitivity_gain": 1.0,
+        "dye_peak_nm": 450,
+        "dye_width_nm": 50,
+        "dye_peak_density": 1.0,
+        "curve": {
+          "base_plus_fog": 0.15,
+          "points": [
+            [
+              0.5,
+              0.34
+            ],
+            [
+              0.733,
+              0.397
+            ],
+            [
+              0.967,
+              0.468
+            ],
+            [
+              1.2,
+              0.554
+            ],
+            [
+              1.433,
+              0.655
+            ],
+            [
+              1.667,
+              0.772
+            ],
+            [
+              1.9,
+              0.9
+            ],
+            [
+              2.133,
+              1.036
+            ],
+            [
+              2.367,
+              1.173
+            ],
+            [
+              2.6,
+              1.306
+            ],
+            [
+              2.833,
+              1.43
+            ],
+            [
+              3.067,
+              1.54
+            ],
+            [
+              3.3,
+              1.635
+            ],
+            [
+              3.533,
+              1.715
+            ],
+            [
+              3.767,
+              1.779
+            ],
+            [
+              4.0,
+              1.831
+            ]
+          ]
+        }
+      }
+    }
+  },
+  "chemistries": [
+    {
+      "id": "c41_standard",
+      "name": "C-41 Standard",
+      "normal_minutes": 3.25,
+      "time_min": 2.5,
+      "time_max": 5.5,
+      "temperature_c": 37.8,
+      "is_base": true,
+      "character": "balanced",
+      "ci_points": [
+        [
+          2.75,
+          0.5
+        ],
+        [
+          3.25,
+          0.58
+        ],
+        [
+          3.75,
+          0.66
+        ],
+        [
+          4.5,
+          0.78
+        ]
+      ]
+    },
+    {
+      "id": "c41_push1",
+      "name": "C-41 Push +1",
+      "normal_minutes": 4.25,
+      "time_min": 3.5,
+      "time_max": 6.0,
+      "temperature_c": 37.8,
+      "is_base": false,
+      "character": "vigorous",
+      "ci_points": [
+        [
+          3.5,
+          0.62
+        ],
+        [
+          4.25,
+          0.72
+        ],
+        [
+          5.0,
+          0.85
+        ]
+      ]
+    },
+    {
+      "id": "c41_pull1",
+      "name": "C-41 Pull \u22121",
+      "normal_minutes": 2.75,
+      "time_min": 2.25,
+      "time_max": 4.0,
+      "temperature_c": 37.8,
+      "is_base": false,
+      "character": "solvent",
+      "ci_points": [
+        [
+          2.25,
+          0.42
+        ],
+        [
+          2.75,
+          0.5
+        ],
+        [
+          3.25,
+          0.56
+        ]
+      ]
+    }
+  ],
+  "reciprocity": {
+    "model": "none"
+  }
+}

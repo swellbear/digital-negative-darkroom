@@ -27,12 +27,17 @@ def build_recipe(
     print_contrast: float = 0.0,
     name: str = "",
     notes: str = "",
+    chemistry_mode: str = "bw",
     extras: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    mode = str(chemistry_mode or "bw").lower()
+    if mode not in {"bw", "color"}:
+        mode = "bw"
     recipe: dict[str, Any] = {
         "digital_negative_recipe_version": RECIPE_VERSION,
         "name": name or "untitled",
         "notes": notes,
+        "chemistry_mode": mode,
         "film_id": str(film_id),
         "developer_id": str(developer_id),
         "development_minutes": float(development_minutes),

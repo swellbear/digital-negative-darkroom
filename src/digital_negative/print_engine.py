@@ -289,7 +289,56 @@ def print_negative(
     contrast: fine nudge between filter steps
     local_stops: optional HxW map of extra exposure stops (burn +, dodge −)
     commit=False: live preview only — no history entry
+
+    Color RA-4: when ``paper.type`` is ``color_ra4`` (or transmittance is
+    spectral …×N), delegates to ``color_print.print_color_negative``. CC knobs
+    are read from ``dn.metadata['print']`` / filtration values, with
+    ``contrast`` mapped to paper contrast and ``grade`` unused.
     """
+    from .spectral import N_WAVELENGTHS, is_color_paper_type
+
+    t_arr = np.asarray(transmittance)
+    if is_color_paper_type(paper.type) or (
+        t_arr.ndim >= 3 and t_arr.shape[-1] == N_WAVELENGTHS
+    ):
+        from .color_print import finish_slide, print_color_negative
+
+        print_meta = dn.metadata.setdefault("print", {})
+        filt_vals = dict(print_meta.get("filtration", {}).get("values") or {})
+        # E-6 finish when process says so or paper is a slide sentinel.
+        process = str(dn.metadata.get("development", {}).get("process") or "")
+        if process == "e6" or str(paper.id).startswith("slide"):
+            color = finish_slide(t_arr, dn, commit=commit)
+            return PrintResult(
+                print_density=color.print_density,
+                reflectance=color.reflectance,
+                preview=color.preview,
+            )
+        base_seconds, _exposure_stops = _resolve_timer(
+            print_meta,
+            overall_exposure=overall_exposure,
+            base_exposure_seconds=base_exposure_seconds,
+        )
+        color = print_color_negative(
+            t_arr,
+            dn,
+            paper,
+            base_exposure_seconds=base_seconds,
+            cc_cyan=float(filt_vals.get("cc_cyan", print_meta.get("cc_cyan", 0.0))),
+            cc_magenta=float(filt_vals.get("cc_magenta", print_meta.get("cc_magenta", 0.0))),
+            cc_yellow=float(filt_vals.get("cc_yellow", print_meta.get("cc_yellow", 0.0))),
+            contrast=float(contrast if contrast is not None else print_meta.get("contrast", 0.0)),
+            local_stops=local_stops,
+            dry_down=float(dry_down_percent),
+            border_frac=float(border_frac),
+            commit=commit,
+        )
+        return PrintResult(
+            print_density=color.print_density,
+            reflectance=color.reflectance,
+            preview=color.preview,
+        )
+
     print_meta = dn.metadata.setdefault("print", {})
     base_seconds, exposure_stops = _resolve_timer(
         print_meta,

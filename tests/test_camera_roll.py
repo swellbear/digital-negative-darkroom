@@ -92,7 +92,7 @@ def test_develop_preserves_camera_roll():
     state = _state_from(mod.commit_ingest(None, [path, path], None))
     assert len(state["roll"]) == 2
 
-    film_id = mod.FILM_CHOICES[0][1]
+    film_id = mod.FILM_CHOICES_BW[0][1]
     chem_id = mod._INIT_DEV_ID
     outs = mod.commit_develop(
         film_id,

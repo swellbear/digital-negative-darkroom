@@ -102,15 +102,28 @@ CROP_RATIO_CHOICES = [
 ]
 DEFAULT_CROP_RECT = "0.00000,0.00000,1.00000,1.00000"
 
-FILM_CHOICES = []
-for path in list_film_profiles():
+def _film_choice_tuple(path) -> tuple[str, str]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    FILM_CHOICES.append((f"{data['name']} (ISO {data['iso']})", data["id"]))
+    return (f"{data['name']} (ISO {data['iso']})", data["id"])
 
-PAPER_CHOICES = []
-for path in list_paper_profiles():
+
+def _paper_choice_tuple(path) -> tuple[str, str]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    PAPER_CHOICES.append((data["name"], data["id"]))
+    return (data["name"], data["id"])
+
+
+FILM_CHOICES_BW = [_film_choice_tuple(p) for p in list_film_profiles(chemistry_mode="bw")]
+FILM_CHOICES_COLOR = [_film_choice_tuple(p) for p in list_film_profiles(chemistry_mode="color")]
+FILM_CHOICES = list(FILM_CHOICES_BW)  # default chemistry mode = B&W
+
+PAPER_CHOICES_BW = [_paper_choice_tuple(p) for p in list_paper_profiles(chemistry_mode="bw")]
+PAPER_CHOICES_COLOR = [_paper_choice_tuple(p) for p in list_paper_profiles(chemistry_mode="color")]
+PAPER_CHOICES = list(PAPER_CHOICES_BW)
+
+CHEMISTRY_MODE_LABELS = [
+    ("Black & White Chemistry", "bw"),
+    ("Color Chemistry", "color"),
+]
 
 # Filled after helper defs below (film-specific chemistry dropdown + minutes).
 _INIT_DEV_CHOICES: list = []
@@ -3268,7 +3281,7 @@ def toggle_ab_print(state):
 
 
 def export_recipe_file(
-    film_id, developer_id, development_minutes, contrast, grain,
+    chemistry_mode, film_id, developer_id, development_minutes, contrast, grain,
     exposure_index, contrast_filter, scene_exposure, halation,
     paper_id, print_grade, print_exposure, print_contrast, recipe_name,
 ):
@@ -3282,6 +3295,7 @@ def export_recipe_file(
         print_grade=float(print_grade),
         print_exposure=float(print_exposure),
         print_contrast=float(print_contrast),
+        chemistry_mode=str(chemistry_mode or "bw"),
         name=str(recipe_name or "recipe"),
         extras={
             "exposure_index": float(exposure_index),
@@ -3307,6 +3321,14 @@ def apply_recipe_file(recipe_file, state):
         raise gr.Error("Choose a recipe JSON first.")
     recipe = load_recipe(path)
     tip = f"**Recipe loaded** — {recipe.get('name', 'untitled')} · this frame only."
+    recipe_mode = str(recipe.get("chemistry_mode") or "bw").lower()
+    if recipe_mode not in {"bw", "color"}:
+        recipe_mode = "bw"
+    current_mode = str(((state or {}).get("controls") or {}).get("chemistry_mode") or "bw")
+    if state and state.get("dn") is not None and current_mode != recipe_mode:
+        raise gr.Error(
+            f"Recipe is {recipe_mode.upper()} chemistry — switch Chemistry mode before loading."
+        )
     film_id = recipe["film_id"]
     profile = _film_profile(film_id)
     chem = get_chemistry(profile, recipe["developer_id"])
@@ -3341,6 +3363,7 @@ def apply_recipe_file(recipe_file, state):
             state,
             {
                 **base,
+                "chemistry_mode": recipe_mode,
                 "film_id": film_id,
                 "developer_id": recipe["developer_id"],
                 "development_minutes": minutes,
@@ -3356,8 +3379,11 @@ def apply_recipe_file(recipe_file, state):
                 "print_contrast": print_contrast,
             },
         )
+    film_choices = FILM_CHOICES_COLOR if recipe_mode == "color" else FILM_CHOICES_BW
+    paper_choices = PAPER_CHOICES_COLOR if recipe_mode == "color" else PAPER_CHOICES_BW
     return (
-        gr.update(value=film_id),
+        gr.update(value=recipe_mode),
+        gr.update(choices=film_choices, value=film_id),
         gr.update(choices=chemistry_choices(profile), value=recipe["developer_id"]),
         minutes_update,
         gr.update(value=contrast),
@@ -3366,7 +3392,7 @@ def apply_recipe_file(recipe_file, state):
         gr.update(value=contrast_filter),
         gr.update(value=scene_exposure),
         gr.update(value=halation),
-        gr.update(value=paper_id),
+        gr.update(choices=paper_choices, value=paper_id),
         gr.update(value=print_grade),
         gr.update(value=print_exposure),
         gr.update(value=print_contrast),
@@ -3443,6 +3469,38 @@ def on_film_change(film_id: str):
 
 def on_developer_change(film_id: str, developer_id: str):
     return _chem_time_update(film_id, developer_id, reset_to_normal=True)
+
+
+def on_chemistry_mode_change(mode: str):
+    """Swap film/paper catalogs when toggling B&W vs Color Chemistry."""
+    mode = str(mode or "bw").lower()
+    if mode not in {"bw", "color"}:
+        mode = "bw"
+    film_choices = FILM_CHOICES_COLOR if mode == "color" else FILM_CHOICES_BW
+    paper_choices = PAPER_CHOICES_COLOR if mode == "color" else PAPER_CHOICES_BW
+    if not film_choices:
+        raise gr.Error("No film profiles for that chemistry mode.")
+    film_id = film_choices[0][1]
+    if mode == "color":
+        # Prefer a C-41 negative stock as the default color entry point.
+        for _label, fid in film_choices:
+            try:
+                if str(_film_profile(fid).type).lower() == "color_negative":
+                    film_id = fid
+                    break
+            except Exception:
+                continue
+    profile = _film_profile(film_id)
+    chem_id = default_chemistry_id(profile)
+    chem_choices = chemistry_choices(profile)
+    paper_id = paper_choices[0][1] if paper_choices else None
+    return (
+        gr.update(choices=film_choices, value=film_id),
+        gr.update(choices=chem_choices, value=chem_id),
+        _chem_time_update(film_id, chem_id, reset_to_normal=True),
+        gr.update(value=float(profile.iso)),
+        gr.update(choices=paper_choices, value=paper_id),
+    )
 
 
 # Initial Develop controls (film-specific chemistry + datasheet normal minutes).
@@ -3539,6 +3597,7 @@ def _activate_roll_index(state, index: int, *, save_current: bool = True) -> dic
 
 
 def _capture_controls(
+    chemistry_mode,
     film_id,
     developer_id,
     development_minutes,
@@ -3564,9 +3623,16 @@ def _capture_controls(
     dry_down,
     tone,
     border_frac,
+    cc_cyan,
+    cc_magenta,
+    cc_yellow,
 ) -> dict:
     """Snapshot Develop/Print UI controls so each roll frame keeps its recipe."""
+    mode = str(chemistry_mode or "bw").lower()
+    if mode not in {"bw", "color"}:
+        mode = "bw"
     return {
+        "chemistry_mode": mode,
         "film_id": film_id,
         "developer_id": developer_id,
         "development_minutes": float(development_minutes),
@@ -3592,13 +3658,17 @@ def _capture_controls(
         "dry_down": float(dry_down),
         "tone": tone,
         "border_frac": float(border_frac),
+        "cc_cyan": float(cc_cyan),
+        "cc_magenta": float(cc_magenta),
+        "cc_yellow": float(cc_yellow),
     }
 
 
-_CONTROL_COUNT = 25
+_CONTROL_COUNT = 29
 
 # Develop recipe controls — Commit Develop sets these interactive=False.
 _DEV_CONTROL_KEYS = (
+    "chemistry_mode",
     "film_id",
     "developer_id",
     "development_minutes",
@@ -3627,13 +3697,17 @@ _PRINT_CONTROL_KEYS = (
     "dry_down",
     "tone",
     "border_frac",
+    "cc_cyan",
+    "cc_magenta",
+    "cc_yellow",
 )
 
 
 def _default_controls_dict() -> dict:
     """Fresh Develop/Print defaults for a newly ingested roll frame."""
     return {
-        "film_id": FILM_CHOICES[0][1] if FILM_CHOICES else None,
+        "chemistry_mode": "bw",
+        "film_id": FILM_CHOICES_BW[0][1] if FILM_CHOICES_BW else None,
         "developer_id": _INIT_DEV_ID,
         "development_minutes": float(_INIT_TNORM),
         "contrast": 0.0,
@@ -3642,7 +3716,7 @@ def _default_controls_dict() -> dict:
         "contrast_filter": "none",
         "scene_exposure": 0.01,
         "halation": 0.0,
-        "paper_id": PAPER_CHOICES[0][1] if PAPER_CHOICES else None,
+        "paper_id": PAPER_CHOICES_BW[0][1] if PAPER_CHOICES_BW else None,
         "print_exposure": 8.0,
         "print_grade": 2.5,
         "print_contrast": 0.0,
@@ -3658,6 +3732,9 @@ def _default_controls_dict() -> dict:
         "dry_down": 0.0,
         "tone": "none",
         "border_frac": 0.0,
+        "cc_cyan": 0.0,
+        "cc_magenta": 0.0,
+        "cc_yellow": 0.0,
     }
 
 
@@ -3688,7 +3765,15 @@ def _control_updates(state):
     dev_on = (not _locked(state, "development")) if has_dn else True
     print_on = (not _locked(state, "print")) if has_dn else True
 
+    mode = str(c.get("chemistry_mode") or "bw").lower()
+    if mode not in {"bw", "color"}:
+        mode = "bw"
+    film_choices = FILM_CHOICES_COLOR if mode == "color" else FILM_CHOICES_BW
+    paper_choices = PAPER_CHOICES_COLOR if mode == "color" else PAPER_CHOICES_BW
     film_id = c["film_id"]
+    film_ids = {x[1] for x in film_choices}
+    if film_id not in film_ids and film_choices:
+        film_id = film_choices[0][1]
     developer_id = c["developer_id"]
     minutes = float(c["development_minutes"])
     try:
@@ -3706,25 +3791,40 @@ def _control_updates(state):
             )
         else:
             minutes_u = gr.update(value=minutes, interactive=dev_on)
+        # Prefer profile default developer when switching chemistry families.
+        chem_ids = {cid for _label, cid in choices}
+        if developer_id not in chem_ids and choices:
+            developer_id = choices[0][1]
         head = (
-            gr.update(value=film_id, interactive=dev_on),
+            gr.update(value=mode, interactive=dev_on),
+            gr.update(choices=film_choices, value=film_id, interactive=dev_on),
             gr.update(choices=choices, value=developer_id, interactive=dev_on),
             minutes_u,
         )
     except Exception:
         head = (
-            gr.update(value=film_id, interactive=dev_on),
+            gr.update(value=mode, interactive=dev_on),
+            gr.update(choices=film_choices, value=film_id, interactive=dev_on),
             gr.update(value=developer_id, interactive=dev_on),
             gr.update(value=minutes, interactive=dev_on),
         )
 
     rest_dev = tuple(
-        gr.update(value=c[k], interactive=dev_on) for k in _DEV_CONTROL_KEYS[3:]
+        gr.update(value=c[k], interactive=dev_on) for k in _DEV_CONTROL_KEYS[4:]
     )
-    print_u = tuple(
-        gr.update(value=c[k], interactive=print_on) for k in _PRINT_CONTROL_KEYS
-    )
-    return head + rest_dev + print_u
+    print_u = []
+    for key in _PRINT_CONTROL_KEYS:
+        if key == "paper_id":
+            pid = c.get("paper_id")
+            pids = {x[1] for x in paper_choices}
+            if pid not in pids and paper_choices:
+                pid = paper_choices[0][1]
+            print_u.append(
+                gr.update(choices=paper_choices, value=pid, interactive=print_on)
+            )
+        else:
+            print_u.append(gr.update(value=c[key], interactive=print_on))
+    return head + rest_dev + tuple(print_u)
 
 
 def _session_with_controls(state, *, drawer: str | None = "roll"):
@@ -5059,6 +5159,36 @@ def remove_from_roll(index_raw, state):
     return _session_with_controls(state, drawer="roll")
 
 
+def _print_transmittance(development) -> np.ndarray:
+    """Prefer spectral transmittance for color develops."""
+    if development is None:
+        return None
+    spectral = getattr(development, "spectral_transmittance", None)
+    if spectral is not None:
+        return spectral
+    return development.transmittance
+
+
+def _stash_color_filtration(dn, cc_cyan, cc_magenta, cc_yellow):
+    print_meta = dn.metadata.setdefault("print", {})
+    print_meta["cc_cyan"] = float(cc_cyan)
+    print_meta["cc_magenta"] = float(cc_magenta)
+    print_meta["cc_yellow"] = float(cc_yellow)
+    filt = print_meta.setdefault("filtration", {})
+    filt["type"] = "color" if any(float(x) for x in (cc_cyan, cc_magenta, cc_yellow)) else filt.get(
+        "type", "multigrade"
+    )
+    values = dict(filt.get("values") or {})
+    values.update(
+        {
+            "cc_cyan": float(cc_cyan),
+            "cc_magenta": float(cc_magenta),
+            "cc_yellow": float(cc_yellow),
+        }
+    )
+    filt["values"] = values
+
+
 def _run_live_develop_then_print(
     film_id,
     developer_id,
@@ -5088,6 +5218,10 @@ def _run_live_develop_then_print(
     state,
     *,
     max_side: int = LIVE_MAX_SIDE,
+    chemistry_mode: str = "bw",
+    cc_cyan: float = 0.0,
+    cc_magenta: float = 0.0,
+    cc_yellow: float = 0.0,
 ):
     """Develop with current settings, then print with current/default print settings.
 
@@ -5119,8 +5253,11 @@ def _run_live_develop_then_print(
         split_on, soft_grade, hard_grade, soft_seconds, hard_seconds,
         test_strips_on, test_bands, test_stops, flash_stops, dry_down, tone, border_frac,
     )
+    t_print = _print_transmittance(development)
+    if getattr(development, "color_process", None):
+        _stash_color_filtration(state["dn"], cc_cyan, cc_magenta, cc_yellow)
     printed = print_negative(
-        development.transmittance,
+        t_print,
         state["dn"],
         paper,
         base_exposure_seconds=float(print_exposure),
@@ -5131,7 +5268,10 @@ def _run_live_develop_then_print(
         **tech,
     )
     live_rgb = _to_rgb_u8(printed.preview)
-    neg_full = _to_rgb_u8(negative_lightbox_preview(development.transmittance))
+    if getattr(development, "spectral_transmittance", None) is not None:
+        neg_full = _to_rgb_u8(development.positive_preview)
+    else:
+        neg_full = _to_rgb_u8(negative_lightbox_preview(development.transmittance))
     neg_inspect = _downscale_rgb(neg_full, INSPECT_MAX_SIDE)
     neg_view = _downscale_rgb(neg_full, LIVE_MAX_SIDE)
     neg_ref = _downscale_rgb(neg_full, REF_MAX_SIDE)
@@ -5140,13 +5280,26 @@ def _run_live_develop_then_print(
     )
     quality_note = "drag" if max_side <= DRAG_MAX_SIDE else "hq"
     curve_src = proxy.metadata.get("development", {}).get("curve_source", "?")
+    process = getattr(development, "color_process", None) or "bw"
+    mode_note = f" · {process.upper()}" if process != "bw" else ""
+    if process in {"c41", "e6"}:
+        paper_line = (
+            f"{paper.name} · CC C{float(cc_cyan):.0f}/M{float(cc_magenta):.0f}/Y{float(cc_yellow):.0f} · "
+            f"{_print_timer_label(print_exposure)}"
+            if process == "c41"
+            else "E-6 slide finish"
+        )
+    else:
+        paper_line = (
+            f"{paper.name} · g{float(print_grade):.1f} · {_print_timer_label(print_exposure)} "
+            f"· ×{float(speed):.2f}"
+        )
     summary = (
         f"{_stage_banner('development', _locks(state))}\n\n"
-        f"**Live print** {live_rgb.shape[1]}×{live_rgb.shape[0]} ({quality_note})  \n"
+        f"**Live print** {live_rgb.shape[1]}×{live_rgb.shape[0]} ({quality_note}){mode_note}  \n"
         f"{profile.name} · {developer_id} · {float(development_minutes):g} min · "
         f"curve={curve_src} · N±={float(contrast):+.2f} · grain={float(grain):.2f}  \n"
-        f"{paper.name} · g{float(print_grade):.1f} · {_print_timer_label(print_exposure)} "
-        f"· ×{float(speed):.2f}\n\n"
+        f"{paper_line}\n\n"
         f"{_history_md(state['dn'])}"
     )
     state = {
@@ -5154,6 +5307,8 @@ def _run_live_develop_then_print(
         "proxy": state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE),
         "proxy_drag": state.get("proxy_drag") or _proxy_dn(state["dn"], DRAG_MAX_SIDE),
         "development": development,
+        "spectral_transmittance": getattr(development, "spectral_transmittance", None),
+        "chemistry_mode": str(chemistry_mode or "bw"),
         "live_rgb": live_rgb,
         "live_inspect": live_rgb,
         "neg_ref": neg_ref,
@@ -5166,6 +5321,9 @@ def _run_live_develop_then_print(
             "print_exposure": float(print_exposure),
             "print_grade": float(print_grade),
             "print_contrast": float(print_contrast),
+            "cc_cyan": float(cc_cyan),
+            "cc_magenta": float(cc_magenta),
+            "cc_yellow": float(cc_yellow),
         },
         "print_technique": tech,
     }
@@ -5174,6 +5332,7 @@ def _run_live_develop_then_print(
 
 
 def live_preview(
+    chemistry_mode,
     film_id,
     developer_id,
     development_minutes,
@@ -5199,6 +5358,9 @@ def live_preview(
     dry_down,
     tone,
     border_frac,
+    cc_cyan,
+    cc_magenta,
+    cc_yellow,
     state,
     quality: str = "high",
     mark_dirty: bool = False,
@@ -5211,6 +5373,7 @@ def live_preview(
     """
     max_side = DRAG_MAX_SIDE if quality == "drag" else LIVE_MAX_SIDE
     controls = _capture_controls(
+        chemistry_mode,
         film_id,
         developer_id,
         development_minutes,
@@ -5236,6 +5399,9 @@ def live_preview(
         dry_down,
         tone,
         border_frac,
+        cc_cyan,
+        cc_magenta,
+        cc_yellow,
     )
 
     if not state or state.get("dn") is None:
@@ -5283,8 +5449,16 @@ def live_preview(
             split_on, soft_grade, hard_grade, soft_seconds, hard_seconds,
             test_strips_on, test_bands, test_stops, flash_stops, dry_down, tone, border_frac,
         )
+        dev_full = state.get("development_full") or state.get("development")
+        t_use = t
+        if dev_full is not None and getattr(dev_full, "spectral_transmittance", None) is not None:
+            t_use = dev_full.spectral_transmittance
+            if max(t_use.shape[:2]) > max_side:
+                step = max(1, int(np.ceil(max(t_use.shape[:2]) / max_side)))
+                t_use = np.ascontiguousarray(t_use[::step, ::step, ...])
+            _stash_color_filtration(state["dn"], cc_cyan, cc_magenta, cc_yellow)
         result = print_negative(
-            t,
+            t_use,
             state["dn"],
             paper,
             base_exposure_seconds=float(print_exposure),
@@ -5354,6 +5528,10 @@ def live_preview(
         border_frac,
         state,
         max_side=max_side,
+        chemistry_mode=str(chemistry_mode or "bw"),
+        cc_cyan=float(cc_cyan),
+        cc_magenta=float(cc_magenta),
+        cc_yellow=float(cc_yellow),
     )
     return _pack_preview(
         live_rgb,
@@ -5368,6 +5546,7 @@ def live_preview(
 
 
 def live_preview_drag(
+    chemistry_mode,
     film_id,
     developer_id,
     development_minutes,
@@ -5393,9 +5572,13 @@ def live_preview_drag(
     dry_down,
     tone,
     border_frac,
+    cc_cyan,
+    cc_magenta,
+    cc_yellow,
     state,
 ):
     return live_preview(
+        chemistry_mode,
         film_id,
         developer_id,
         development_minutes,
@@ -5421,13 +5604,18 @@ def live_preview_drag(
         dry_down,
         tone,
         border_frac,
+        cc_cyan,
+        cc_magenta,
+        cc_yellow,
         state,
         quality="drag",
         mark_dirty=True,
     )
 
 
+
 def live_preview_high(
+    chemistry_mode,
     film_id,
     developer_id,
     development_minutes,
@@ -5453,10 +5641,13 @@ def live_preview_high(
     dry_down,
     tone,
     border_frac,
+    cc_cyan,
+    cc_magenta,
+    cc_yellow,
     state,
 ):
-    """Refresh preview after a roll switch / commit — does not mark the frame dirty."""
     return live_preview(
+        chemistry_mode,
         film_id,
         developer_id,
         development_minutes,
@@ -5482,13 +5673,18 @@ def live_preview_high(
         dry_down,
         tone,
         border_frac,
+        cc_cyan,
+        cc_magenta,
+        cc_yellow,
         state,
         quality="high",
         mark_dirty=False,
     )
 
 
+
 def live_preview_edit(
+    chemistry_mode,
     film_id,
     developer_id,
     development_minutes,
@@ -5514,10 +5710,13 @@ def live_preview_edit(
     dry_down,
     tone,
     border_frac,
+    cc_cyan,
+    cc_magenta,
+    cc_yellow,
     state,
 ):
-    """User-driven preview refresh — marks the active roll frame dirty."""
     return live_preview(
+        chemistry_mode,
         film_id,
         developer_id,
         development_minutes,
@@ -5543,10 +5742,14 @@ def live_preview_edit(
         dry_down,
         tone,
         border_frac,
+        cc_cyan,
+        cc_magenta,
+        cc_yellow,
         state,
         quality="high",
         mark_dirty=True,
     )
+
 
 
 def commit_develop(
@@ -5578,8 +5781,12 @@ def commit_develop(
     if "development" not in locks:
         locks.append("development")
 
-    step = max(1, int(np.ceil(max(development.transmittance.shape) / LIVE_MAX_SIDE)))
-    t_proxy = np.ascontiguousarray(development.transmittance[::step, ::step])
+    t_src = _print_transmittance(development)
+    if t_src.ndim >= 2:
+        step = max(1, int(np.ceil(max(t_src.shape[:2]) / LIVE_MAX_SIDE)))
+        t_proxy = np.ascontiguousarray(t_src[::step, ::step, ...])
+    else:
+        t_proxy = t_src
 
     # Keep last theoretical print on screen until .then refreshes with Print controls;
     # fall back to positive if no live print was generated yet.
@@ -5589,13 +5796,18 @@ def commit_develop(
         live_view = _downscale_rgb(
             _to_rgb_u8(development.positive_preview), LIVE_MAX_SIDE
         )
-    neg_full = _to_rgb_u8(negative_lightbox_preview(development.transmittance))
+    if getattr(development, "spectral_transmittance", None) is not None:
+        neg_full = _to_rgb_u8(development.positive_preview)
+    else:
+        neg_full = _to_rgb_u8(negative_lightbox_preview(development.transmittance))
     neg_inspect = _downscale_rgb(neg_full, INSPECT_MAX_SIDE)
     neg_view = _downscale_rgb(neg_full, LIVE_MAX_SIDE)
     neg_ref = _downscale_rgb(neg_full, REF_MAX_SIDE)
+    process = getattr(development, "color_process", None)
+    process_note = f" ({process.upper()})" if process else ""
     summary = (
         f"{_stage_banner('print', locks)}\n\n"
-        f"**Develop locked** — refine Print below, then Commit Print.\n\n{_history_md(dn)}"
+        f"**Develop locked**{process_note} — refine Print below, then Commit Print.\n\n{_history_md(dn)}"
     )
     state = {
         **state,
@@ -5617,6 +5829,7 @@ def commit_develop(
         "development": development,
         "development_full": development,
         "transmittance_proxy": t_proxy,
+        "spectral_transmittance": getattr(development, "spectral_transmittance", None),
         "stage": "print",
         "summary_cache": summary,
         "source_path": state.get("source_path"),
@@ -6721,9 +6934,15 @@ def build_ui() -> gr.Blocks:
 
                 with gr.Group(elem_id="drawer_develop", elem_classes=["drawer-panel"]):
                     with gr.Accordion("Develop", open=True, elem_id="acc_develop") as develop_acc:
+                        chemistry_mode = gr.Radio(
+                            choices=CHEMISTRY_MODE_LABELS,
+                            value="bw",
+                            label="Chemistry",
+                            elem_id="chemistry_mode",
+                        )
                         film = gr.Dropdown(
-                            choices=FILM_CHOICES,
-                            value=FILM_CHOICES[0][1] if FILM_CHOICES else None,
+                            choices=FILM_CHOICES_BW,
+                            value=FILM_CHOICES_BW[0][1] if FILM_CHOICES_BW else None,
                             label="Film",
                         )
                         developer = gr.Dropdown(
@@ -6762,8 +6981,8 @@ def build_ui() -> gr.Blocks:
                 with gr.Group(elem_id="drawer_print", elem_classes=["drawer-panel"]):
                     with gr.Accordion("Print", open=True, elem_id="acc_print") as print_acc:
                         paper = gr.Dropdown(
-                            choices=PAPER_CHOICES,
-                            value=PAPER_CHOICES[0][1] if PAPER_CHOICES else None,
+                            choices=PAPER_CHOICES_BW,
+                            value=PAPER_CHOICES_BW[0][1] if PAPER_CHOICES_BW else None,
                             label="Paper",
                         )
                         print_exposure = gr.Slider(
@@ -6772,6 +6991,10 @@ def build_ui() -> gr.Blocks:
                         base_math_md = gr.Markdown(_base_math_md(8.0), elem_id="base_math")
                         print_grade = gr.Slider(0.0, 5.0, value=2.5, step=0.5, label="MG grade")
                         print_contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Filter")
+                        with gr.Row(elem_id="cc_row"):
+                            cc_cyan = gr.Slider(0, 100, value=0, step=1, label="CC Cyan")
+                            cc_magenta = gr.Slider(0, 100, value=0, step=1, label="CC Magenta")
+                            cc_yellow = gr.Slider(0, 100, value=0, step=1, label="CC Yellow")
                         split_grade = gr.Checkbox(label="Split-grade", value=False)
                         with gr.Row():
                             soft_grade = gr.Slider(0.0, 5.0, value=0.0, step=0.5, label="Soft grade")
@@ -7101,6 +7324,7 @@ def build_ui() -> gr.Blocks:
         # Always pass develop + print controls so the large viewer can show a
         # theoretical print through the working negative while developing.
         preview_inputs = [
+            chemistry_mode,
             film,
             developer,
             development_minutes,
@@ -7126,6 +7350,9 @@ def build_ui() -> gr.Blocks:
             dry_down,
             tone,
             border_frac,
+            cc_cyan,
+            cc_magenta,
+            cc_yellow,
             state,
         ]
         preview_outputs = [
@@ -7144,6 +7371,7 @@ def build_ui() -> gr.Blocks:
             roll_meta, roll_gallery, remove_roll_btn,
         ]
         control_outputs = [
+            chemistry_mode,
             film,
             developer,
             development_minutes,
@@ -7169,6 +7397,9 @@ def build_ui() -> gr.Blocks:
             dry_down,
             tone,
             border_frac,
+            cc_cyan,
+            cc_magenta,
+            cc_yellow,
         ]
         # Ingest/remove also restore Develop/Print interactivity — otherwise a
         # prior Commit Develop leaves film controls disabled on the new frame.
@@ -7267,6 +7498,16 @@ def build_ui() -> gr.Blocks:
             inputs=preview_inputs,
             outputs=preview_outputs,
         )
+        chemistry_mode.change(
+            fn=on_chemistry_mode_change,
+            inputs=[chemistry_mode],
+            outputs=[film, developer, development_minutes, exposure_index, paper],
+        ).then(
+            fn=live_preview_edit,
+            inputs=preview_inputs,
+            outputs=preview_outputs,
+        )
+
         for ctrl in (
             development_minutes,
             contrast,
@@ -7291,6 +7532,9 @@ def build_ui() -> gr.Blocks:
             dry_down,
             tone,
             border_frac,
+            cc_cyan,
+            cc_magenta,
+            cc_yellow,
         ):
             # Drag = fast lower-res; release/change = commit-quality preview
             ctrl.input(fn=live_preview_drag, inputs=preview_inputs, outputs=preview_outputs)
@@ -7611,7 +7855,7 @@ def build_ui() -> gr.Blocks:
         )
 
         recipe_controls = [
-            film, developer, development_minutes, contrast, grain,
+            chemistry_mode, film, developer, development_minutes, contrast, grain,
             exposure_index, contrast_filter, scene_exposure, halation,
             paper, print_grade, print_exposure, print_contrast, recipe_name,
         ]
@@ -7624,7 +7868,7 @@ def build_ui() -> gr.Blocks:
             fn=apply_recipe_file,
             inputs=[recipe_file, state],
             outputs=[
-                film, developer, development_minutes, contrast, grain,
+                chemistry_mode, film, developer, development_minutes, contrast, grain,
                 exposure_index, contrast_filter, scene_exposure, halation,
                 paper, print_grade, print_exposure, print_contrast,
                 recipe_name, recipe_tip, state,

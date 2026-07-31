@@ -1,0 +1,56 @@
+{
+  "id": "ra4-glossy-v1",
+  "name": "RA-4 Glossy",
+  "type": "color_ra4",
+  "version": "1.0",
+  "source": {
+    "document": "Public RA-4 process aims + coupler dye peak regions (authored composite).",
+    "digitization_date": "2026-07-31",
+    "digitization_notes": "Paper spectral sensitivities are Gaussians in B/G/R exposing bands; dye peaks for formed image dyes. Replace with measured paper spectra when available."
+  },
+  "dmax": 2.35,
+  "dmin": 0.06,
+  "default_grade": 0.0,
+  "grades": {
+    "0": {
+      "gamma": 1.0,
+      "toe": 0.35,
+      "shoulder": 0.35
+    }
+  },
+  "spectral": {
+    "layer_order": [
+      "cyan",
+      "magenta",
+      "yellow"
+    ],
+    "toe": 0.32,
+    "shoulder": 0.28,
+    "layers": {
+      "cyan": {
+        "sensitivity_peak_nm": 700,
+        "sensitivity_width_nm": 55,
+        "sensitivity_gain": 1.0,
+        "dye_peak_nm": 650,
+        "dye_width_nm": 48,
+        "dye_peak_density": 1.05
+      },
+      "magenta": {
+        "sensitivity_peak_nm": 550,
+        "sensitivity_width_nm": 45,
+        "sensitivity_gain": 1.05,
+        "dye_peak_nm": 545,
+        "dye_width_nm": 44,
+        "dye_peak_density": 1.1
+      },
+      "yellow": {
+        "sensitivity_peak_nm": 450,
+        "sensitivity_width_nm": 45,
+        "sensitivity_gain": 1.0,
+        "dye_peak_nm": 450,
+        "dye_width_nm": 48,
+        "dye_peak_density": 1.0
+      }
+    }
+  }
+}

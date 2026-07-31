@@ -26,7 +26,8 @@ def _state_from(outputs):
 
 def _default_controls(mod):
     return (
-        mod.FILM_CHOICES[0][1],
+        "bw",
+        mod.FILM_CHOICES_BW[0][1],
         mod._INIT_DEV_ID,
         mod._INIT_TNORM,
         0.0,
@@ -35,7 +36,7 @@ def _default_controls(mod):
         "none",
         0.01,
         0.0,
-        mod.PAPER_CHOICES[0][1],
+        mod.PAPER_CHOICES_BW[0][1],
         8.0,
         2.5,
         0.0,
@@ -50,6 +51,9 @@ def _default_controls(mod):
         0.0,
         0.0,
         "none",
+        0.0,
+        0.0,
+        0.0,
         0.0,
     )
 
@@ -127,7 +131,7 @@ def test_switch_after_develop_reenables_film_controls():
     assert state["roll_index"] == 1
 
     develop_args = (
-        mod.FILM_CHOICES[0][1],
+        mod.FILM_CHOICES_BW[0][1],
         mod._INIT_DEV_ID,
         mod._INIT_TNORM,
         0.0,
@@ -149,12 +153,12 @@ def test_switch_after_develop_reenables_film_controls():
     assert state["roll_index"] == 0
     assert not mod._locked(state, "development")
 
-    film_u, developer_u, minutes_u, contrast_u, grain_u = _control_block(outs, mod)[:5]
+    # control block: chemistry_mode, film, developer, minutes, contrast, ...
+    _mode_u, film_u, developer_u, minutes_u, contrast_u = _control_block(outs, mod)[:5]
     assert film_u.get("interactive") is True
     assert developer_u.get("interactive") is True
     assert minutes_u.get("interactive") is True
     assert contrast_u.get("interactive") is True
-    assert grain_u.get("interactive") is True
 
     # And Commit Develop must succeed on the newly active frame.
     state = _state_from(mod.commit_develop(*develop_args, state))
@@ -169,9 +173,9 @@ def test_frame_controls_do_not_leak_across_roll():
     assert state["roll_index"] == 1
 
     edited = list(_default_controls(mod))
-    edited[3] = 0.75  # contrast
-    edited[4] = 2.0  # grain
-    edited[10] = 12.0  # print_exposure
+    edited[4] = 0.75  # contrast (after chemistry_mode + film + developer + minutes)
+    edited[5] = 2.0  # grain
+    edited[11] = 12.0  # print_exposure
 
     # Clean switch away from the edited frame — snapshot should stick on frame 1.
     outs = mod.begin_roll_switch("0:click", state, *edited)
@@ -186,9 +190,9 @@ def test_frame_controls_do_not_leak_across_roll():
     assert state["controls"]["grain"] == 1.0
     assert state["controls"]["print_exposure"] == 8.0
 
-    contrast_u = _control_block(outs, mod)[3]
-    grain_u = _control_block(outs, mod)[4]
-    print_exp_u = _control_block(outs, mod)[10]
+    contrast_u = _control_block(outs, mod)[4]
+    grain_u = _control_block(outs, mod)[5]
+    print_exp_u = _control_block(outs, mod)[11]
     assert contrast_u.get("value") == 0.0
     assert grain_u.get("value") == 1.0
     assert print_exp_u.get("value") == 8.0
@@ -199,7 +203,7 @@ def test_frame_controls_do_not_leak_across_roll():
     assert state["roll_index"] == 1
     assert state["controls"]["contrast"] == 0.75
     assert state["controls"]["grain"] == 2.0
-    contrast_u = _control_block(outs, mod)[3]
-    grain_u = _control_block(outs, mod)[4]
+    contrast_u = _control_block(outs, mod)[4]
+    grain_u = _control_block(outs, mod)[5]
     assert contrast_u.get("value") == 0.75
     assert grain_u.get("value") == 2.0
