@@ -7069,15 +7069,15 @@ def commit_develop(
             state.get("latent_ref"),
             None,
             *_split_summary(summary),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            gr.update(interactive=True),  # unlock develop / pull
+            gr.update(interactive=False),  # film
+            gr.update(interactive=False),  # developer / reagent
+            gr.update(interactive=False),  # development_minutes
+            gr.update(interactive=False),  # contrast
+            gr.update(interactive=False),  # grain / diffusion
+            gr.update(interactive=False),  # Commit pull
+            gr.update(interactive=True),   # Unlock (Dev drawer) — was wrongly on Print Unlock
+            gr.update(interactive=False),  # Commit Print (hidden in Instant)
+            gr.update(interactive=False),  # Unlock Print
             gr.update(open=True),
             gr.update(open=False),
             state,

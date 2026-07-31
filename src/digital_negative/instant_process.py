@@ -204,15 +204,24 @@ def process_instant(
     layers_block = instant.get("layers") or {}
     channel_names = ("red", "green", "blue")
     dens_ch = []
+    dye_ceilings: list[float] = []
     for name in channel_names:
         pts = layers_block.get(name) or _default_layer_points(name)
         d = _interp_density(pts, log_e[..., channel_names.index(name)])
-        # Morph Dmax with temperature / process time.
-        dmin = float(np.min(d))
-        dens_ch.append(dmin + (d - dmin) * dmax_scale)
-    density_rgb = np.stack(dens_ch, axis=-1).astype(np.float32)
+        # Morph Dmax with temperature / process time against the authored fog floor.
+        dmin_curve = float(min(p[1] for p in pts))
+        dmax_curve = float(max(p[1] for p in pts))
+        dens_ch.append(dmin_curve + (d - dmin_curve) * dmax_scale)
+        dye_ceilings.append(dmin_curve + (dmax_curve - dmin_curve) * dmax_scale)
+    # Authored layer curves follow negative-forming / donor-sheet dye density
+    # (rises with exposure). Integral transfer migrates the *unexposed* dye onto
+    # the positive receiver — invert so the theoretical card is a finished
+    # positive print, not a colour negative.
+    density_neg = np.stack(dens_ch, axis=-1).astype(np.float32)
+    ceiling = np.asarray(dye_ceilings, dtype=np.float32).reshape(1, 1, 3)
+    density_rgb = np.clip(ceiling - density_neg, 0.0, None).astype(np.float32)
 
-    # Print reflectance from density (integral H&D is already reflection density).
+    # Reflection density of the finished integral card → reflectance.
     reflectance = np.power(10.0, -np.clip(density_rgb, 0.0, 4.0)).astype(np.float32)
 
     # Mild pod diffusion (spatial smear) — classic soft integral look.
