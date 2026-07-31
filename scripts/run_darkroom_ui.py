@@ -31,12 +31,12 @@ from digital_negative.analysis import (
     apply_clipping_overlay,
     build_curve_report,
     curve_summary_markdown,
-    render_curve_plot,
     render_print_histogram,
     spot_at,
     spot_markdown,
     suggest_tone_fit,
 )
+from digital_negative.curve_edit import apply_curve_handle_edit, curve_overlay_payload
 from digital_negative.recipes import build_recipe, load_recipe, save_recipe
 from digital_negative.chemistry import (
     chemistry_choices,
@@ -1325,7 +1325,8 @@ body.drawer-collapsed #drawer_host {
   overflow: hidden !important;
   pointer-events: none !important;
 }
-#preview_tool, #active_drawer, #crop_rect, #db_pos, #curves_open, #spot_pos, #inspect_open {
+#preview_tool, #active_drawer, #crop_rect, #db_pos, #curves_open, #spot_pos, #inspect_open,
+#curve_overlay_json, #curve_edit_cmd {
   position: absolute !important;
   left: -9999px !important;
   width: 1px !important;
@@ -1533,40 +1534,106 @@ body.module-collapsed #module_panel {
   min-height: 0 !important;
   margin-right: 3px !important;
 }
-/* Gradio wraps an Image in a <button>; the module-panel button height rule
-   above squeezed the curve plot to 20px. Let this one size to its box. */
-#module_panel #curve_plot,
-#module_panel #curve_plot .image-container,
-#module_panel #curve_plot .image-frame,
-#module_panel #curve_plot > button,
-#module_panel #curve_plot .image-container > button,
-#module_panel #curve_plot .wrap,
-#module_panel #curve_plot [data-testid="image"] {
-  height: auto !important;
-  min-height: 280px !important;
-  max-height: none !important;
-  width: 100% !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  background: var(--dr-bg-panel) !important;
-  border-radius: 5px !important;
-  overflow: visible !important;
-  padding: 0 !important;
-  flex: 0 0 auto !important;
-}
-#module_panel #curve_plot img {
-  width: 100% !important;
-  height: auto !important;
-  min-height: 260px !important;
-  max-height: none !important;
-  object-fit: contain !important;
-  cursor: zoom-in;
-  display: block !important;
-}
-#curve_plot [data-testid="block-label"],
-#curve_plot .icon-button-wrapper { display: none !important; }
 #curve_summary { margin-bottom: 4px !important; }
+#curve_overlay_json, #curve_edit_cmd { display: none !important; }
+/* Floating interactive curves over the live print */
+#curve_float {
+  position: absolute !important;
+  right: 12px !important;
+  bottom: 56px !important;
+  z-index: 28 !important;
+  width: 300px !important;
+  max-width: calc(100% - 24px) !important;
+  background: rgba(22, 22, 26, 0.94) !important;
+  border: 1px solid rgba(224, 149, 79, 0.45) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45) !important;
+  color: var(--dr-text, #eae6df) !important;
+  backdrop-filter: blur(6px);
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  pointer-events: auto !important;
+  user-select: none;
+}
+#curve_float.is-open { display: flex !important; }
+#curve_float.is-expanded {
+  width: min(460px, calc(100% - 24px)) !important;
+  bottom: 52px !important;
+}
+.curve-float-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dr-text-faint, #a8a49b);
+  cursor: grab;
+}
+.curve-float-head button {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--dr-text, #eae6df);
+  border-radius: 5px;
+  font-size: 11px;
+  padding: 2px 7px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.curve-float-head button:hover {
+  border-color: rgba(224, 149, 79, 0.55);
+  color: #e0954f;
+}
+.curve-float-head .curve-float-title { flex: 1; }
+.curve-float-body { padding: 6px 8px 4px; display: flex; flex-direction: column; gap: 6px; }
+.curve-float-panel {
+  background: rgba(38, 38, 43, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  padding: 4px 4px 2px;
+}
+.curve-float-panel h4 {
+  margin: 0 2px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #a8a49b;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.curve-float-panel svg {
+  display: block;
+  width: 100%;
+  height: 118px;
+}
+#curve_float.is-expanded .curve-float-panel svg { height: 168px; }
+.curve-float-foot {
+  padding: 5px 10px 8px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #a8a49b;
+}
+.curve-handle {
+  fill: #e0954f;
+  stroke: #1d1d21;
+  stroke-width: 1.5;
+  cursor: grab;
+}
+.curve-handle:hover, .curve-handle.is-drag {
+  fill: #f0b06a;
+  cursor: grabbing;
+}
+.curve-poly-active { fill: none; stroke: #e0954f; stroke-width: 2.2; }
+.curve-poly-base { fill: none; stroke: #6a675f; stroke-width: 1.2; stroke-dasharray: 3 3; }
+.curve-grid { stroke: #3a3a40; stroke-width: 0.6; }
+.curve-zone { stroke: #3a3a40; stroke-width: 0.5; opacity: 0.85; }
+.curve-label { fill: #a8a49b; font-size: 9px; }
 /* Float over the print stage only — never cover the stage filmstrip
    (#seq_strip is a fixed 46px row under the preview). */
 #preview_col .block:has(#spot_readout) {
@@ -2961,14 +3028,19 @@ UI_JS = """
         } else {
           hideTool();
         }
-      } else if (id === 'mod_curves' && open) {
-        // Nudge the hidden box so the server rebuilds the plot on open.
-        const root = document.querySelector('#curves_open');
-        const box = root && (root.querySelector('textarea') || root.querySelector('input'));
-        if (box) {
-          box.value = String(Date.now());
-          box.dispatchEvent(new Event('input', { bubbles: true }));
-          box.dispatchEvent(new Event('change', { bubbles: true }));
+      } else if (id === 'mod_curves') {
+        if (open) {
+          // Rebuild overlay JSON + open the floating editor over the print.
+          const root = document.querySelector('#curves_open');
+          const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+          if (box) {
+            box.value = String(Date.now());
+            box.dispatchEvent(new Event('input', { bubbles: true }));
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          try { showCurveFloat(true); } catch (_) {}
+        } else {
+          try { showCurveFloat(false); } catch (_) {}
         }
       } else if (id === 'mod_inspect' && open) {
         const root = document.querySelector('#inspect_open');
@@ -2981,6 +3053,212 @@ UI_JS = """
       }
     }, 30);
   });
+
+  // ——— Floating interactive film / paper curves over #preview_col ———
+  const readCurvePayload = () => {
+    const root = document.querySelector('#curve_overlay_json');
+    const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+    if (!box || !box.value) return null;
+    try { return JSON.parse(box.value); } catch (_) { return null; }
+  };
+  const writeCurveEditCmd = (payload) => {
+    const root = document.querySelector('#curve_edit_cmd');
+    const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+    if (!box) return;
+    const text = JSON.stringify({ ...payload, ts: Date.now() });
+    const proto = box.tagName === 'TEXTAREA'
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (desc && desc.set) desc.set.call(box, text);
+    else box.value = text;
+    box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const polyToPath = (pts, w, h, pad) => {
+    if (!pts || !pts.length) return '';
+    return pts.map((p, i) => {
+      const x = pad + p[0] * (w - 2 * pad);
+      // SVG y grows down; data y=0 is bottom of the D–logE plot.
+      const y = pad + (1 - p[1]) * (h - 2 * pad);
+      return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+  };
+  const renderCurveSvg = (host, block, { showBase = false } = {}) => {
+    if (!host || !block) {
+      if (host) host.innerHTML = '';
+      return;
+    }
+    const w = 280, h = 120, pad = 10;
+    const grid = [0.25, 0.5, 0.75].map((t) => {
+      const x = pad + t * (w - 2 * pad);
+      const y = pad + t * (h - 2 * pad);
+      return `<line class="curve-grid" x1="${x}" y1="${pad}" x2="${x}" y2="${h - pad}"/>` +
+        `<line class="curve-grid" x1="${pad}" y1="${y}" x2="${w - pad}" y2="${y}"/>`;
+    }).join('');
+    const zones = (block.zone_guides || []).map((g) => {
+      const y = pad + (1 - g.y) * (h - 2 * pad);
+      return `<line class="curve-zone" x1="${pad}" y1="${y}" x2="${w - pad}" y2="${y}"/>` +
+        `<text class="curve-label" x="${pad + 2}" y="${y - 2}">${g.label}</text>`;
+    }).join('');
+    const base = showBase && block.base
+      ? `<path class="curve-poly-base" d="${polyToPath(block.base, w, h, pad)}"/>`
+      : '';
+    const active = `<path class="curve-poly-active" d="${polyToPath(block.polyline, w, h, pad)}"/>`;
+    const handles = (block.handles || []).map((hh) => {
+      const x = pad + hh.x * (w - 2 * pad);
+      const y = pad + (1 - hh.y) * (h - 2 * pad);
+      return `<g class="curve-handle-g" data-handle="${hh.id}" data-tip="${hh.tip || hh.label}">` +
+        `<circle class="curve-handle" cx="${x}" cy="${y}" r="6"/>` +
+        `<text class="curve-label" x="${x + 8}" y="${y - 6}">${hh.label}</text></g>`;
+    }).join('');
+    host.innerHTML =
+      `<h4 title="${block.title || ''}">${block.title || ''}</h4>` +
+      `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${grid}${zones}${base}${active}${handles}</svg>`;
+  };
+  const ensureCurveFloat = () => {
+    let el = document.getElementById('curve_float');
+    if (el) return el;
+    const col = document.querySelector('#preview_col');
+    if (!col) return null;
+    el = document.createElement('div');
+    el.id = 'curve_float';
+    el.innerHTML = `
+      <div class="curve-float-head">
+        <span class="curve-float-title">Curves</span>
+        <button type="button" data-act="expand" title="Expand / shrink">Expand</button>
+        <button type="button" data-act="close" title="Close">Close</button>
+      </div>
+      <div class="curve-float-body">
+        <div class="curve-float-panel" id="curve_panel_film"></div>
+        <div class="curve-float-panel" id="curve_panel_print"></div>
+      </div>
+      <div class="curve-float-foot">Drag handles — updates Dev time, N±, base exposure, and MG grade so the curve stays possible.</div>
+    `;
+    col.appendChild(el);
+    el.querySelector('[data-act="close"]').addEventListener('click', () => showCurveFloat(false));
+    el.querySelector('[data-act="expand"]').addEventListener('click', (ev) => {
+      el.classList.toggle('is-expanded');
+      ev.currentTarget.textContent = el.classList.contains('is-expanded') ? 'Shrink' : 'Expand';
+    });
+    // Drag the panel by its header.
+    const head = el.querySelector('.curve-float-head');
+    let drag = null;
+    head.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      const r = el.getBoundingClientRect();
+      const host = col.getBoundingClientRect();
+      drag = { ox: e.clientX - r.left, oy: e.clientY - r.top, host };
+      head.setPointerCapture(e.pointerId);
+    });
+    head.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const left = e.clientX - drag.host.left - drag.ox;
+      const top = e.clientY - drag.host.top - drag.oy;
+      el.style.left = Math.max(6, left) + 'px';
+      el.style.top = Math.max(6, top) + 'px';
+      el.style.right = 'auto';
+      el.style.bottom = 'auto';
+    });
+    head.addEventListener('pointerup', () => { drag = null; });
+    return el;
+  };
+  const paintCurveFloat = (payload) => {
+    if (window.__curveDragging) {
+      window.__curvePendingPayload = payload;
+      return;
+    }
+    const el = ensureCurveFloat();
+    if (!el || !payload || !payload.ok) return;
+    renderCurveSvg(el.querySelector('#curve_panel_film'), payload.film, { showBase: true });
+    const printHost = el.querySelector('#curve_panel_print');
+    if (payload.print) {
+      printHost.style.display = '';
+      renderCurveSvg(printHost, payload.print, { showBase: false });
+    } else {
+      printHost.style.display = 'none';
+      printHost.innerHTML = '<h4>Print curve — set paper / wait for Live print</h4>';
+    }
+    // Bind handle drags (re-bound each paint).
+    el.querySelectorAll('[data-handle]').forEach((g) => {
+      const circ = g.querySelector('.curve-handle');
+      if (!circ || circ.dataset.bound === '1') return;
+      circ.dataset.bound = '1';
+      let originY = 0;
+      let sentDy = 0;
+      let lastSent = 0;
+      const plotH = () => {
+        const svg = circ.ownerSVGElement;
+        return svg ? Math.max(svg.getBoundingClientRect().height, 1) : 120;
+      };
+      const onMove = (e) => {
+        const totalDy = (originY - e.clientY) / plotH(); // up = positive
+        const delta = totalDy - sentDy;
+        if (Math.abs(delta) < 0.012) return;
+        const now = Date.now();
+        if (now - lastSent < 100) return;
+        lastSent = now;
+        sentDy = totalDy;
+        writeCurveEditCmd({ id: g.getAttribute('data-handle'), dy: delta });
+      };
+      const onUp = (e) => {
+        const totalDy = (originY - e.clientY) / plotH();
+        const delta = totalDy - sentDy;
+        if (Math.abs(delta) >= 0.008) {
+          writeCurveEditCmd({ id: g.getAttribute('data-handle'), dy: delta });
+        }
+        circ.classList.remove('is-drag');
+        window.__curveDragging = false;
+        try { circ.releasePointerCapture(e.pointerId); } catch (_) {}
+        circ.removeEventListener('pointermove', onMove);
+        circ.removeEventListener('pointerup', onUp);
+        if (window.__curvePendingPayload) {
+          const pending = window.__curvePendingPayload;
+          window.__curvePendingPayload = null;
+          setTimeout(() => paintCurveFloat(pending), 40);
+        }
+      };
+      circ.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        window.__curveDragging = true;
+        originY = e.clientY;
+        sentDy = 0;
+        lastSent = 0;
+        circ.classList.add('is-drag');
+        circ.setPointerCapture(e.pointerId);
+        circ.addEventListener('pointermove', onMove);
+        circ.addEventListener('pointerup', onUp);
+      });
+    });
+  };
+  const showCurveFloat = (on) => {
+    const el = ensureCurveFloat();
+    if (!el) return;
+    el.classList.toggle('is-open', !!on);
+    if (on) paintCurveFloat(readCurvePayload());
+  };
+  // Keep the float in sync when Gradio writes new overlay JSON.
+  let lastCurveJson = '';
+  const syncCurveFloatFromBox = () => {
+    const root = document.querySelector('#curve_overlay_json');
+    const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+    if (!box) return;
+    if (box.value === lastCurveJson) return;
+    lastCurveJson = box.value;
+    const payload = readCurvePayload();
+    if (payload && payload.ok) {
+      const el = document.getElementById('curve_float');
+      if (el && el.classList.contains('is-open')) paintCurveFloat(payload);
+      else if (isModuleOpen('mod_curves')) showCurveFloat(true);
+    }
+  };
+  setInterval(syncCurveFloatFromBox, 350);
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest && e.target.closest('#curve_show_btn');
+    if (!btn) return;
+    setTimeout(() => showCurveFloat(true), 80);
+  }, true);
 
   const ensureCtxMenu = () => {
     let menu = document.getElementById('ctx_menu');
@@ -3597,16 +3875,13 @@ def apply_recipe_file(recipe_file, state):
     )
 
 
-def refresh_curves(
+def _curve_report_for_ui(
     film_id, developer_id, development_minutes, contrast, paper_id, print_grade,
     print_exposure, state,
 ):
-    """Sample the curves currently in play and report where this frame lands."""
+    """Build the in-play film/paper CurveReport for the floating editor."""
     if not state or state.get("dn") is None:
-        return (
-            gr.update(),
-            "_Commit Ingest first — the scene is what makes these curves useful._",
-        )
+        return None, None, None
     profile = _film_profile(film_id)
     chem = get_chemistry(profile, developer_id)
     minutes = float(development_minutes) if chem is not None else None
@@ -3616,10 +3891,12 @@ def refresh_curves(
         development_minutes=minutes,
         relative_time=None if minutes is not None else 1.0,
     )
+    # Always include paper when we can — Live already shows a theoretical print.
     paper = None
-    if _locked(state, "development"):
+    try:
         paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
-
+    except Exception:
+        paper = None
     report = build_curve_report(
         state["dn"],
         profile,
@@ -3631,7 +3908,131 @@ def refresh_curves(
         grade=float(print_grade),
         base_exposure_seconds=float(print_exposure),
     )
-    return render_curve_plot(report), curve_summary_markdown(report)
+    return report, minutes_resolved, profile
+
+
+def refresh_curves(
+    film_id, developer_id, development_minutes, contrast, paper_id, print_grade,
+    print_exposure, state,
+):
+    """Sample curves for the floating editor (summary + interactive JSON)."""
+    if not state or state.get("dn") is None:
+        empty = json.dumps({"ok": False, "message": "Commit Ingest first."})
+        return (
+            "_Commit Ingest first — the scene is what makes these curves useful._",
+            empty,
+        )
+    report, minutes_resolved, _profile = _curve_report_for_ui(
+        film_id, developer_id, development_minutes, contrast, paper_id,
+        print_grade, print_exposure, state,
+    )
+    mins = float(minutes_resolved if minutes_resolved is not None else development_minutes)
+    payload = curve_overlay_payload(
+        report,
+        development_minutes=mins,
+        contrast=float(contrast),
+        print_grade=float(print_grade),
+        print_exposure=float(print_exposure),
+    )
+    return curve_summary_markdown(report), json.dumps(payload)
+
+
+def apply_curve_edit_cmd(
+    cmd_raw,
+    film_id,
+    developer_id,
+    development_minutes,
+    contrast,
+    paper_id,
+    print_grade,
+    print_exposure,
+    state,
+):
+    """JS handle drag → update Dev / N± / Grade / Exp, then refresh the float."""
+    raw = str(cmd_raw or "").strip()
+    if not raw:
+        return (
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+        )
+    try:
+        cmd = json.loads(raw)
+    except json.JSONDecodeError:
+        return (
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+        )
+    handle = str(cmd.get("id") or cmd.get("handle") or "")
+    dy = float(cmd.get("dy") or 0.0)
+    if abs(dy) < 1e-4 or not handle:
+        return (
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+        )
+
+    edit = apply_curve_handle_edit(
+        handle,
+        dy=dy,
+        development_minutes=float(development_minutes),
+        contrast=float(contrast),
+        print_grade=float(print_grade),
+        print_exposure=float(print_exposure),
+        minutes_min=_DEV_TIME_SLIDER_MIN,
+        minutes_max=_DEV_TIME_SLIDER_MAX,
+    )
+    if not edit.get("ok"):
+        return (
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+        )
+
+    minutes = float(edit["development_minutes"])
+    n_mod = float(edit["contrast"])
+    grade = float(edit["print_grade"])
+    exposure = float(edit["print_exposure"])
+    summary = gr.skip()
+    overlay = gr.skip()
+    if state and state.get("dn") is not None:
+        report, minutes_resolved, _p = _curve_report_for_ui(
+            film_id, developer_id, minutes, n_mod, paper_id, grade, exposure, state,
+        )
+        if report is not None:
+            mins = float(minutes_resolved if minutes_resolved is not None else minutes)
+            payload = curve_overlay_payload(
+                report,
+                development_minutes=mins,
+                contrast=n_mod,
+                print_grade=grade,
+                print_exposure=exposure,
+            )
+            tip = edit.get("message") or ""
+            summary = curve_summary_markdown(report) + (f"\n\n_{tip}_" if tip else "")
+            overlay = json.dumps(payload)
+
+    return (
+        gr.update(value=minutes),
+        gr.update(value=n_mod),
+        gr.update(value=grade),
+        gr.update(value=exposure),
+        summary,
+        overlay,
+    )
 
 
 # Stable Gradio slider span covering B&W tank times (~3–22 min) and C-41/E-6
@@ -7822,25 +8223,27 @@ def build_ui() -> gr.Blocks:
 
                 with gr.Accordion("Curves", open=False, elem_id="mod_curves"):
                     curve_summary = gr.Markdown(
-                        "_Commit Ingest, then refresh to see where this frame "
-                        "lands on the film and paper curves._",
+                        "_Open to float film + paper curves over the print. "
+                        "Drag **Dev / N± / Exp / Grade** handles — the matching "
+                        "drawer sliders update so the curve stays physically possible._",
                         elem_id="curve_summary",
                     )
-                    curve_plot = gr.Image(
-                        label="Curves",
-                        type="numpy",
-                        elem_id="curve_plot",
-                        height=300,
-                        buttons=["fullscreen"],
-                        show_label=False,
-                    )
-                    curve_refresh_btn = gr.Button(
-                        "Refresh curves", size="sm", elem_id="curve_refresh"
-                    )
-                    # Bumped by JS when the module expands, so the plot is
-                    # rebuilt from current settings on open.
+                    with gr.Row():
+                        curve_show_btn = gr.Button(
+                            "Show on print", size="sm", elem_id="curve_show_btn"
+                        )
+                        curve_refresh_btn = gr.Button(
+                            "Refresh", size="sm", elem_id="curve_refresh"
+                        )
+                    # Bumped by JS when the module expands → rebuild + open float.
                     curves_open = gr.Textbox(
                         value="", elem_id="curves_open", show_label=False
+                    )
+                    curve_overlay_json = gr.Textbox(
+                        value="{}", elem_id="curve_overlay_json", show_label=False
+                    )
+                    curve_edit_cmd = gr.Textbox(
+                        value="", elem_id="curve_edit_cmd", show_label=False
                     )
 
                 with gr.Accordion("Recipes", open=False, elem_id="mod_recipes"):
@@ -8535,15 +8938,37 @@ def build_ui() -> gr.Blocks:
             film, developer, development_minutes, contrast,
             paper, print_grade, print_exposure, state,
         ]
-        curve_outputs = [curve_plot, curve_summary]
+        curve_outputs = [curve_summary, curve_overlay_json]
         curve_refresh_btn.click(
             fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
         )
-        # Opening the module should show the current state, not a stale plot.
+        curve_show_btn.click(
+            fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
+        )
+        # Opening the module rebuilds the floating editor from current settings.
         # The JS sets #curves_open when the accordion expands.
         curves_open.change(
             fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
         )
+        curve_edit_cmd.change(
+            fn=apply_curve_edit_cmd,
+            inputs=[
+                curve_edit_cmd, film, developer, development_minutes, contrast,
+                paper, print_grade, print_exposure, state,
+            ],
+            outputs=[
+                development_minutes, contrast, print_grade, print_exposure,
+                curve_summary, curve_overlay_json,
+            ],
+        ).then(
+            fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
+        )
+        # Keep the float honest when drawer sliders move (handles re-snap to the
+        # engine curve for the new settings).
+        for _curve_ctrl in (development_minutes, contrast, print_grade, print_exposure, paper, film, developer):
+            _curve_ctrl.change(
+                fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
+            )
 
         spot_pos.change(fn=read_spot, inputs=[spot_pos, state], outputs=[spot_readout])
 
