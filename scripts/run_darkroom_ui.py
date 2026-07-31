@@ -422,9 +422,11 @@ footer, .gradio-container footer {
   --dr-fs-title: 0.68rem !important;
   --dr-fs-tiny: 0.60rem !important;
   height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
   flex-wrap: nowrap !important;
   overflow-x: hidden !important;
-  overflow-y: auto !important;
+  overflow-y: hidden !important;
   /* Commit rows are pinned under the stage accordion now — only a light
      bottom pad is needed on the host itself. */
   padding: 4px 6px 8px !important;
@@ -443,9 +445,32 @@ footer, .gradio-container footer {
 #drawer_host #drawer_print.is-open {
   display: flex !important;
   flex-direction: column !important;
-  height: 100% !important;
+  flex: 1 1 auto !important;
+  height: auto !important;
+  max-height: 100% !important;
   min-height: 0 !important;
   overflow: hidden !important;
+}
+#drawer_host #download_row {
+  flex: 0 0 auto !important;
+  margin: 4px 0 0 !important;
+  padding: 6px 0 2px !important;
+  border-top: 1px solid var(--dr-border) !important;
+  gap: 4px !important;
+}
+#drawer_host #download_row button {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+}
+/* Collapse the strip while Gradio keeps the trigger hidden. */
+#drawer_host #download_row:has(#download_trigger.hidden),
+#drawer_host #download_row:has(#download_trigger[style*="display: none"]),
+#drawer_host #download_row:has(.block.hidden #download_trigger),
+#drawer_host #download_row:has(.hide #download_trigger) {
+  display: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
 }
 #drawer_host #drawer_develop #acc_develop,
 #drawer_host #drawer_print #acc_print {
@@ -485,10 +510,12 @@ footer, .gradio-container footer {
   min-width: 0 !important;
   box-sizing: border-box !important;
 }
-/* Let Dev/Print fill the rail so their accordion can scroll above Commit. */
-#drawer_host > div {
-  height: 100% !important;
+/* Let Dev/Print fill the rail so their accordion can scroll above Commit.
+   Do not force 100% height on the shared download strip. */
+#drawer_host > div:not(:has(#download_row)):not(:has(#download_modes)) {
+  flex: 1 1 auto !important;
   min-height: 0 !important;
+  max-height: 100% !important;
 }
 #drawer_host .block,
 #drawer_host .form,
@@ -3378,9 +3405,13 @@ UI_JS = """
     print: 'Print only',
     both: 'Print + negative',
     negative: 'Negative only',
+    card: 'Finished card',
   };
   const clickPackage = (mode) => {
-    const host = document.getElementById('dl_pkg_' + mode);
+    // Instant Commit pull writes the card zip into #dl_pkg_negative (develop
+    // outputs only wire that slot); map mode "card" there.
+    const pkg = mode === 'card' ? 'negative' : mode;
+    const host = document.getElementById('dl_pkg_' + pkg);
     if (!host) return;
     const btn = host.matches('button') ? host : host.querySelector('button');
     if (btn) btn.click();
@@ -7076,14 +7107,15 @@ def commit_develop(
         "db_strokes": [],
     }
     if is_instant_film_type(profile.type):
-        # Finished card is the deliverable — offer card download via print package later;
-        # hide the "negative only" affordance for integral pulls.
+        # Finished card is the deliverable — no enlarger negative package.
+        card_download = _write_instant_card_package(live_view, dn, profile)
         state["dl_negative"] = None
+        state["dl_print_only"] = card_download
         state = _sync_active_into_roll(state)
         return (
-            gr.update(visible=False),
-            "",
-            gr.update(),
+            gr.update(value="⇣ Download card", visible=True),
+            "card",
+            gr.update(value=card_download),
             _viewer_frame(state, live=live_view, neg=None),
             state.get("original_ref"),
             state.get("latent_ref"),
@@ -7095,7 +7127,7 @@ def commit_develop(
             gr.update(interactive=False),  # contrast
             gr.update(interactive=False),  # grain / diffusion
             gr.update(interactive=False),  # Commit pull
-            gr.update(interactive=True),   # Unlock (Dev drawer) — was wrongly on Print Unlock
+            gr.update(interactive=True),   # Unlock (Dev drawer)
             gr.update(interactive=False),  # Commit Print (hidden in Instant)
             gr.update(interactive=False),  # Unlock Print
             gr.update(open=True),
@@ -7199,6 +7231,16 @@ def _write_print_packages(print_rgb, dn, paper, grade, exposure) -> tuple[str, s
         members.append((f"negative/{neg_png.name}", neg_png))
     combined = _zip_package(members, f"{stem}__{recipe}_print+negative.zip")
     return print_only, combined
+
+
+def _write_instant_card_package(card_rgb, dn, profile) -> str:
+    """Finished integral card — unpacks into card/ (no enlarger negative)."""
+    stem = _source_stem(dn)
+    film_bit = _safe_name(getattr(profile, "name", None) or getattr(profile, "id", "instant"))
+    card_png = _save_png(card_rgb, _downloads_dir() / f"{stem}__{film_bit}_card.png")
+    return _zip_package(
+        [(f"card/{card_png.name}", card_png)], f"{stem}__{film_bit}_card.zip"
+    )
 
 
 def _technique_kwargs(
@@ -8382,28 +8424,6 @@ def build_ui() -> gr.Blocks:
                             border_frac = gr.Slider(
                                 0.0, 0.12, value=0.0, step=0.005, label="Border"
                             )
-                        # One visible trigger. With a single package it
-                        # downloads straight away; with several it opens a
-                        # popup listing them. The real DownloadButtons sit
-                        # off-screen and are clicked by the menu.
-                        download_trigger = gr.Button(
-                            "⇣ Download",
-                            visible=False,
-                            size="sm",
-                            elem_id="download_trigger",
-                        )
-                        download_modes = gr.Textbox(
-                            value="", elem_id="download_modes", show_label=False
-                        )
-                        dl_pkg_print = gr.DownloadButton(
-                            "print", size="sm", elem_id="dl_pkg_print"
-                        )
-                        dl_pkg_both = gr.DownloadButton(
-                            "both", size="sm", elem_id="dl_pkg_both"
-                        )
-                        dl_pkg_negative = gr.DownloadButton(
-                            "negative", size="sm", elem_id="dl_pkg_negative"
-                        )
                     with gr.Row(elem_id="print_commit_row"):
                         print_btn = gr.Button(
                             "Commit Print", interactive=False, variant="primary", size="sm"
@@ -8425,6 +8445,28 @@ def build_ui() -> gr.Blocks:
                             "_Locked decisions only — exploring does not write here._",
                             elem_id="history_box",
                         )
+
+                # Shared download strip — outside Print drawer so Instant (which
+                # hides Print) can still offer the finished card after Commit pull.
+                with gr.Row(elem_id="download_row"):
+                    download_trigger = gr.Button(
+                        "⇣ Download",
+                        visible=False,
+                        size="sm",
+                        elem_id="download_trigger",
+                    )
+                download_modes = gr.Textbox(
+                    value="", elem_id="download_modes", show_label=False
+                )
+                dl_pkg_print = gr.DownloadButton(
+                    "print", size="sm", elem_id="dl_pkg_print"
+                )
+                dl_pkg_both = gr.DownloadButton(
+                    "both", size="sm", elem_id="dl_pkg_both"
+                )
+                dl_pkg_negative = gr.DownloadButton(
+                    "negative", size="sm", elem_id="dl_pkg_negative"
+                )
 
             # ——— Live theoretical print (fills remaining viewport) ———
             with gr.Column(scale=1, elem_id="preview_col", min_width=420):
