@@ -38,14 +38,17 @@ The live + Commit/Unlock model is good. Now refine the *experience* of the ritua
 
 ## 3. Profile Depth Before Expansion
 
-Resist the urge to add many more films/papers yet. Tri-X 400 was added as one carefully chosen favorite (Kodak F-4017 approximate digitization) — still prefer deepening existing stocks over a large catalog.
+**Named first batch (done):** Kodak Portra 160/400/800, Ektachrome E100, Fujifilm Provia 100F / Velvia 50, Kodak T-Max 400, Ilford Delta 400, Fujifilm Acros 100 II — public-datasheet-inspired profiles with brand names and `source{}` attribution. Color spectral stocks are approximate character models (not licensed LUTs). New B&W stocks use single-curve + CI×time morph except where noted.
 
-**Chemistries (v1 → v1.2):** Develop exposes named developers + tank minutes from public datasheets. **Breakthrough:** Tri-X D-76 and T-MAX now use digitized multi-time characteristic **curve families** from Kodak F-4017 (interpolate between published times). Other film×chem pairs still morph from a single base curve until their datasheet curve families are digitized.
+Still prefer **deepening** over a second large catalog expansion. Tri-X 400 remains the only stock with digitized multi-time characteristic **curve families** (Kodak F-4017 D-76 / T-MAX). Other film×chem pairs morph from a single base curve until datasheet curve families are digitized.
+
+**Chemistries (v1 → v1.2):** Develop exposes named developers + tank minutes from public datasheets.
 
 **Next critique focus:**
 - Side-by-side Tri-X D-76 @ 6 / 8 / 12 min vs real tanks — does the family feel right?
 - Digitize remaining Tri-X chemistries (HC-110, XTOL) when plots exist; Ilford stocks need multi-time plots or densitometer sessions.
 - Do D-76 vs T-MAX curve families feel distinct (not just grain bias)?
+- Do named Portra / Fuji slide stocks feel distinct enough, or do they need densitometer recalibration first?
 - Which profile currently feels weakest?
 - Would one carefully refined additional paper (e.g., a different surface) add more value than three mediocre new films?
 

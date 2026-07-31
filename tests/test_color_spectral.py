@@ -39,14 +39,31 @@ def test_profile_lists_split_by_chemistry_mode():
     bw_ids = {p.stem for p in bw_films}
     color_ids = {p.stem for p in color_films}
     assert "hp5-plus-v1" in bw_ids
+    assert "tmax-400-v1" in bw_ids
+    assert "delta-400-v1" in bw_ids
+    assert "acros-100-ii-v1" in bw_ids
     assert "portra-400-spectral-v1" in color_ids
+    assert "portra-160-spectral-v1" in color_ids
+    assert "portra-800-spectral-v1" in color_ids
     assert "ektachrome-100-spectral-v1" in color_ids
+    assert "provia-100f-spectral-v1" in color_ids
+    assert "velvia-50-spectral-v1" in color_ids
     assert not (bw_ids & color_ids)
 
     bw_papers = list_paper_profiles(chemistry_mode="bw")
     color_papers = list_paper_profiles(chemistry_mode="color")
     assert any(p.stem.startswith("mg-") or "fiber" in p.stem for p in bw_papers)
     assert any("ra4" in p.stem for p in color_papers)
+
+
+def test_named_color_profiles_use_brand_labels():
+    portra = load_film_profile(ROOT / "profiles" / "films" / "portra-400-spectral-v1.json")
+    e100 = load_film_profile(ROOT / "profiles" / "films" / "ektachrome-100-spectral-v1.json")
+    assert portra.name == "Kodak Portra 400"
+    assert "Kodak" in str(portra.raw.get("manufacturer", ""))
+    assert e100.name == "Kodak Ektachrome E100"
+    doc = portra.raw["source"]["document"].lower()
+    assert "approximate" in doc or "not a licensed" in doc
 
 
 def test_c41_develop_has_mask_and_inverted_preview():

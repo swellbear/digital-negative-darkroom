@@ -1,87 +1,87 @@
 {
-  "id": "ektachrome-100-spectral-v1",
-  "name": "Kodak Ektachrome E100",
+  "id": "velvia-50-spectral-v1",
+  "name": "Fujifilm Velvia 50",
   "type": "color_slide",
-  "version": "1.1",
-  "iso": 100,
-  "manufacturer": "Eastman Kodak / Kodak Alaris",
-  "grain_scale": 0.55,
+  "version": "1.0",
+  "iso": 50,
+  "manufacturer": "FUJIFILM",
+  "grain_scale": 0.42,
   "source": {
-    "document": "Kodak PROFESSIONAL EKTACHROME E100 Film technical data (public) + E-6 process aims \u2014 approximate character profile, not a licensed Kodak digitization or LUT.",
-    "reference_url": "https://imaging.kodakalaris.com/sites/prod/files/files/resources/E100_TI2591.pdf",
+    "document": "FUJICHROME Velvia 50 Professional [RVP] technical data (public) + E-6 process aims \u2014 approximate character profile, not a licensed Fujifilm digitization or LUT.",
+    "reference_url": "https://www.fujifilm.com/us/en/business/professional-photography/film/velvia-50",
     "process": "E-6",
     "digitization_date": "2026-07-31",
-    "digitization_notes": "Named Ektachrome E100 for UI catalog clarity. Reversal is modeled as density inversion around a per-layer pivot after first-developer-equivalent exposure. Dye peaks / layer curves are authored approximations of modern E-6 slide character (neutral-warm bias vs Fuji stocks).",
-    "chemistry_notes": "e6_standard / e6_push1 parameterized via CI-style minutes (first developer ~6 min @ 38\u00b0C class)."
+    "digitization_notes": "Authored from Ektachrome E100 spectral scaffold with higher mid/shoulder contrast, stronger interimage, and punchier dye densities for Velvia-class saturation. ISO 50 stock \u2014 synthetic curves pending densitometer calibration.",
+    "chemistry_notes": "e6_standard / e6_push1; Velvia is often rated/pushed carefully \u2014 keep first-dev near standard unless intentional."
   },
   "curve": {
     "x_label": "relative_log_exposure",
     "y_label": "density",
-    "base_plus_fog": 0.12,
+    "base_plus_fog": 0.1,
     "points": [
       [
         0.5,
-        0.277
+        0.257
       ],
       [
         0.733,
-        0.341
+        0.3325
       ],
       [
         0.967,
-        0.428
+        0.4352
       ],
       [
         1.2,
-        0.542
+        0.5697
       ],
       [
         1.433,
-        0.688
+        0.742
       ],
       [
         1.667,
-        0.865
+        0.9508
       ],
       [
         1.9,
-        1.071
+        1.1939
       ],
       [
         2.133,
-        1.295
+        1.4582
       ],
       [
         2.367,
-        1.523
+        1.7273
       ],
       [
         2.6,
-        1.74
+        1.9833
       ],
       [
         2.833,
-        1.935
+        2.2134
       ],
       [
         3.067,
-        2.099
+        2.407
       ],
       [
         3.3,
-        2.23
+        2.5615
       ],
       [
         3.533,
-        2.332
+        2.6819
       ],
       [
         3.767,
-        2.409
+        2.7728
       ],
       [
         4.0,
-        2.465
+        2.8388
       ]
     ]
   },
@@ -89,8 +89,8 @@
     "developer_id": "e6_standard",
     "development_minutes": 6.0,
     "relative_time": 1.0,
-    "contrast_modifier": 0.0,
-    "grain_strength": 0.7
+    "contrast_modifier": 0.12,
+    "grain_strength": 0.55
   },
   "spectral": {
     "layer_order": [
@@ -106,248 +106,248 @@
     "interimage": [
       [
         1.0,
-        -0.08,
-        -0.05
+        -0.116,
+        -0.0725
       ],
       [
-        -0.06,
+        -0.087,
         1.0,
-        -0.06
+        -0.087
       ],
       [
-        -0.04,
-        -0.07,
+        -0.058,
+        -0.1015,
         1.0
       ]
     ],
     "layers": {
       "cyan": {
         "sensitivity_peak_nm": 640,
-        "sensitivity_width_nm": 36,
+        "sensitivity_width_nm": 30.6,
         "sensitivity_gain": 1.0,
         "dye_peak_nm": 650,
-        "dye_width_nm": 44,
-        "dye_peak_density": 1.0,
+        "dye_width_nm": 37.4,
+        "dye_peak_density": 1.18,
         "curve": {
-          "base_plus_fog": 0.1,
+          "base_plus_fog": 0.08,
           "points": [
             [
               0.5,
-              0.237
+              0.217
             ],
             [
               0.733,
-              0.296
+              0.2878
             ],
             [
               0.967,
-              0.377
+              0.385
             ],
             [
               1.2,
-              0.487
+              0.517
             ],
             [
               1.433,
-              0.628
+              0.6862
             ],
             [
               1.667,
-              0.804
+              0.8974
             ],
             [
               1.9,
-              1.009
+              1.1434
             ],
             [
               2.133,
-              1.234
+              1.4134
             ],
             [
               2.367,
-              1.464
+              1.6894
             ],
             [
               2.6,
-              1.682
+              1.951
             ],
             [
               2.833,
-              1.876
+              2.1838
             ],
             [
               3.067,
-              2.037
+              2.377
             ],
             [
               3.3,
-              2.164
+              2.5294
             ],
             [
               3.533,
-              2.261
+              2.6458
             ],
             [
               3.767,
-              2.332
+              2.731
             ],
             [
               4.0,
-              2.383
+              2.7922
             ]
           ]
         }
       },
       "magenta": {
-        "sensitivity_peak_nm": 550,
-        "sensitivity_width_nm": 34,
+        "sensitivity_peak_nm": 552,
+        "sensitivity_width_nm": 28.9,
         "sensitivity_gain": 1.0,
-        "dye_peak_nm": 545,
-        "dye_width_nm": 42,
-        "dye_peak_density": 1.0,
+        "dye_peak_nm": 547,
+        "dye_width_nm": 35.7,
+        "dye_peak_density": 1.18,
         "curve": {
-          "base_plus_fog": 0.11,
+          "base_plus_fog": 0.09,
           "points": [
             [
               0.5,
-              0.238
+              0.218
             ],
             [
               0.733,
-              0.296
+              0.2876
             ],
             [
               0.967,
-              0.378
+              0.386
             ],
             [
               1.2,
-              0.489
+              0.5192
             ],
             [
               1.433,
-              0.637
+              0.6968
             ],
             [
               1.667,
-              0.822
+              0.9188
             ],
             [
               1.9,
-              1.041
+              1.1816
             ],
             [
               2.133,
-              1.284
+              1.4732
             ],
             [
               2.367,
-              1.532
+              1.7708
             ],
             [
               2.6,
-              1.766
+              2.0516
             ],
             [
               2.833,
-              1.972
+              2.2988
             ],
             [
               3.067,
-              2.141
+              2.5016
             ],
             [
               3.3,
-              2.273
+              2.66
             ],
             [
               3.533,
-              2.371
+              2.7776
             ],
             [
               3.767,
-              2.441
+              2.8616
             ],
             [
               4.0,
-              2.492
+              2.9228
             ]
           ]
         }
       },
       "yellow": {
-        "sensitivity_peak_nm": 450,
-        "sensitivity_width_nm": 36,
+        "sensitivity_peak_nm": 448,
+        "sensitivity_width_nm": 30.6,
         "sensitivity_gain": 1.0,
-        "dye_peak_nm": 450,
-        "dye_width_nm": 46,
-        "dye_peak_density": 1.0,
+        "dye_peak_nm": 448,
+        "dye_width_nm": 39.1,
+        "dye_peak_density": 1.18,
         "curve": {
-          "base_plus_fog": 0.1,
+          "base_plus_fog": 0.08,
           "points": [
             [
               0.5,
-              0.256
+              0.236
             ],
             [
               0.733,
-              0.318
+              0.3104
             ],
             [
               0.967,
-              0.399
+              0.4076
             ],
             [
               1.2,
-              0.506
+              0.536
             ],
             [
               1.433,
-              0.64
+              0.6968
             ],
             [
               1.667,
-              0.803
+              0.8924
             ],
             [
               1.9,
-              0.989
+              1.1156
             ],
             [
               2.133,
-              1.191
+              1.358
             ],
             [
               2.367,
-              1.397
+              1.6052
             ],
             [
               2.6,
-              1.593
+              1.8404
             ],
             [
               2.833,
-              1.77
+              2.0528
             ],
             [
               3.067,
-              1.921
+              2.234
             ],
             [
               3.3,
-              2.043
+              2.3804
             ],
             [
               3.533,
-              2.138
+              2.4944
             ],
             [
               3.767,
-              2.211
+              2.582
             ],
             [
               4.0,
-              2.265
+              2.6468
             ]
           ]
         }

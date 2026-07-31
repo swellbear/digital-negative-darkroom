@@ -1,96 +1,96 @@
 {
-  "id": "portra-400-spectral-v1",
-  "name": "Kodak Portra 400",
-  "type": "color_negative",
-  "version": "1.1",
-  "iso": 400,
-  "manufacturer": "Eastman Kodak / Kodak Alaris",
-  "grain_scale": 0.85,
+  "id": "provia-100f-spectral-v1",
+  "name": "Fujifilm Provia 100F",
+  "type": "color_slide",
+  "version": "1.0",
+  "iso": 100,
+  "manufacturer": "FUJIFILM",
+  "grain_scale": 0.5,
   "source": {
-    "document": "Kodak PROFESSIONAL PORTRA 400 Film technical data (public process aims) + published C-41 dye-peak regions \u2014 approximate character profile, not a licensed Kodak digitization or LUT.",
-    "reference_url": "https://imaging.kodakalaris.com/sites/default/files/wysiwyg/pro/chemistry/e4020.pdf",
-    "process": "C-41",
+    "document": "FUJICHROME PROVIA 100F Professional [RDP III] technical data (public) + E-6 process aims \u2014 approximate character profile, not a licensed Fujifilm digitization or LUT.",
+    "reference_url": "https://www.fujifilm.com/us/en/business/professional-photography/film/provia-100f",
+    "process": "E-6",
     "digitization_date": "2026-07-31",
-    "digitization_notes": "Named Portra 400 for UI catalog clarity. Spectral sensitivities and dye peaks are authored Gaussians centered on commonly published coupler absorption regions (cyan~640\u2013650nm, magenta~540\u2013550nm, yellow~440\u2013450nm). Characteristic curves are synthetic logistic families for push/pull \u2014 replace with densitometer data when available. Soft mask and moderate interimage tuned for Portra-class skin/pastel bias.",
-    "chemistry_notes": "c41_standard / c41_push1 / c41_pull1 map minutes to relative_time via CI-style points (standard C-41 ~3\u00bc min @ 37.8\u00b0C)."
+    "digitization_notes": "Authored from Ektachrome E100 spectral scaffold with cooler cyan bias, slightly lower saturation (narrower dyes), and neutral mid-contrast typical of Provia 100F published character.",
+    "chemistry_notes": "e6_standard / e6_push1 parameterized via CI-style minutes."
   },
   "curve": {
     "x_label": "relative_log_exposure",
     "y_label": "density",
-    "base_plus_fog": 0.18,
+    "base_plus_fog": 0.11,
     "points": [
       [
         0.5,
-        0.356
+        0.267
       ],
       [
         0.733,
-        0.415
+        0.3284
       ],
       [
         0.967,
-        0.489
+        0.412
       ],
       [
         1.2,
-        0.581
+        0.5214
       ],
       [
         1.433,
-        0.692
+        0.6616
       ],
       [
         1.667,
-        0.822
+        0.8315
       ],
       [
         1.9,
-        0.966
+        1.0292
       ],
       [
         2.133,
-        1.12
+        1.2443
       ],
       [
         2.367,
-        1.276
+        1.4632
       ],
       [
         2.6,
-        1.427
+        1.6715
       ],
       [
         2.833,
-        1.566
+        1.8587
       ],
       [
         3.067,
-        1.688
+        2.0161
       ],
       [
         3.3,
-        1.791
+        2.1419
       ],
       [
         3.533,
-        1.875
+        2.2398
       ],
       [
         3.767,
-        1.942
+        2.3137
       ],
       [
         4.0,
-        1.994
+        2.3675
       ]
     ]
   },
   "defaults": {
-    "developer_id": "c41_standard",
-    "development_minutes": 3.25,
+    "developer_id": "e6_standard",
+    "development_minutes": 6.0,
     "relative_time": 1.0,
     "contrast_modifier": 0.0,
-    "grain_strength": 0.9
+    "grain_strength": 0.65
   },
   "spectral": {
     "layer_order": [
@@ -99,255 +99,255 @@
       "yellow"
     ],
     "mask": {
-      "cyan": 0.12,
-      "magenta": 0.55,
-      "yellow": 0.18
+      "cyan": 0.0,
+      "magenta": 0.0,
+      "yellow": 0.0
     },
     "interimage": [
       [
         1.0,
-        -0.06,
-        -0.04
+        -0.072,
+        -0.045
       ],
       [
-        -0.05,
+        -0.054,
         1.0,
-        -0.05
+        -0.054
       ],
       [
-        -0.03,
-        -0.06,
+        -0.036,
+        -0.063,
         1.0
       ]
     ],
     "layers": {
       "cyan": {
         "sensitivity_peak_nm": 645,
-        "sensitivity_width_nm": 42,
+        "sensitivity_width_nm": 33.12,
         "sensitivity_gain": 1.0,
-        "dye_peak_nm": 650,
-        "dye_width_nm": 48,
-        "dye_peak_density": 1.0,
+        "dye_peak_nm": 655,
+        "dye_width_nm": 40.48,
+        "dye_peak_density": 0.98,
         "curve": {
-          "base_plus_fog": 0.16,
+          "base_plus_fog": 0.09,
           "points": [
             [
               0.5,
-              0.346
+              0.227
             ],
             [
               0.733,
-              0.405
+              0.2836
             ],
             [
               0.967,
-              0.478
+              0.3614
             ],
             [
               1.2,
-              0.569
+              0.467
             ],
             [
               1.433,
-              0.677
+              0.6024
             ],
             [
               1.667,
-              0.802
+              0.7713
             ],
             [
               1.9,
-              0.94
+              0.9681
             ],
             [
               2.133,
-              1.087
+              1.1841
             ],
             [
               2.367,
-              1.236
+              1.4049
             ],
             [
               2.6,
-              1.38
+              1.6142
             ],
             [
               2.833,
-              1.513
+              1.8004
             ],
             [
               3.067,
-              1.631
+              1.955
             ],
             [
               3.3,
-              1.732
+              2.0769
             ],
             [
               3.533,
-              1.815
+              2.17
             ],
             [
               3.767,
-              1.882
+              2.2382
             ],
             [
               4.0,
-              1.935
+              2.2872
             ]
           ]
         }
       },
       "magenta": {
-        "sensitivity_peak_nm": 545,
-        "sensitivity_width_nm": 38,
+        "sensitivity_peak_nm": 547,
+        "sensitivity_width_nm": 31.28,
         "sensitivity_gain": 1.0,
-        "dye_peak_nm": 545,
-        "dye_width_nm": 46,
-        "dye_peak_density": 1.0,
+        "dye_peak_nm": 542,
+        "dye_width_nm": 38.64,
+        "dye_peak_density": 0.98,
         "curve": {
-          "base_plus_fog": 0.17,
+          "base_plus_fog": 0.1,
           "points": [
             [
               0.5,
-              0.34
+              0.228
             ],
             [
               0.733,
-              0.398
+              0.2837
             ],
             [
               0.967,
-              0.474
+              0.3624
             ],
             [
               1.2,
-              0.569
+              0.469
             ],
             [
               1.433,
-              0.685
+              0.611
             ],
             [
               1.667,
-              0.821
+              0.7886
             ],
             [
               1.9,
-              0.974
+              0.9989
             ],
             [
               2.133,
-              1.137
+              1.2322
             ],
             [
               2.367,
-              1.304
+              1.4702
             ],
             [
               2.6,
-              1.464
+              1.6949
             ],
             [
               2.833,
-              1.61
+              1.8926
             ],
             [
               3.067,
-              1.737
+              2.0549
             ],
             [
               3.3,
-              1.844
+              2.1816
             ],
             [
               3.533,
-              1.931
+              2.2757
             ],
             [
               3.767,
-              1.999
+              2.3429
             ],
             [
               4.0,
-              2.051
+              2.3918
             ]
           ]
         }
       },
       "yellow": {
-        "sensitivity_peak_nm": 445,
-        "sensitivity_width_nm": 40,
+        "sensitivity_peak_nm": 450,
+        "sensitivity_width_nm": 33.12,
         "sensitivity_gain": 1.0,
         "dye_peak_nm": 450,
-        "dye_width_nm": 50,
-        "dye_peak_density": 1.0,
+        "dye_width_nm": 42.32,
+        "dye_peak_density": 0.98,
         "curve": {
-          "base_plus_fog": 0.15,
+          "base_plus_fog": 0.09,
           "points": [
             [
               0.5,
-              0.34
+              0.246
             ],
             [
               0.733,
-              0.397
+              0.3055
             ],
             [
               0.967,
-              0.468
+              0.3833
             ],
             [
               1.2,
-              0.554
+              0.486
             ],
             [
               1.433,
-              0.655
+              0.6146
             ],
             [
               1.667,
-              0.772
+              0.7711
             ],
             [
               1.9,
-              0.9
+              0.9497
             ],
             [
               2.133,
-              1.036
+              1.1436
             ],
             [
               2.367,
-              1.173
+              1.3414
             ],
             [
               2.6,
-              1.306
+              1.5295
             ],
             [
               2.833,
-              1.43
+              1.6994
             ],
             [
               3.067,
-              1.54
+              1.8444
             ],
             [
               3.3,
-              1.635
+              1.9615
             ],
             [
               3.533,
-              1.715
+              2.0527
             ],
             [
               3.767,
-              1.779
+              2.1228
             ],
             [
               4.0,
-              1.831
+              2.1746
             ]
           ]
         }
@@ -356,78 +356,54 @@
   },
   "chemistries": [
     {
-      "id": "c41_standard",
-      "name": "C-41 Standard",
-      "normal_minutes": 3.25,
-      "time_min": 2.5,
-      "time_max": 5.5,
-      "temperature_c": 37.8,
+      "id": "e6_standard",
+      "name": "E-6 Standard",
+      "normal_minutes": 6.0,
+      "time_min": 5.0,
+      "time_max": 9.0,
+      "temperature_c": 38.0,
       "is_base": true,
       "character": "balanced",
       "ci_points": [
         [
-          2.75,
-          0.5
+          5.0,
+          0.55
         ],
         [
-          3.25,
-          0.58
+          6.0,
+          0.65
         ],
         [
-          3.75,
-          0.66
-        ],
-        [
-          4.5,
+          7.5,
           0.78
+        ],
+        [
+          9.0,
+          0.9
         ]
       ]
     },
     {
-      "id": "c41_push1",
-      "name": "C-41 Push +1",
-      "normal_minutes": 4.25,
-      "time_min": 3.5,
-      "time_max": 6.0,
-      "temperature_c": 37.8,
+      "id": "e6_push1",
+      "name": "E-6 Push +1",
+      "normal_minutes": 8.0,
+      "time_min": 6.5,
+      "time_max": 11.0,
+      "temperature_c": 38.0,
       "is_base": false,
       "character": "vigorous",
       "ci_points": [
         [
-          3.5,
-          0.62
+          6.5,
+          0.7
         ],
         [
-          4.25,
-          0.72
+          8.0,
+          0.82
         ],
         [
-          5.0,
-          0.85
-        ]
-      ]
-    },
-    {
-      "id": "c41_pull1",
-      "name": "C-41 Pull \u22121",
-      "normal_minutes": 2.75,
-      "time_min": 2.25,
-      "time_max": 4.0,
-      "temperature_c": 37.8,
-      "is_base": false,
-      "character": "solvent",
-      "ci_points": [
-        [
-          2.25,
-          0.42
-        ],
-        [
-          2.75,
-          0.5
-        ],
-        [
-          3.25,
-          0.56
+          10.0,
+          0.95
         ]
       ]
     }

@@ -1,0 +1,405 @@
+{
+  "id": "tmax-400-v1",
+  "name": "Kodak T-Max 400",
+  "type": "bw",
+  "version": "1.0",
+  "iso": 400,
+  "manufacturer": "Eastman Kodak / Kodak Alaris",
+  "grain_scale": 0.72,
+  "source": {
+    "document": "KODAK PROFESSIONAL T-MAX 400 Film \u2014 Technical Data F-4016 (public)",
+    "reference_url": "https://imaging.kodakalaris.com/sites/prod/files/files/resources/f4016_TMax400.pdf",
+    "process": "KODAK PROFESSIONAL T-MAX Developer, small tank ~6\u00be minutes at 20\u00b0C (CI \u2248 0.58 class). Base curve is an approximate tabular-grain D\u2013logE character (not a full multi-time family digitization).",
+    "digitization_date": "2026-07-31",
+    "digitization_notes": "v1.0: single approximate characteristic curve for T-Max 400 tabular grain (clean toe, long straight line, moderated shoulder vs Tri-X). Named developer times from public F-4016 / Kodak processing tables. No multi-time curve_family yet \u2014 CI\u00d7time morph until plots are digitized.",
+    "chemistry_notes": "D-76, HC-110 (B), XTOL, T-MAX, T-MAX RS normals from Kodak T-MAX 400 public processing data (small tank / intermittent, 20\u00b0C, EI 400)."
+  },
+  "curve": {
+    "x_label": "relative_log_exposure",
+    "y_label": "density",
+    "base_plus_fog": 0.14,
+    "points": [
+      [
+        0.5,
+        0.14
+      ],
+      [
+        0.8,
+        0.145
+      ],
+      [
+        1.0,
+        0.17
+      ],
+      [
+        1.2,
+        0.24
+      ],
+      [
+        1.45,
+        0.38
+      ],
+      [
+        1.7,
+        0.55
+      ],
+      [
+        1.9,
+        0.72
+      ],
+      [
+        2.1,
+        0.9
+      ],
+      [
+        2.3,
+        1.08
+      ],
+      [
+        2.5,
+        1.26
+      ],
+      [
+        2.7,
+        1.43
+      ],
+      [
+        2.9,
+        1.58
+      ],
+      [
+        3.1,
+        1.72
+      ],
+      [
+        3.3,
+        1.84
+      ],
+      [
+        3.5,
+        1.94
+      ],
+      [
+        3.7,
+        2.02
+      ],
+      [
+        3.9,
+        2.08
+      ],
+      [
+        4.15,
+        2.14
+      ],
+      [
+        4.4,
+        2.18
+      ]
+    ]
+  },
+  "defaults": {
+    "developer_id": "tmax",
+    "development_minutes": 6.75,
+    "relative_time": 1.0,
+    "contrast_modifier": 0.0,
+    "grain_strength": 0.85
+  },
+  "chemistries": [
+    {
+      "id": "tmax",
+      "name": "T-MAX Developer",
+      "normal_minutes": 6.75,
+      "time_min": 4.0,
+      "time_max": 14.0,
+      "temperature_c": 20,
+      "is_base": true,
+      "character": "balanced",
+      "ci_points": [
+        [
+          4.0,
+          0.4176
+        ],
+        [
+          4.05,
+          0.4582
+        ],
+        [
+          5.06,
+          0.5162
+        ],
+        [
+          6.75,
+          0.58
+        ],
+        [
+          8.44,
+          0.6612
+        ],
+        [
+          10.12,
+          0.7482
+        ],
+        [
+          12.15,
+          0.8468
+        ],
+        [
+          14.0,
+          0.8932
+        ]
+      ],
+      "source": "Kodak F-4016 \u00b7 EI 400 \u00b7 T-MAX"
+    },
+    {
+      "id": "d76",
+      "name": "D-76 (stock)",
+      "normal_minutes": 6.5,
+      "time_min": 4.0,
+      "time_max": 14.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "balanced",
+      "ci_points": [
+        [
+          4.0,
+          0.4032
+        ],
+        [
+          4.88,
+          0.4984
+        ],
+        [
+          6.5,
+          0.56
+        ],
+        [
+          8.12,
+          0.6384
+        ],
+        [
+          9.75,
+          0.7224
+        ],
+        [
+          11.7,
+          0.8176
+        ],
+        [
+          14.0,
+          0.8624
+        ]
+      ],
+      "source": "Kodak F-4016 \u00b7 EI 400 \u00b7 D-76"
+    },
+    {
+      "id": "d76_1_1",
+      "name": "D-76 (1+1)",
+      "normal_minutes": 9.5,
+      "time_min": 6.0,
+      "time_max": 18.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "solvent",
+      "ci_points": [
+        [
+          6.0,
+          0.4032
+        ],
+        [
+          7.12,
+          0.4984
+        ],
+        [
+          9.5,
+          0.56
+        ],
+        [
+          11.88,
+          0.6384
+        ],
+        [
+          14.25,
+          0.7224
+        ],
+        [
+          17.1,
+          0.8176
+        ],
+        [
+          18.0,
+          0.8624
+        ]
+      ],
+      "source": "Kodak F-4016 \u00b7 EI 400 \u00b7 D-76 1+1"
+    },
+    {
+      "id": "hc110_b",
+      "name": "HC-110 (Dilution B)",
+      "normal_minutes": 5.0,
+      "time_min": 3.0,
+      "time_max": 12.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "vigorous",
+      "ci_points": [
+        [
+          3.0,
+          0.4176
+        ],
+        [
+          3.75,
+          0.5162
+        ],
+        [
+          5.0,
+          0.58
+        ],
+        [
+          6.25,
+          0.6612
+        ],
+        [
+          7.5,
+          0.7482
+        ],
+        [
+          9.0,
+          0.8468
+        ],
+        [
+          12.0,
+          0.8932
+        ]
+      ],
+      "source": "Kodak F-4016 \u00b7 EI 400 \u00b7 HC-110 B"
+    },
+    {
+      "id": "xtol",
+      "name": "XTOL (stock)",
+      "normal_minutes": 6.5,
+      "time_min": 4.0,
+      "time_max": 14.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "solvent",
+      "ci_points": [
+        [
+          4.0,
+          0.4032
+        ],
+        [
+          4.88,
+          0.4984
+        ],
+        [
+          6.5,
+          0.56
+        ],
+        [
+          8.12,
+          0.6384
+        ],
+        [
+          9.75,
+          0.7224
+        ],
+        [
+          11.7,
+          0.8176
+        ],
+        [
+          14.0,
+          0.8624
+        ]
+      ],
+      "source": "Kodak F-4016 \u00b7 EI 400 \u00b7 XTOL"
+    },
+    {
+      "id": "xtol_1_1",
+      "name": "XTOL (1+1)",
+      "normal_minutes": 9.5,
+      "time_min": 6.0,
+      "time_max": 18.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "solvent",
+      "ci_points": [
+        [
+          6.0,
+          0.4032
+        ],
+        [
+          7.12,
+          0.4984
+        ],
+        [
+          9.5,
+          0.56
+        ],
+        [
+          11.88,
+          0.6384
+        ],
+        [
+          14.25,
+          0.7224
+        ],
+        [
+          17.1,
+          0.8176
+        ],
+        [
+          18.0,
+          0.8624
+        ]
+      ],
+      "source": "Kodak F-4016 \u00b7 EI 400 \u00b7 XTOL 1+1"
+    },
+    {
+      "id": "tmax_rs",
+      "name": "T-MAX RS",
+      "normal_minutes": 5.0,
+      "time_min": 3.0,
+      "time_max": 12.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "balanced",
+      "ci_points": [
+        [
+          3.0,
+          0.4176
+        ],
+        [
+          3.75,
+          0.5162
+        ],
+        [
+          5.0,
+          0.58
+        ],
+        [
+          6.25,
+          0.6612
+        ],
+        [
+          7.5,
+          0.7482
+        ],
+        [
+          9.0,
+          0.8468
+        ],
+        [
+          12.0,
+          0.8932
+        ]
+      ],
+      "source": "Kodak F-4016 \u00b7 EI 400 \u00b7 T-MAX RS"
+    }
+  ],
+  "reciprocity": {
+    "threshold_s": 1.0,
+    "p": 0.85,
+    "contrast_gain": 0.08
+  }
+}
