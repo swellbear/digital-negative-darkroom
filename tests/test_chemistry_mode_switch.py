@@ -87,3 +87,53 @@ def test_stale_bw_film_ignored_after_color_switch():
     film_u = _update_dict(mod.on_chemistry_mode_change("color")[0])
     assert film_u.get("value") in {c[1] for c in mod.FILM_CHOICES_COLOR}
     assert film_u.get("value") != "acros-100-ii-v1"
+
+
+def test_chemistry_switch_unlocks_instant_commit_and_swaps_catalog():
+    """Instant Commit pull locked Print; switching to Color must unlock + swap film."""
+    mod = _load_ui()
+    if not mod.FILM_CHOICES_INSTANT:
+        return
+
+    class _DN:
+        def __init__(self):
+            self.metadata = {
+                "ui_state": {
+                    "locked_stages": ["ingest", "development", "print"],
+                    "committed_stages": ["ingest", "development", "print"],
+                },
+                "history": [],
+            }
+
+        def touch(self):
+            return None
+
+    state = {
+        "dn": _DN(),
+        "chemistry_mode": "instant",
+        "development_full": object(),
+        "print_draft": object(),
+        "controls": {"chemistry_mode": "instant", "film_id": "polaroid-600-instant-v1"},
+    }
+    outs = mod.on_chemistry_mode_change("color", False, state)
+    film_u = _update_dict(outs[0])
+    assert film_u.get("value") in {c[1] for c in mod.FILM_CHOICES_COLOR}
+    assert _update_dict(outs[-7]).get("interactive") is True  # Commit Develop
+    new_state = outs[-1]
+    assert new_state is not None and new_state is not state
+    assert "development" not in new_state["dn"].metadata["ui_state"]["locked_stages"]
+    assert "print" not in new_state["dn"].metadata["ui_state"]["locked_stages"]
+    assert new_state.get("development_full") is None
+    assert new_state.get("chemistry_mode") == "color"
+
+    # Round-trip into Instant lands on an Instant catalog id and unlocks.
+    outs_i = mod.on_chemistry_mode_change("instant", False, new_state)
+    assert _update_dict(outs_i[0]).get("value") in {c[1] for c in mod.FILM_CHOICES_INSTANT}
+    assert "Instant" in str(_update_dict(outs_i[5]).get("value", ""))
+
+
+def test_chemistry_help_update_supports_instant():
+    mod = _load_ui()
+    state = {"controls": {"chemistry_mode": "instant"}}
+    help_u = _update_dict(mod._chemistry_help_update(state))
+    assert "Instant" in str(help_u.get("value", ""))

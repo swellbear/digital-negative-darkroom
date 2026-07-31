@@ -4244,7 +4244,7 @@ def on_developer_change(film_id: str, developer_id: str, chemistry_mode: str = "
     return _chem_time_update(film_id, developer_id, reset_to_normal=True)
 
 
-def on_chemistry_mode_change(mode: str, split_on=False):
+def on_chemistry_mode_change(mode: str, split_on=False, state=None):
     """Swap film/paper catalogs and control visibility for B&W / Color / Instant."""
     mode = str(mode or "bw").lower()
     if mode not in {"bw", "color", "instant"}:
@@ -4280,33 +4280,62 @@ def on_chemistry_mode_change(mode: str, split_on=False):
             show = _split_grade_child_visible(split_on, mode)
         else:
             show = _print_key_visible(mode, key)
-        vis.append(gr.update(visible=bool(show)))
+        # Re-enable after leaving a locked Instant/Color commit — visibility
+        # alone left Print sliders stuck non-interactive.
+        vis.append(gr.update(visible=bool(show), interactive=bool(show)))
     chem = get_chemistry(profile, chem_id) or {}
-    normal = float(chem.get("normal_minutes", profile.defaults.get("development_minutes", 8.0)))
+    _tmin, _tmax, normal = (
+        time_slider_bounds(chem)
+        if chem is not None
+        else (_DEV_TIME_SLIDER_MIN, _DEV_TIME_SLIDER_MAX, 8.0)
+    )
+    minutes_val = float(np.clip(float(normal), _DEV_TIME_SLIDER_MIN, _DEV_TIME_SLIDER_MAX))
     if is_instant:
-        minutes_u = gr.update(
-            minimum=_DEV_TIME_SLIDER_MIN,
-            maximum=_DEV_TIME_SLIDER_MAX,
-            value=float(np.clip(normal, _DEV_TIME_SLIDER_MIN, _DEV_TIME_SLIDER_MAX)),
-            step=0.25,
-            label=f"Process time · N={normal:g} min",
-        )
+        minutes_label = f"Process time · N={float(normal):g} min"
     else:
-        minutes_u = _chem_time_update(film_id, chem_id, reset_to_normal=True)
+        family = (chem or {}).get("curve_family") or []
+        if isinstance(family, list) and len(family) >= 2:
+            times = ", ".join(
+                f"{float(m['minutes']):g}" for m in sorted(family, key=lambda x: x["minutes"])
+            )
+            minutes_label = f"Dev time · N={float(normal):g} [{times}]"
+        else:
+            minutes_label = f"Dev time · N={float(normal):g} @20°C"
+    minutes_u = gr.update(
+        minimum=_DEV_TIME_SLIDER_MIN,
+        maximum=_DEV_TIME_SLIDER_MAX,
+        value=minutes_val,
+        step=0.25,
+        label=minutes_label,
+        interactive=True,
+    )
     temp_default = float(profile.defaults.get("process_temp_c", 21.0))
+    ei_val = float(profile.iso)
+    state = _reset_state_for_chemistry_switch(
+        state,
+        mode=mode,
+        film_id=film_id,
+        developer_id=chem_id,
+        development_minutes=minutes_val,
+        exposure_index=ei_val,
+        paper_id=paper_id,
+    )
+    on, off = gr.update(interactive=True), gr.update(interactive=False)
     return (
-        gr.update(choices=film_choices, value=film_id),
+        gr.update(choices=film_choices, value=film_id, interactive=True),
         gr.update(
             choices=chem_choices,
             value=chem_id,
             label="Reagent" if is_instant else "Developer",
+            interactive=True,
         ),
         minutes_u,
-        gr.update(value=float(profile.iso)),
+        gr.update(value=ei_val, interactive=True),
         gr.update(
             choices=paper_choices if paper_choices else PAPER_CHOICES_BW,
             value=paper_id if paper_id else (PAPER_CHOICES_BW[0][1] if PAPER_CHOICES_BW else None),
             visible=not is_instant,
+            interactive=not is_instant,
         ),
         gr.update(value=_chemistry_help_md(mode)),
         *vis,
@@ -4323,6 +4352,7 @@ def on_chemistry_mode_change(mode: str, split_on=False):
             visible=is_instant,
             value=bool(profile.defaults.get("card_border", True)),
         ),
+        gr.update(interactive=True, value=0.0),  # contrast — re-enable after Commit pull
         gr.update(
             label="Diffusion" if is_instant else "Grain",
             value=(
@@ -4333,13 +4363,23 @@ def on_chemistry_mode_change(mode: str, split_on=False):
             minimum=0.0,
             maximum=1.0 if is_instant else 2.5,
             step=0.05,
+            interactive=True,
         ),
-        gr.update(visible=not is_instant),  # contrast_filter
-        gr.update(visible=not is_instant),  # scene_exposure (reciprocity; tank path)
-        gr.update(visible=not is_instant),  # halation
-        gr.update(visible=not is_instant),  # print_exposure
+        gr.update(visible=not is_instant, interactive=not is_instant),  # contrast_filter
+        gr.update(visible=not is_instant, interactive=not is_instant),  # scene_exposure
+        gr.update(visible=not is_instant, interactive=not is_instant),  # halation
+        gr.update(visible=not is_instant, interactive=not is_instant),  # print_exposure
         gr.update(visible=not is_instant),  # print drawer host
-        gr.update(value="Commit pull" if is_instant else "Commit Develop"),
+        gr.update(
+            value="Commit pull" if is_instant else "Commit Develop",
+            interactive=True,
+        ),
+        off,  # unlock develop — nothing locked after a chemistry flip
+        gr.update(interactive=not is_instant),  # Commit Print
+        off,  # unlock print
+        gr.update(visible=False),  # download_trigger
+        "",  # download_modes
+        state if state is not None else gr.skip(),
     )
 
 
@@ -4771,9 +4811,64 @@ def _control_updates(state):
 def _chemistry_help_update(state):
     """Keep the Develop drawer chemistry blurb aligned with the active frame."""
     mode = str(_merged_frame_controls(state).get("chemistry_mode") or "bw").lower()
-    if mode not in {"bw", "color"}:
+    if mode not in {"bw", "color", "instant"}:
         mode = "bw"
     return gr.update(value=_chemistry_help_md(mode))
+
+
+def _reset_state_for_chemistry_switch(
+    state,
+    *,
+    mode: str,
+    film_id: str,
+    developer_id: str,
+    development_minutes: float,
+    exposure_index: float,
+    paper_id: str | None,
+):
+    """Drop develop/print locks and caches when B&W / Color / Instant changes.
+
+    Committed Instant pulls lock Print too, which froze Live forever after a
+    chemistry flip; Color↔B&W had the same trap. Exploring the new family
+    always starts from an unlocked Develop.
+    """
+    if not state or state.get("dn") is None:
+        return state
+    dn = state["dn"]
+    _unlock_develop_print(dn)
+    ctrl = {
+        **((state.get("controls") or {})),
+        "chemistry_mode": mode,
+        "film_id": film_id,
+        "developer_id": developer_id,
+        "development_minutes": float(development_minutes),
+        "exposure_index": float(exposure_index),
+    }
+    if paper_id is not None:
+        ctrl["paper_id"] = paper_id
+    return {
+        **state,
+        "chemistry_mode": mode,
+        "controls": ctrl,
+        "development": None,
+        "development_full": None,
+        "transmittance_proxy": None,
+        "spectral_transmittance": None,
+        "print": None,
+        "print_draft": None,
+        "neg_ref": None,
+        "neg_view": None,
+        "neg_inspect": None,
+        "dl_negative": None,
+        "dl_print_only": None,
+        "dl_print_negative": None,
+        "db_accum": None,
+        "db_exposing": False,
+        "db_seconds_left": 0,
+        "db_strokes": [],
+        "stage": "development",
+        "summary_cache": None,
+    }
 
 
 def _session_with_controls(state, *, drawer: str | None = "roll"):
@@ -8951,7 +9046,7 @@ def build_ui() -> gr.Blocks:
         )
         chemistry_mode.change(
             fn=on_chemistry_mode_change,
-            inputs=[chemistry_mode, split_grade],
+            inputs=[chemistry_mode, split_grade, state],
             outputs=[
                 film,
                 developer,
@@ -8974,6 +9069,7 @@ def build_ui() -> gr.Blocks:
                 instant_chroma,
                 instant_warmth,
                 instant_border,
+                contrast,
                 grain,
                 contrast_filter,
                 scene_exposure,
@@ -8981,6 +9077,12 @@ def build_ui() -> gr.Blocks:
                 print_exposure,
                 print_drawer,
                 develop_btn,
+                unlock_develop_btn,
+                print_btn,
+                unlock_print_btn,
+                download_trigger,
+                download_modes,
+                state,
             ],
         ).then(
             fn=live_preview_edit,
