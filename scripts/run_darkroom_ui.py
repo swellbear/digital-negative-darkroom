@@ -3439,21 +3439,43 @@ def refresh_curves(
     return render_curve_plot(report), curve_summary_markdown(report)
 
 
+# Stable Gradio slider span covering B&W tank times (~3–22 min) and C-41/E-6
+# process times (~2.5–11 min). Chem-specific normals still drive the label and
+# reset value; narrowing min/max per chemistry races with cascading .change/.then
+# events and raises "Value X is greater than maximum value Y" (e.g. Tri-X 7.75
+# still in the payload when Color C-41 max becomes 5.5).
+_DEV_TIME_SLIDER_MIN = 1.5
+_DEV_TIME_SLIDER_MAX = 24.0
+
+
 def _chem_time_update(film_id: str, developer_id: str, *, reset_to_normal: bool = True):
     """Gradio updates for developer dropdown / minutes slider."""
     profile = _film_profile(film_id)
     chem = get_chemistry(profile, developer_id)
     if chem is None:
         label = "Dev time (rel. ×8 min stand-in)"
-        return gr.update(minimum=4.0, maximum=16.0, value=8.0, label=label, step=0.25)
-    tmin, tmax, normal = time_slider_bounds(chem)
+        return gr.update(
+            minimum=_DEV_TIME_SLIDER_MIN,
+            maximum=_DEV_TIME_SLIDER_MAX,
+            value=8.0,
+            label=label,
+            step=0.25,
+        )
+    _tmin, _tmax, normal = time_slider_bounds(chem)
     family = chem.get("curve_family") or []
     if isinstance(family, list) and len(family) >= 2:
         times = ", ".join(f"{float(m['minutes']):g}" for m in sorted(family, key=lambda x: x["minutes"]))
         label = f"Dev time · N={normal:g} [{times}]"
     else:
         label = f"Dev time · N={normal:g} @20°C"
-    return gr.update(minimum=tmin, maximum=tmax, value=normal, label=label, step=0.25)
+    value = float(np.clip(float(normal), _DEV_TIME_SLIDER_MIN, _DEV_TIME_SLIDER_MAX))
+    return gr.update(
+        minimum=_DEV_TIME_SLIDER_MIN,
+        maximum=_DEV_TIME_SLIDER_MAX,
+        value=value,
+        label=label,
+        step=0.25,
+    )
 
 
 def on_film_change(film_id: str):
@@ -3781,16 +3803,26 @@ def _control_updates(state):
         choices = chemistry_choices(profile)
         chem = get_chemistry(profile, str(developer_id))
         if chem is not None:
-            tmin, tmax, _normal = time_slider_bounds(chem)
+            _tmin, _tmax, normal = time_slider_bounds(chem)
+            # Prefer saved minutes when in range of this chem; otherwise datasheet normal.
+            if _tmin <= minutes <= _tmax:
+                minutes_val = minutes
+            else:
+                minutes_val = float(normal)
             minutes_u = gr.update(
-                minimum=tmin,
-                maximum=tmax,
-                value=float(np.clip(minutes, tmin, tmax)),
+                minimum=_DEV_TIME_SLIDER_MIN,
+                maximum=_DEV_TIME_SLIDER_MAX,
+                value=float(np.clip(minutes_val, _DEV_TIME_SLIDER_MIN, _DEV_TIME_SLIDER_MAX)),
                 step=0.25,
                 interactive=dev_on,
             )
         else:
-            minutes_u = gr.update(value=minutes, interactive=dev_on)
+            minutes_u = gr.update(
+                minimum=_DEV_TIME_SLIDER_MIN,
+                maximum=_DEV_TIME_SLIDER_MAX,
+                value=float(np.clip(minutes, _DEV_TIME_SLIDER_MIN, _DEV_TIME_SLIDER_MAX)),
+                interactive=dev_on,
+            )
         # Prefer profile default developer when switching chemistry families.
         chem_ids = {cid for _label, cid in choices}
         if developer_id not in chem_ids and choices:
@@ -6951,8 +6983,8 @@ def build_ui() -> gr.Blocks:
                             label="Developer",
                         )
                         development_minutes = gr.Slider(
-                            _INIT_TMIN,
-                            _INIT_TMAX,
+                            _DEV_TIME_SLIDER_MIN,
+                            _DEV_TIME_SLIDER_MAX,
                             value=_INIT_TNORM,
                             step=0.25,
                             label=f"Dev time · N={_INIT_TNORM:g}",
