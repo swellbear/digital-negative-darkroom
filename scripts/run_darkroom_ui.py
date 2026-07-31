@@ -412,33 +412,57 @@ footer, .gradio-container footer {
   flex: 0 0 40px !important;
   box-sizing: border-box !important;
 }
-/* Camera roll tab — server-rendered HTML list (✕ is a real button). */
-#drawer_roll #camera_roll {
+/* Camera roll tab — server-rendered HTML list (✕ is a real button).
+   Thumbs keep a fixed height (flex-shrink: 0); the list scrolls instead of
+   compressing every frame to fit the drawer. */
+#drawer_roll #camera_roll,
+#drawer_roll #camera_roll > .wrap,
+#drawer_roll #camera_roll > .html-container,
+#drawer_roll #camera_roll .prose {
   max-width: 100% !important;
   margin: 0 !important;
   padding: 0 !important;
   border: none !important;
   background: transparent !important;
+  overflow: visible !important;
+  height: auto !important;
+  max-height: none !important;
 }
 #drawer_roll #camera_roll .roll-list {
   display: flex !important;
   flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
   gap: 6px !important;
   overflow-x: hidden !important;
   overflow-y: auto !important;
-  max-height: min(52vh, 420px) !important;
-  padding: 0 !important;
+  overscroll-behavior: contain !important;
+  /* Fill the drawer column; scroll when frames exceed the viewport. */
+  max-height: min(72vh, calc(100vh - 120px)) !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 0 2px 4px 0 !important;
   margin: 0 !important;
+  flex: 0 1 auto !important;
 }
 #drawer_roll #camera_roll .roll-empty {
   color: var(--dr-text-dim) !important;
   font-size: var(--dr-fs-label) !important;
   padding: 8px 2px !important;
+  flex: 0 0 auto !important;
 }
 #drawer_roll #camera_roll .roll-item {
   position: relative !important;
+  /* Critical: default flex-shrink:1 was squashing 88px thumbs into strips. */
+  flex: 0 0 88px !important;
+  flex-grow: 0 !important;
+  flex-shrink: 0 !important;
+  align-self: stretch !important;
   width: 100% !important;
   height: 88px !important;
+  min-height: 88px !important;
+  max-height: 88px !important;
   margin: 0 !important;
   padding: 0 !important;
   border: 1px solid var(--dr-border) !important;
@@ -456,8 +480,11 @@ footer, .gradio-container footer {
   display: block !important;
   width: 100% !important;
   height: 100% !important;
+  min-height: 88px !important;
   object-fit: cover !important;
+  object-position: center center !important;
   pointer-events: none !important;
+  flex-shrink: 0 !important;
 }
 #drawer_roll #camera_roll .roll-cap {
   position: absolute !important;
@@ -481,7 +508,9 @@ footer, .gradio-container footer {
   right: 5px !important;
   z-index: 6 !important;
   width: 22px !important;
+  min-width: 22px !important;
   height: 22px !important;
+  min-height: 22px !important;
   margin: 0 !important;
   padding: 0 !important;
   border: 1px solid rgba(255, 255, 255, 0.18) !important;
