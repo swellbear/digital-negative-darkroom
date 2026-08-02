@@ -5118,22 +5118,41 @@ def parse_crop_rect(text) -> tuple[float, float, float, float]:
     return left, top, right, bottom
 
 
+def _straighten_preview_rgb(src, straighten_deg: float = 0.0) -> np.ndarray | None:
+    """Apply a fine CW straighten to an 8-bit RGB (or gray) preview frame."""
+    if src is None:
+        return None
+    img = np.asarray(src)
+    deg = float(straighten_deg or 0.0)
+    if abs(deg) >= 1e-6:
+        work = img.astype(np.float32) if img.dtype != np.float32 else img
+        img = straighten_image(work, deg, fill=0.0)
+        img = np.clip(img, 0, 255).astype(np.uint8)
+    elif img.dtype != np.uint8:
+        img = np.clip(img, 0, 255).astype(np.uint8)
+    if img.ndim == 2:
+        img = np.stack([img, img, img], axis=-1)
+    return img
+
+
 def _framing_stage_preview(state, straighten_deg: float = 0.0):
-    """RGB preview for the interactive crop stage (prefer original photo base)."""
+    """RGB preview for Frame tools — straighten the live print in place.
+
+    Frame / Crop / Auto straighten sit on the theoretical print (not a separate
+    crop stage). Prefer ``live_rgb`` so Auto does not appear to "revert" to the
+    original photo; fall back to original / geometry bases only when needed.
+    """
     if not state:
         return None
     deg = float(straighten_deg or 0.0)
+    live = _display_live_rgb(state)
+    if live is not None:
+        out = _straighten_preview_rgb(live, deg)
+        return None if out is None else np.ascontiguousarray(out)
     orig = state.get("original_base")
     if orig is not None:
-        src = np.asarray(orig)
-        if abs(deg) >= 1e-6:
-            src = straighten_image(src.astype(np.float32), deg, fill=0.0)
-            src = np.clip(src, 0, 255).astype(np.uint8)
-        elif src.dtype != np.uint8:
-            src = np.clip(src, 0, 255).astype(np.uint8)
-        if src.ndim == 2:
-            src = np.stack([src, src, src], axis=-1)
-        return _downscale_rgb(src, CROP_STAGE_MAX_SIDE)
+        out = _straighten_preview_rgb(orig, deg)
+        return None if out is None else _downscale_rgb(out, CROP_STAGE_MAX_SIDE)
     base = state.get("geometry_base")
     if base is None and state.get("dn") is not None:
         base = state["dn"].image
@@ -6059,8 +6078,10 @@ def suggest_auto_straighten(state):
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
     state = _ensure_geometry_bases(state)
-    # Prefer the photo the user is framing; fall back to geometry base.
-    src = state.get("original_base")
+    # Analyze the same picture Frame shows (live print), then geometry/original.
+    src = _display_live_rgb(state)
+    if src is None:
+        src = state.get("original_base")
     if src is None:
         src = state.get("geometry_base")
     if src is None:
