@@ -1060,20 +1060,42 @@ body.drawer-collapsed #drawer_host {
   white-space: pre-wrap !important;
 }
 /* Markdown code spans default to a near-white fill, which on this dark
-   chrome turned every logged value into a glaring highlight. */
+   chrome turned every logged value into a glaring highlight — including
+   Spot Zone / D / R and the C-41 path chip over the print. */
 #history_box code,
 #history_box pre,
 #history_box kbd,
 #history_box samp,
 #drawer_host code,
-#module_panel code {
-  background: rgba(255, 255, 255, 0.07) !important;
-  color: var(--dr-accent-strong) !important;
-  border: 1px solid var(--dr-border) !important;
+#module_panel code,
+#ritual_status code,
+#ritual_status kbd,
+#ritual_status samp,
+#spot_readout code,
+#spot_readout kbd,
+#spot_readout samp,
+#preview_col code {
+  background: rgba(255, 255, 255, 0.10) !important;
+  color: #e0954f !important;
+  border: 1px solid rgba(224, 149, 79, 0.35) !important;
   border-radius: 4px !important;
-  padding: 0 3px !important;
+  padding: 0 4px !important;
   font-size: 0.95em !important;
   box-shadow: none !important;
+}
+#ritual_status code,
+#ritual_status .prose code,
+#spot_readout code,
+#spot_readout .prose code,
+#preview_col .prose code {
+  color: #f0b06a !important;
+  background: rgba(32, 24, 16, 0.92) !important;
+  font-weight: 600 !important;
+}
+#ritual_status .prose strong,
+#spot_readout .prose strong {
+  color: #f0b06a !important;
+  font-weight: 650 !important;
 }
 #history_box pre {
   padding: 3px 5px !important;
@@ -1664,12 +1686,18 @@ body.module-collapsed #module_panel {
   padding: 6px 10px !important;
   border-radius: 6px !important;
   border: 1px solid var(--dr-border) !important;
-  background: rgba(18, 18, 21, 0.82) !important;
+  background: rgba(18, 18, 21, 0.88) !important;
   color: var(--dr-text) !important;
   font-size: 12px !important;
   pointer-events: none !important;
 }
+#spot_readout,
+#spot_readout .prose,
+#spot_readout .prose * {
+  color: var(--dr-text, #eae6df) !important;
+}
 #spot_readout p { margin: 0 !important; }
+#spot_readout strong { color: var(--dr-text, #eae6df) !important; }
 #hist_plot,
 #hist_plot > div,
 #hist_plot button,
@@ -3183,40 +3211,43 @@ UI_JS = """
       printHost.style.display = 'none';
       printHost.innerHTML = '<h4>Print curve — set paper / wait for Live print</h4>';
     }
-    // Bind handle drags (re-bound each paint).
+    // Bind handle drags (re-bound each paint). Commit only on release —
+    // mid-drag server round-trips were freezing the preview every ~100ms.
     el.querySelectorAll('[data-handle]').forEach((g) => {
       const circ = g.querySelector('.curve-handle');
       if (!circ || circ.dataset.bound === '1') return;
       circ.dataset.bound = '1';
       let originY = 0;
-      let sentDy = 0;
-      let lastSent = 0;
+      let originCy = 0;
+      let label = null;
       const plotH = () => {
         const svg = circ.ownerSVGElement;
         return svg ? Math.max(svg.getBoundingClientRect().height, 1) : 120;
       };
       const onMove = (e) => {
+        // Optimistic local feedback only — no Gradio traffic until release.
         const totalDy = (originY - e.clientY) / plotH(); // up = positive
-        const delta = totalDy - sentDy;
-        if (Math.abs(delta) < 0.012) return;
-        const now = Date.now();
-        if (now - lastSent < 100) return;
-        lastSent = now;
-        sentDy = totalDy;
-        writeCurveEditCmd({ id: g.getAttribute('data-handle'), dy: delta });
+        const svg = circ.ownerSVGElement;
+        if (!svg) return;
+        const hb = parseFloat((svg.getAttribute('viewBox') || '0 0 280 120').split(/\s+/)[3] || '120');
+        const pad = 10;
+        // SVG y grows down; dragging up (positive totalDy) moves the handle up.
+        let cy = originCy - totalDy * (hb - 2 * pad);
+        cy = Math.max(pad, Math.min(hb - pad, cy));
+        circ.setAttribute('cy', cy.toFixed(1));
+        if (label) label.setAttribute('y', (cy - 6).toFixed(1));
       };
       const onUp = (e) => {
         const totalDy = (originY - e.clientY) / plotH();
-        const delta = totalDy - sentDy;
-        if (Math.abs(delta) >= 0.008) {
-          writeCurveEditCmd({ id: g.getAttribute('data-handle'), dy: delta });
-        }
         circ.classList.remove('is-drag');
         window.__curveDragging = false;
         try { circ.releasePointerCapture(e.pointerId); } catch (_) {}
         circ.removeEventListener('pointermove', onMove);
         circ.removeEventListener('pointerup', onUp);
-        if (window.__curvePendingPayload) {
+        circ.removeEventListener('pointercancel', onUp);
+        if (Math.abs(totalDy) >= 0.015) {
+          writeCurveEditCmd({ id: g.getAttribute('data-handle'), dy: totalDy });
+        } else if (window.__curvePendingPayload) {
           const pending = window.__curvePendingPayload;
           window.__curvePendingPayload = null;
           setTimeout(() => paintCurveFloat(pending), 40);
@@ -3226,13 +3257,15 @@ UI_JS = """
         e.preventDefault();
         e.stopPropagation();
         window.__curveDragging = true;
+        window.__curvePendingPayload = null;
         originY = e.clientY;
-        sentDy = 0;
-        lastSent = 0;
+        originCy = parseFloat(circ.getAttribute('cy') || '0');
+        label = g.querySelector('text.curve-label');
         circ.classList.add('is-drag');
         circ.setPointerCapture(e.pointerId);
         circ.addEventListener('pointermove', onMove);
         circ.addEventListener('pointerup', onUp);
+        circ.addEventListener('pointercancel', onUp);
       });
     });
   };
@@ -5161,7 +5194,8 @@ def _stage_banner(stage: str, locked: list | None = None, state=None) -> str:
     banner = " → ".join(parts)
     extras = []
     if path:
-        extras.append(f"`{path}`")
+        # Bold, not `code` — Gradio code spans read as white-on-white on the float.
+        extras.append(f"**{path}**")
     if explore:
         extras.append(f"**{explore}**")
     if extras:
@@ -9208,6 +9242,7 @@ def build_ui() -> gr.Blocks:
         curves_open.change(
             fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
         )
+        # One server round-trip per handle release (JS only commits on pointerup).
         curve_edit_cmd.change(
             fn=apply_curve_edit_cmd,
             inputs=[
@@ -9221,9 +9256,13 @@ def build_ui() -> gr.Blocks:
         ).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
         )
-        # Keep the float honest when drawer sliders move (handles re-snap to the
-        # engine curve for the new settings).
-        for _curve_ctrl in (development_minutes, contrast, print_grade, print_exposure, paper, film, developer):
+        # Re-snap float handles after drawer edits settle (release), not on every
+        # drag tick — avoids fighting the curve editor mid-gesture.
+        for _curve_ctrl in (development_minutes, contrast, print_grade, print_exposure):
+            _curve_ctrl.release(
+                fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
+            )
+        for _curve_ctrl in (paper, film, developer):
             _curve_ctrl.change(
                 fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
             )
