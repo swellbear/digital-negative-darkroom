@@ -332,6 +332,61 @@ def _axis_alignment_score(gray: np.ndarray) -> float:
     return h_score + v_score
 
 
+def _orientation_axis_score(gray: np.ndarray) -> float:
+    """Reward edge energy whose line orientation is near 0° or 90°.
+
+    Soft horizons and faint architecture often fail pure projection variance;
+    a magnitude-weighted orientation histogram still peaks when the frame is
+    leveled, even with a single weak band.
+    """
+    g = gray.astype(np.float32)
+    gx = ndimage.sobel(g, axis=1)
+    gy = ndimage.sobel(g, axis=0)
+    mag = np.hypot(gx, gy)
+    thr = float(np.percentile(mag, 70))
+    mask = mag >= max(thr, 1e-6)
+    if int(np.count_nonzero(mask)) < 32:
+        return 0.0
+    # Gradient angle → line orientation in [-90, 90).
+    line_deg = np.degrees(np.arctan2(gx[mask], -gy[mask]))
+    weights = mag[mask]
+    # Distance to nearest axis (0° horizontal or ±90° vertical), in [0, 45].
+    to_axis = np.minimum(np.abs(line_deg), np.abs(np.abs(line_deg) - 90.0))
+    to_axis = np.minimum(to_axis, 45.0)
+    # Cosine lobe: 1 on-axis, 0 at 45° diagonals.
+    lobe = np.cos(np.deg2rad(to_axis * 2.0))
+    lobe = np.clip(lobe, 0.0, 1.0)
+    return float(np.sum(weights * lobe) / (float(np.sum(weights)) + 1e-8))
+
+
+def _horizon_profile_score(gray: np.ndarray) -> float:
+    """Peakiness of the row-mean transition — high when a horizon is level.
+
+    A soft sky/ground split spreads across many rows when tilted; leveling
+    stacks that transition into a sharper 1-D step.
+    """
+    g = gray.astype(np.float32)
+    row = np.mean(g, axis=1)
+    col = np.mean(g, axis=0)
+    drow = np.abs(np.diff(row))
+    dcol = np.abs(np.diff(col))
+    if drow.size == 0 and dcol.size == 0:
+        return 0.0
+    # Prefer a single strong horizon/mullion jump over many small ones.
+    h = float(np.max(drow) ** 2 / (float(np.mean(drow)) + 1e-8)) if drow.size else 0.0
+    v = float(np.max(dcol) ** 2 / (float(np.mean(dcol)) + 1e-8)) if dcol.size else 0.0
+    return h + v
+
+
+def _straighten_score(gray: np.ndarray) -> float:
+    """Combined leveling score used by the Auto straighten search."""
+    proj = _axis_alignment_score(gray)
+    orient = _orientation_axis_score(gray)
+    horizon = _horizon_profile_score(gray)
+    # Horizon/profile term carries soft scenes; projection keeps hard stripes.
+    return float(proj + 0.25 * orient * (abs(proj) + 1e-6) + 0.045 * horizon)
+
+
 def estimate_straighten_degrees(
     image: np.ndarray,
     *,
@@ -342,7 +397,8 @@ def estimate_straighten_degrees(
     """Estimate a fine straighten angle (degrees CW) that levels the frame.
 
     Searches small rotations and picks the one that maximizes axis-aligned
-    edge energy (horizontals *and* verticals). Uses the same CW convention as
+    edge energy (horizontals *and* verticals) plus an orientation-histogram
+    term for soft horizons. Uses the same CW convention as
     :func:`digital_negative.display.straighten_image`.
     """
     from .display import straighten_image
@@ -357,9 +413,9 @@ def estimate_straighten_degrees(
         xx = np.linspace(0, w - 1, nw).astype(np.int32)
         gray = np.ascontiguousarray(gray[yy][:, xx])
 
-    # Mild high-pass so flat fields don't dominate the score.
+    # Blend high-pass structure with the tone field so soft horizons remain.
     blur = ndimage.gaussian_filter(gray, sigma=1.2)
-    work = _norm01(np.abs(gray - blur) + 0.25 * gray)
+    work = _norm01(np.abs(gray - blur) + 0.55 * gray)
 
     limit = float(np.clip(max_degrees, 1.0, 20.0))
     step = float(max(step, 0.1))
@@ -370,6 +426,7 @@ def estimate_straighten_degrees(
     best_deg = 0.0
     best_score = -1.0
     score_at_zero = None
+    scores: dict[float, float] = {}
     for deg in candidates:
         trial = straighten_image(work, float(deg), fill=0.0)
         # Crop the filled corners so the black wedges don't fake a score.
@@ -378,7 +435,8 @@ def estimate_straighten_degrees(
             core = trial[pad:-pad, pad:-pad]
         else:
             core = trial
-        score = _axis_alignment_score(core)
+        score = _straighten_score(core)
+        scores[float(deg)] = score
         if abs(float(deg)) < 1e-9:
             score_at_zero = score
         if score > best_score:
@@ -389,13 +447,18 @@ def estimate_straighten_degrees(
     refine_lo = max(-limit, best_deg - coarse)
     refine_hi = min(limit, best_deg + coarse)
     for deg in np.arange(refine_lo, refine_hi + 0.5 * step, step, dtype=np.float64):
-        trial = straighten_image(work, float(deg), fill=0.0)
-        pad = int(round(0.08 * min(trial.shape[:2])))
-        if pad > 0 and trial.shape[0] > 2 * pad + 8 and trial.shape[1] > 2 * pad + 8:
-            core = trial[pad:-pad, pad:-pad]
+        key = float(deg)
+        if key in scores:
+            score = scores[key]
         else:
-            core = trial
-        score = _axis_alignment_score(core)
+            trial = straighten_image(work, float(deg), fill=0.0)
+            pad = int(round(0.08 * min(trial.shape[:2])))
+            if pad > 0 and trial.shape[0] > 2 * pad + 8 and trial.shape[1] > 2 * pad + 8:
+                core = trial[pad:-pad, pad:-pad]
+            else:
+                core = trial
+            score = _straighten_score(core)
+            scores[key] = score
         if score > best_score:
             best_score = score
             best_deg = float(deg)
@@ -404,7 +467,12 @@ def estimate_straighten_degrees(
     if abs(best_deg) < 0.15:
         return 0.0
     if score_at_zero is not None and best_score > 0:
-        # Require a clear improvement over level before claiming a tilt.
-        if best_score < score_at_zero * 1.02 and abs(best_deg) < 0.5:
+        # Soft horizons often improve only a few percent over 0°; require a
+        # relative lift, or a clear absolute gap for larger angles.
+        rel = best_score / max(score_at_zero, 1e-12)
+        abs_gain = best_score - score_at_zero
+        if rel < 1.008 and abs_gain < 1e-4 and abs(best_deg) < 0.75:
+            return 0.0
+        if rel < 1.004 and abs(best_deg) < 0.35:
             return 0.0
     return float(np.clip(round(best_deg / step) * step, -limit, limit))
