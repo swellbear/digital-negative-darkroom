@@ -37,6 +37,7 @@ from digital_negative.analysis import (
     suggest_tone_fit,
 )
 from digital_negative.curve_edit import apply_curve_handle_edit, curve_overlay_payload
+from digital_negative.spectral import is_instant_film_type
 from digital_negative.recipes import build_recipe, load_recipe, save_recipe
 from digital_negative.chemistry import (
     chemistry_choices,
@@ -115,6 +116,7 @@ def _paper_choice_tuple(path) -> tuple[str, str]:
 
 FILM_CHOICES_BW = [_film_choice_tuple(p) for p in list_film_profiles(chemistry_mode="bw")]
 FILM_CHOICES_COLOR = [_film_choice_tuple(p) for p in list_film_profiles(chemistry_mode="color")]
+FILM_CHOICES_INSTANT = [_film_choice_tuple(p) for p in list_film_profiles(chemistry_mode="instant")]
 FILM_CHOICES = list(FILM_CHOICES_BW)  # default chemistry mode = B&W
 
 PAPER_CHOICES_BW = [_paper_choice_tuple(p) for p in list_paper_profiles(chemistry_mode="bw")]
@@ -124,6 +126,7 @@ PAPER_CHOICES = list(PAPER_CHOICES_BW)
 CHEMISTRY_MODE_LABELS = [
     ("Black & White Chemistry", "bw"),
     ("Color Chemistry", "color"),
+    ("Instant / Polaroid", "instant"),
 ]
 
 # Viewer chrome — exploratory until Print is locked.
@@ -136,8 +139,9 @@ HOW_DARKROOM_WORKS_MD = (
     "**How this darkroom works**\n\n"
     "- **Live preview** is exploratory until you Commit a stage.\n"
     "- **Commit** locks that stage into the Digital Negative; **Unlock** revises it.\n"
-    "- Default print path: paper → exposure → filtration → **Commit Print** "
-    "(Advanced tools are optional)."
+    "- **B&W / Color:** paper → exposure → filtration → **Commit Print**.\n"
+    "- **Instant / Polaroid:** expose → pod diffusion → **Commit pull** "
+    "(no enlarger paper stage)."
 )
 
 # Filled after helper defs below (film-specific chemistry dropdown + minutes).
@@ -3795,7 +3799,7 @@ def apply_recipe_file(recipe_file, state):
     recipe = load_recipe(path)
     tip = f"**Recipe loaded** — {recipe.get('name', 'untitled')} · this frame only."
     recipe_mode = str(recipe.get("chemistry_mode") or "bw").lower()
-    if recipe_mode not in {"bw", "color"}:
+    if recipe_mode not in {"bw", "color", "instant"}:
         recipe_mode = "bw"
     current_mode = str(((state or {}).get("controls") or {}).get("chemistry_mode") or "bw")
     if state and state.get("dn") is not None and current_mode != recipe_mode:
@@ -3852,8 +3856,8 @@ def apply_recipe_file(recipe_file, state):
                 "print_contrast": print_contrast,
             },
         )
-    film_choices = FILM_CHOICES_COLOR if recipe_mode == "color" else FILM_CHOICES_BW
-    paper_choices = PAPER_CHOICES_COLOR if recipe_mode == "color" else PAPER_CHOICES_BW
+    film_choices = _film_choices_for_mode(recipe_mode)
+    paper_choices = _paper_choices_for_mode(recipe_mode)
     return (
         gr.update(value=recipe_mode),
         gr.update(choices=film_choices, value=film_id),
@@ -4074,24 +4078,38 @@ def _chem_time_update(film_id: str, developer_id: str, *, reset_to_normal: bool 
     )
 
 
-def _film_choice_ids(mode: str) -> set[str]:
+def _film_choices_for_mode(mode: str):
     mode = str(mode or "bw").lower()
-    choices = FILM_CHOICES_COLOR if mode == "color" else FILM_CHOICES_BW
-    return {c[1] for c in choices}
+    if mode == "color":
+        return FILM_CHOICES_COLOR
+    if mode == "instant":
+        return FILM_CHOICES_INSTANT
+    return FILM_CHOICES_BW
+
+
+def _paper_choices_for_mode(mode: str):
+    mode = str(mode or "bw").lower()
+    if mode == "color":
+        return PAPER_CHOICES_COLOR
+    if mode == "instant":
+        return []
+    return PAPER_CHOICES_BW
+
+
+def _film_choice_ids(mode: str) -> set[str]:
+    return {c[1] for c in _film_choices_for_mode(mode)}
 
 
 def _paper_choice_ids(mode: str) -> set[str]:
-    mode = str(mode or "bw").lower()
-    choices = PAPER_CHOICES_COLOR if mode == "color" else PAPER_CHOICES_BW
-    return {c[1] for c in choices}
+    return {c[1] for c in _paper_choices_for_mode(mode)}
 
 
 def _coerce_film_id(film_id: str | None, mode: str) -> str:
-    """Map a film id into the active chemistry catalog (B&W ↔ Color swap safe)."""
+    """Map a film id into the active chemistry catalog (mode-swap safe)."""
     mode = str(mode or "bw").lower()
-    if mode not in {"bw", "color"}:
+    if mode not in {"bw", "color", "instant"}:
         mode = "bw"
-    choices = FILM_CHOICES_COLOR if mode == "color" else FILM_CHOICES_BW
+    choices = _film_choices_for_mode(mode)
     ids = {c[1] for c in choices}
     if film_id and str(film_id) in ids:
         return str(film_id)
@@ -4109,7 +4127,7 @@ def _coerce_film_id(film_id: str | None, mode: str) -> str:
 
 def _coerce_paper_id(paper_id: str | None, mode: str) -> str | None:
     mode = str(mode or "bw").lower()
-    choices = PAPER_CHOICES_COLOR if mode == "color" else PAPER_CHOICES_BW
+    choices = _paper_choices_for_mode(mode)
     ids = {c[1] for c in choices}
     if paper_id and str(paper_id) in ids:
         return str(paper_id)
@@ -4144,12 +4162,12 @@ def on_developer_change(film_id: str, developer_id: str, chemistry_mode: str = "
 
 
 def on_chemistry_mode_change(mode: str, split_on=False):
-    """Swap film/paper catalogs and Print control visibility for B&W vs Color."""
+    """Swap film/paper catalogs and control visibility for B&W / Color / Instant."""
     mode = str(mode or "bw").lower()
-    if mode not in {"bw", "color"}:
+    if mode not in {"bw", "color", "instant"}:
         mode = "bw"
-    film_choices = FILM_CHOICES_COLOR if mode == "color" else FILM_CHOICES_BW
-    paper_choices = PAPER_CHOICES_COLOR if mode == "color" else PAPER_CHOICES_BW
+    film_choices = _film_choices_for_mode(mode)
+    paper_choices = _paper_choices_for_mode(mode)
     if not film_choices:
         raise gr.Error("No film profiles for that chemistry mode.")
     film_id = _coerce_film_id(None, mode)
@@ -4157,6 +4175,7 @@ def on_chemistry_mode_change(mode: str, split_on=False):
     chem_id = default_chemistry_id(profile)
     chem_choices = chemistry_choices(profile)
     paper_id = _coerce_paper_id(None, mode)
+    is_instant = mode == "instant"
     # Visibility for mode-specific Print controls (order matches wiring).
     vis = []
     for key in (
@@ -4172,19 +4191,67 @@ def on_chemistry_mode_change(mode: str, split_on=False):
         "hard_seconds",
         "tone",
     ):
-        if key in {"soft_grade", "hard_grade", "soft_seconds", "hard_seconds"}:
+        if is_instant:
+            show = False
+        elif key in {"soft_grade", "hard_grade", "soft_seconds", "hard_seconds"}:
             show = _split_grade_child_visible(split_on, mode)
         else:
             show = _print_key_visible(mode, key)
         vis.append(gr.update(visible=bool(show)))
+    chem = get_chemistry(profile, chem_id) or {}
+    normal = float(chem.get("normal_minutes", profile.defaults.get("development_minutes", 8.0)))
+    if is_instant:
+        minutes_u = gr.update(
+            minimum=_DEV_TIME_SLIDER_MIN,
+            maximum=_DEV_TIME_SLIDER_MAX,
+            value=float(np.clip(normal, _DEV_TIME_SLIDER_MIN, _DEV_TIME_SLIDER_MAX)),
+            step=0.25,
+            label=f"Process time · N={normal:g} min",
+        )
+    else:
+        minutes_u = _chem_time_update(film_id, chem_id, reset_to_normal=True)
+    temp_default = float(profile.defaults.get("process_temp_c", 21.0))
     return (
         gr.update(choices=film_choices, value=film_id),
-        gr.update(choices=chem_choices, value=chem_id),
-        _chem_time_update(film_id, chem_id, reset_to_normal=True),
+        gr.update(
+            choices=chem_choices,
+            value=chem_id,
+            label="Reagent" if is_instant else "Developer",
+        ),
+        minutes_u,
         gr.update(value=float(profile.iso)),
-        gr.update(choices=paper_choices, value=paper_id),
+        gr.update(
+            choices=paper_choices if paper_choices else PAPER_CHOICES_BW,
+            value=paper_id if paper_id else (PAPER_CHOICES_BW[0][1] if PAPER_CHOICES_BW else None),
+            visible=not is_instant,
+        ),
         gr.update(value=_chemistry_help_md(mode)),
         *vis,
+        gr.update(visible=is_instant, value=temp_default),
+        gr.update(
+            visible=is_instant,
+            value=float(profile.defaults.get("chroma", 1.0)),
+        ),
+        gr.update(
+            visible=is_instant,
+            value=float(profile.defaults.get("warmth", 0.0)),
+        ),
+        gr.update(
+            label="Diffusion" if is_instant else "Grain",
+            value=(
+                float(profile.defaults.get("diffusion", 0.14))
+                if is_instant
+                else float(profile.defaults.get("grain_strength", 1.0))
+            ),
+            minimum=0.0,
+            maximum=1.0 if is_instant else 2.5,
+            step=0.05,
+        ),
+        gr.update(visible=not is_instant),  # contrast_filter
+        gr.update(visible=not is_instant),  # halation
+        gr.update(visible=not is_instant),  # print_exposure
+        gr.update(visible=not is_instant),  # print drawer host
+        gr.update(value="Commit pull" if is_instant else "Commit Develop"),
     )
 
 
@@ -4314,7 +4381,7 @@ def _capture_controls(
 ) -> dict:
     """Snapshot Develop/Print UI controls so each roll frame keeps its recipe."""
     mode = str(chemistry_mode or "bw").lower()
-    if mode not in {"bw", "color"}:
+    if mode not in {"bw", "color", "instant"}:
         mode = "bw"
     return {
         "chemistry_mode": mode,
@@ -4404,10 +4471,16 @@ _COLOR_ONLY_PRINT_KEYS = frozenset({"cc_cyan", "cc_magenta", "cc_yellow"})
 
 
 def _chemistry_help_md(mode: str) -> str:
-    if str(mode or "bw").lower() == "color":
+    m = str(mode or "bw").lower()
+    if m == "color":
         return (
             "_**Color Chemistry** — Develop is C-41 / E-6; Print is RA-4 "
             "(CC filtration) or slide finish._"
+        )
+    if m == "instant":
+        return (
+            "_**Instant / Polaroid** — integral film: expose → reagent pod → "
+            "finished card. No enlarger paper. Temperature matters._"
         )
     return (
         "_**Black & White Chemistry** — Develop is tank chemistry; "
@@ -4417,7 +4490,10 @@ def _chemistry_help_md(mode: str) -> str:
 
 def _print_key_visible(mode: str, key: str) -> bool | None:
     """Return visibility for a print control key, or None to leave unchanged."""
-    is_color = str(mode or "bw").lower() == "color"
+    m = str(mode or "bw").lower()
+    if m == "instant":
+        return False
+    is_color = m == "color"
     if key in _BW_ONLY_PRINT_KEYS:
         return not is_color
     if key in _COLOR_ONLY_PRINT_KEYS:
@@ -4427,7 +4503,7 @@ def _print_key_visible(mode: str, key: str) -> bool | None:
 
 def _split_grade_child_visible(split_on, chemistry_mode: str = "bw") -> bool:
     """Soft/hard grade & seconds only when Split-grade is on in B&W."""
-    if str(chemistry_mode or "bw").lower() == "color":
+    if str(chemistry_mode or "bw").lower() in {"color", "instant"}:
         return False
     return bool(split_on)
 
@@ -4481,6 +4557,9 @@ def _default_controls_dict() -> dict:
         "cc_cyan": 0.0,
         "cc_magenta": 0.0,
         "cc_yellow": 0.0,
+        "process_temp_c": 21.0,
+        "instant_chroma": 1.0,
+        "instant_warmth": 0.0,
     }
 
 
@@ -4512,10 +4591,10 @@ def _control_updates(state):
     print_on = (not _locked(state, "print")) if has_dn else True
 
     mode = str(c.get("chemistry_mode") or "bw").lower()
-    if mode not in {"bw", "color"}:
+    if mode not in {"bw", "color", "instant"}:
         mode = "bw"
-    film_choices = FILM_CHOICES_COLOR if mode == "color" else FILM_CHOICES_BW
-    paper_choices = PAPER_CHOICES_COLOR if mode == "color" else PAPER_CHOICES_BW
+    film_choices = _film_choices_for_mode(mode)
+    paper_choices = _paper_choices_for_mode(mode)
     film_id = c["film_id"]
     film_ids = {x[1] for x in film_choices}
     if film_id not in film_ids and film_choices:
@@ -4577,9 +4656,12 @@ def _control_updates(state):
         else:
             vis = _print_key_visible(mode, key)
         if key == "paper_id":
+            if mode == "instant" or not paper_choices:
+                print_u.append(gr.update(visible=False, interactive=False))
+                continue
             pid = c.get("paper_id")
             pids = {x[1] for x in paper_choices}
-            if pid not in pids and paper_choices:
+            if pid not in pids:
                 pid = paper_choices[0][1]
             kwargs = {
                 "choices": paper_choices,
@@ -4982,11 +5064,16 @@ def _path_label(state) -> str:
         return "C-41"
     if proc == "e6":
         return "E-6"
+    if proc == "instant_integral":
+        return "Instant"
     mode = (state or {}).get("chemistry_mode")
     if not mode:
         mode = ((state or {}).get("controls") or {}).get("chemistry_mode")
-    if str(mode or "bw").lower() == "color":
+    m = str(mode or "bw").lower()
+    if m == "color":
         return "Color"
+    if m == "instant":
+        return "Instant"
     return "B&W"
 
 
@@ -6194,6 +6281,17 @@ def _run_live_develop_then_print(
         proxy = state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE)
     proxy.metadata["process_seed"] = state["dn"].metadata.get("process_seed")
     profile = load_film_profile(_profile_path(list_film_profiles(), film_id))
+    # Instant knobs travel on development metadata (read by process_instant).
+    ctrl = (state or {}).get("controls") or {}
+    if is_instant_film_type(profile.type):
+        dev_m = proxy.metadata.setdefault("development", {})
+        dev_m["process_temp_c"] = float(
+            ctrl.get("process_temp_c", profile.defaults.get("process_temp_c", 21.0))
+        )
+        dev_m["chroma"] = float(ctrl.get("instant_chroma", profile.defaults.get("chroma", 1.0)))
+        dev_m["warmth"] = float(ctrl.get("instant_warmth", profile.defaults.get("warmth", 0.0)))
+        # Grain slider is remapped to diffusion in Instant mode.
+        dev_m["diffusion"] = float(grain)
     development = develop(
         proxy,
         profile,
@@ -6208,6 +6306,38 @@ def _run_live_develop_then_print(
         halation=float(halation),
         commit=False,
     )
+    if is_instant_film_type(profile.type):
+        live_rgb = _to_rgb_u8(development.positive_preview)
+        quality_note = "drag" if max_side <= DRAG_MAX_SIDE else "hq"
+        temp_c = float(proxy.metadata.get("development", {}).get("process_temp_c", 21.0))
+        summary = (
+            f"{_stage_banner('development', _locks(state), state)}\n\n"
+            f"**Live exploring — Instant card** · {live_rgb.shape[1]}×{live_rgb.shape[0]} "
+            f"({quality_note})  \n"
+            f"{profile.name} · pod · {float(development_minutes):g} min · "
+            f"{temp_c:.0f}°C · N±={float(contrast):+.2f} · "
+            f"diffusion={float(grain):.2f}  \n"
+            f"_No enlarger paper — Commit pull locks the finished card._\n\n"
+            f"{_history_md(state['dn'])}"
+        )
+        state = {
+            **state,
+            "proxy": state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE),
+            "proxy_drag": state.get("proxy_drag") or _proxy_dn(state["dn"], DRAG_MAX_SIDE),
+            "development": development,
+            "spectral_transmittance": None,
+            "chemistry_mode": "instant",
+            "live_rgb": live_rgb,
+            "live_inspect": live_rgb,
+            "print_draft": None,
+            "neg_ref": None,
+            "neg_view": None,
+            "neg_inspect": None,
+            "stage": "development",
+            "summary_cache": summary,
+        }
+        return live_rgb, None, summary, state
+
     paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
     tech = _technique_kwargs(
         split_on, soft_grade, hard_grade, soft_seconds, hard_seconds,
@@ -6321,6 +6451,9 @@ def live_preview(
     cc_cyan,
     cc_magenta,
     cc_yellow,
+    process_temp_c,
+    instant_chroma,
+    instant_warmth,
     state,
     quality: str = "high",
     mark_dirty: bool = False,
@@ -6337,6 +6470,8 @@ def live_preview(
     mode = str(chemistry_mode or "bw").lower()
     film_id = _coerce_film_id(film_id, mode)
     paper_id = _coerce_paper_id(paper_id, mode)
+    if paper_id is None and PAPER_CHOICES_BW:
+        paper_id = PAPER_CHOICES_BW[0][1]
     if film_id not in _film_choice_ids(mode):
         film_id = _coerce_film_id(None, mode)
     try:
@@ -6377,12 +6512,19 @@ def live_preview(
         cc_magenta,
         cc_yellow,
     )
+    # Instant extras (not in the legacy 29-wide roll snapshot arity).
+    controls["process_temp_c"] = float(process_temp_c if process_temp_c is not None else 21.0)
+    controls["instant_chroma"] = float(instant_chroma if instant_chroma is not None else 1.0)
+    controls["instant_warmth"] = float(instant_warmth if instant_warmth is not None else 0.0)
 
     if not state or state.get("dn") is None:
         return _pack_preview(None, None, None, None, "*Commit Ingest first.*", state)
 
     # Keep path labels coherent when chemistry and roll index change together.
-    state = {**state, "chemistry_mode": str(chemistry_mode or "bw")}
+    state = {**state, "chemistry_mode": str(chemistry_mode or "bw"), "controls": {
+        **((state or {}).get("controls") or {}),
+        **controls,
+    }}
 
     if _locked(state, "print"):
         return _pack_preview(
@@ -6580,6 +6722,9 @@ def live_preview_drag(
     cc_cyan,
     cc_magenta,
     cc_yellow,
+    process_temp_c,
+    instant_chroma,
+    instant_warmth,
     state,
 ):
     return live_preview(
@@ -6612,6 +6757,9 @@ def live_preview_drag(
         cc_cyan,
         cc_magenta,
         cc_yellow,
+        process_temp_c,
+        instant_chroma,
+        instant_warmth,
         state,
         quality="drag",
         mark_dirty=True,
@@ -6649,6 +6797,9 @@ def live_preview_high(
     cc_cyan,
     cc_magenta,
     cc_yellow,
+    process_temp_c,
+    instant_chroma,
+    instant_warmth,
     state,
 ):
     return live_preview(
@@ -6681,6 +6832,9 @@ def live_preview_high(
         cc_cyan,
         cc_magenta,
         cc_yellow,
+        process_temp_c,
+        instant_chroma,
+        instant_warmth,
         state,
         quality="high",
         mark_dirty=False,
@@ -6718,6 +6872,9 @@ def live_preview_edit(
     cc_cyan,
     cc_magenta,
     cc_yellow,
+    process_temp_c,
+    instant_chroma,
+    instant_warmth,
     state,
 ):
     return live_preview(
@@ -6750,6 +6907,9 @@ def live_preview_edit(
         cc_cyan,
         cc_magenta,
         cc_yellow,
+        process_temp_c,
+        instant_chroma,
+        instant_warmth,
         state,
         quality="high",
         mark_dirty=True,
@@ -6768,6 +6928,13 @@ def commit_develop(
 
     dn = state["dn"]
     profile = load_film_profile(_profile_path(list_film_profiles(), film_id))
+    if is_instant_film_type(profile.type):
+        ctrl = (state or {}).get("controls") or {}
+        dev_m = dn.metadata.setdefault("development", {})
+        dev_m["process_temp_c"] = float(ctrl.get("process_temp_c", 21.0))
+        dev_m["chroma"] = float(ctrl.get("instant_chroma", 1.0))
+        dev_m["warmth"] = float(ctrl.get("instant_warmth", 0.0))
+        dev_m["diffusion"] = float(grain)
     development = develop(
         dn,
         profile,
@@ -6785,6 +6952,9 @@ def commit_develop(
     locks = dn.metadata["ui_state"].setdefault("locked_stages", [])
     if "development" not in locks:
         locks.append("development")
+    # Instant has no paper stage — lock print too so Live stays on the card.
+    if is_instant_film_type(profile.type) and "print" not in locks:
+        locks.append("print")
 
     t_src = _print_transmittance(development)
     if t_src.ndim >= 2:
@@ -6797,20 +6967,31 @@ def commit_develop(
     # fall back to positive if no live print was generated yet.
     # Do not use `or` — live_rgb is a numpy array (ambiguous truth value).
     live_view = state.get("live_rgb")
-    if live_view is None:
+    if live_view is None or is_instant_film_type(profile.type):
         live_view = _downscale_rgb(
             _to_rgb_u8(development.positive_preview), LIVE_MAX_SIDE
         )
-    neg_full = _color_or_bw_negative_view(development)
-    neg_inspect = _downscale_rgb(neg_full, INSPECT_MAX_SIDE)
-    neg_view = _downscale_rgb(neg_full, LIVE_MAX_SIDE)
-    neg_ref = _downscale_rgb(neg_full, REF_MAX_SIDE)
-    process = getattr(development, "color_process", None)
-    process_note = f" ({process.upper()})" if process else ""
-    summary = (
-        f"{_stage_banner('print', locks, state)}\n\n"
-        f"**Develop locked**{process_note} — refine Print below, then Commit Print.\n\n{_history_md(dn)}"
-    )
+    if is_instant_film_type(profile.type):
+        neg_full = np.zeros((64, 64, 3), dtype=np.uint8)
+        neg_inspect = neg_full
+        neg_view = neg_full
+        neg_ref = neg_full
+        summary = (
+            f"{_stage_banner('development', locks, state)}\n\n"
+            f"**Pull locked** — integral card committed "
+            f"({profile.name}). Unlock to revise.\n\n{_history_md(dn)}"
+        )
+    else:
+        neg_full = _color_or_bw_negative_view(development)
+        neg_inspect = _downscale_rgb(neg_full, INSPECT_MAX_SIDE)
+        neg_view = _downscale_rgb(neg_full, LIVE_MAX_SIDE)
+        neg_ref = _downscale_rgb(neg_full, REF_MAX_SIDE)
+        process = getattr(development, "color_process", None)
+        process_note = f" ({process.upper()})" if process else ""
+        summary = (
+            f"{_stage_banner('print', locks, state)}\n\n"
+            f"**Develop locked**{process_note} — refine Print below, then Commit Print.\n\n{_history_md(dn)}"
+        )
     state = {
         **state,
         "dn": dn,
@@ -6832,7 +7013,7 @@ def commit_develop(
         "development_full": development,
         "transmittance_proxy": t_proxy,
         "spectral_transmittance": getattr(development, "spectral_transmittance", None),
-        "stage": "print",
+        "stage": "development" if is_instant_film_type(profile.type) else "print",
         "summary_cache": summary,
         "source_path": state.get("source_path"),
         "db_accum": None,
@@ -6840,6 +7021,34 @@ def commit_develop(
         "db_seconds_left": 0,
         "db_strokes": [],
     }
+    if is_instant_film_type(profile.type):
+        # Finished card is the deliverable — offer card download via print package later;
+        # hide the "negative only" affordance for integral pulls.
+        state["dl_negative"] = None
+        state = _sync_active_into_roll(state)
+        return (
+            gr.update(visible=False),
+            "",
+            gr.update(),
+            _viewer_frame(state, live=live_view, neg=None),
+            state.get("original_ref"),
+            state.get("latent_ref"),
+            None,
+            *_split_summary(summary),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
+            gr.update(interactive=True),  # unlock develop / pull
+            gr.update(open=True),
+            gr.update(open=False),
+            state,
+            "develop",
+        )
     neg_download = _write_negative_package(neg_full, dn)
     state["dl_negative"] = neg_download
     # Keep the camera-roll snapshot aligned with the active frame.
@@ -7489,9 +7698,16 @@ def unlock_develop(state):
         "stage": "development",
     }
     state = reset_local_work(state)
+    is_instant = str((state.get("controls") or {}).get("chemistry_mode") or state.get("chemistry_mode") or "").lower() == "instant"
+    unlock_label = "Pull unlocked" if is_instant else "Develop unlocked"
+    unlock_hint = (
+        "adjust Instant process below, then Commit pull again."
+        if is_instant
+        else "adjust Develop below, then Commit again."
+    )
     summary = (
         f"{_stage_banner('development', _locks(state), state)}\n\n"
-        f"**Develop unlocked** — adjust Develop below, then Commit again.\n\n"
+        f"**{unlock_label}** — {unlock_hint}\n\n"
         f"{_history_md(dn)}"
     )
     state["summary_cache"] = summary
@@ -7971,6 +8187,33 @@ def build_ui() -> gr.Blocks:
                         )
                         contrast = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Contrast")
                         grain = gr.Slider(0.0, 2.5, value=1.0, step=0.05, label="Grain")
+                        process_temp = gr.Slider(
+                            10.0,
+                            38.0,
+                            value=21.0,
+                            step=0.5,
+                            label="Process temp (°C)",
+                            visible=False,
+                            elem_id="process_temp",
+                        )
+                        instant_chroma = gr.Slider(
+                            0.0,
+                            2.0,
+                            value=1.0,
+                            step=0.05,
+                            label="Chroma",
+                            visible=False,
+                            elem_id="instant_chroma",
+                        )
+                        instant_warmth = gr.Slider(
+                            -1.0,
+                            1.0,
+                            value=0.0,
+                            step=0.05,
+                            label="Warmth",
+                            visible=False,
+                            elem_id="instant_warmth",
+                        )
                         with gr.Accordion(
                             "More",
                             open=False,
@@ -7998,7 +8241,7 @@ def build_ui() -> gr.Blocks:
                             )
                             unlock_develop_btn = gr.Button("Unlock", interactive=False, size="sm")
 
-                with gr.Group(elem_id="drawer_print", elem_classes=["drawer-panel"]):
+                with gr.Group(elem_id="drawer_print", elem_classes=["drawer-panel"]) as print_drawer:
                     with gr.Accordion("Print", open=True, elem_id="acc_print") as print_acc:
                         paper = gr.Dropdown(
                             choices=PAPER_CHOICES_BW,
@@ -8434,6 +8677,9 @@ def build_ui() -> gr.Blocks:
             cc_cyan,
             cc_magenta,
             cc_yellow,
+            process_temp,
+            instant_chroma,
+            instant_warmth,
             state,
         ]
         preview_outputs = [
@@ -8601,6 +8847,15 @@ def build_ui() -> gr.Blocks:
                 soft_seconds,
                 hard_seconds,
                 tone,
+                process_temp,
+                instant_chroma,
+                instant_warmth,
+                grain,
+                contrast_filter,
+                halation,
+                print_exposure,
+                print_drawer,
+                develop_btn,
             ],
         ).then(
             fn=live_preview_edit,
@@ -8646,6 +8901,9 @@ def build_ui() -> gr.Blocks:
             cc_cyan,
             cc_magenta,
             cc_yellow,
+            process_temp,
+            instant_chroma,
+            instant_warmth,
         ):
             # Drag = fast lower-res; release/change = commit-quality preview
             ctrl.input(fn=live_preview_drag, inputs=preview_inputs, outputs=preview_outputs)

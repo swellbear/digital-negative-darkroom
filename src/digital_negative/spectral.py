@@ -239,15 +239,25 @@ def profile_layer_spectra(raw_spectral: dict[str, Any]) -> tuple[np.ndarray, np.
     )
 
 
+INSTANT_FILM_TYPES = frozenset({"instant_integral_color", "instant_integral_bw"})
+COLOR_FILM_TYPES = frozenset({"color_negative", "color_slide", "color_ra4"})
+
+
 def chemistry_mode_for_film_type(film_type: str) -> str:
     t = str(film_type or "bw").lower()
-    if t in {"color_negative", "color_slide", "color_ra4"}:
+    if t in COLOR_FILM_TYPES:
         return "color"
+    if t in INSTANT_FILM_TYPES:
+        return "instant"
     return "bw"
 
 
 def is_color_film_type(film_type: str) -> bool:
     return chemistry_mode_for_film_type(film_type) == "color"
+
+
+def is_instant_film_type(film_type: str) -> bool:
+    return chemistry_mode_for_film_type(film_type) == "instant"
 
 
 def is_color_paper_type(paper_type: str) -> bool:
