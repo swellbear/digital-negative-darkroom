@@ -311,17 +311,38 @@ def format_crop_rect(box: dict[str, Any]) -> str:
     return ",".join(f"{float(box[k]):.5f}" for k in ("x", "y", "w", "h"))
 
 
+def _axis_alignment_score(gray: np.ndarray) -> float:
+    """Higher when strong edges are axis-aligned (horizontals + verticals).
+
+    Architectural scenes (window mullions, door frames) are dominated by
+    verticals; horizons and shelves by horizontals. Scoring only row-projection
+    variance made building tilts look "already level."
+    """
+    # Edge magnitude — prefer structure over smooth tone ramps.
+    gy, gx = np.gradient(gray.astype(np.float32))
+    # Horizontal-edge energy projected per row; vertical-edge energy per column.
+    row_proj = np.mean(np.abs(gy), axis=1)
+    col_proj = np.mean(np.abs(gx), axis=0)
+    # Peakiness of those projections = how consistently edges share an axis.
+    h_score = float(np.var(row_proj))
+    v_score = float(np.var(col_proj))
+    # Also reward discrete jumps in the 1-D profiles (lined-up edges).
+    h_score += 0.35 * float(np.var(np.diff(row_proj)))
+    v_score += 0.35 * float(np.var(np.diff(col_proj)))
+    return h_score + v_score
+
+
 def estimate_straighten_degrees(
     image: np.ndarray,
     *,
     max_degrees: float = 12.0,
-    max_side: int = 420,
+    max_side: int = 480,
     step: float = 0.25,
 ) -> float:
-    """Estimate a fine straighten angle (degrees CW) that levels the horizon.
+    """Estimate a fine straighten angle (degrees CW) that levels the frame.
 
-    Scores candidate rotations by how sharp the horizontal structure becomes
-    (variance of row-to-row differences). Uses the same CW convention as
+    Searches small rotations and picks the one that maximizes axis-aligned
+    edge energy (horizontals *and* verticals). Uses the same CW convention as
     :func:`digital_negative.display.straighten_image`.
     """
     from .display import straighten_image
@@ -337,15 +358,18 @@ def estimate_straighten_degrees(
         gray = np.ascontiguousarray(gray[yy][:, xx])
 
     # Mild high-pass so flat fields don't dominate the score.
-    blur = ndimage.gaussian_filter(gray, sigma=1.4)
-    work = _norm01(np.abs(gray - blur) + 0.35 * gray)
+    blur = ndimage.gaussian_filter(gray, sigma=1.2)
+    work = _norm01(np.abs(gray - blur) + 0.25 * gray)
 
     limit = float(np.clip(max_degrees, 1.0, 20.0))
     step = float(max(step, 0.1))
-    candidates = np.arange(-limit, limit + 0.5 * step, step, dtype=np.float64)
+    # Coarse then refine around the winner for better building/horizon hits.
+    coarse = float(max(step, 0.5))
+    candidates = list(np.arange(-limit, limit + 0.5 * coarse, coarse, dtype=np.float64))
 
     best_deg = 0.0
     best_score = -1.0
+    score_at_zero = None
     for deg in candidates:
         trial = straighten_image(work, float(deg), fill=0.0)
         # Crop the filled corners so the black wedges don't fake a score.
@@ -354,13 +378,33 @@ def estimate_straighten_degrees(
             core = trial[pad:-pad, pad:-pad]
         else:
             core = trial
-        rows = core.mean(axis=1)
-        score = float(np.var(np.diff(rows)))
+        score = _axis_alignment_score(core)
+        if abs(float(deg)) < 1e-9:
+            score_at_zero = score
         if score > best_score:
             best_score = score
             best_deg = float(deg)
 
-    # Snap near-zero noise to exactly 0.
+    # Local refine ± coarse step.
+    refine_lo = max(-limit, best_deg - coarse)
+    refine_hi = min(limit, best_deg + coarse)
+    for deg in np.arange(refine_lo, refine_hi + 0.5 * step, step, dtype=np.float64):
+        trial = straighten_image(work, float(deg), fill=0.0)
+        pad = int(round(0.08 * min(trial.shape[:2])))
+        if pad > 0 and trial.shape[0] > 2 * pad + 8 and trial.shape[1] > 2 * pad + 8:
+            core = trial[pad:-pad, pad:-pad]
+        else:
+            core = trial
+        score = _axis_alignment_score(core)
+        if score > best_score:
+            best_score = score
+            best_deg = float(deg)
+
+    # Snap near-zero noise to exactly 0 — but only when 0° is nearly as good.
     if abs(best_deg) < 0.15:
         return 0.0
+    if score_at_zero is not None and best_score > 0:
+        # Require a clear improvement over level before claiming a tilt.
+        if best_score < score_at_zero * 1.02 and abs(best_deg) < 0.5:
+            return 0.0
     return float(np.clip(round(best_deg / step) * step, -limit, limit))
