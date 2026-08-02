@@ -1,0 +1,429 @@
+{
+  "id": "delta-400-v1",
+  "name": "Ilford Delta 400",
+  "type": "bw",
+  "version": "1.0",
+  "iso": 400,
+  "manufacturer": "ILFORD / HARMAN technology",
+  "grain_scale": 0.78,
+  "source": {
+    "document": "ILFORD Delta 400 Professional technical information (public)",
+    "reference_url": "https://www.ilfordphoto.com/amfile/file/download/file/5/product/686/",
+    "process": "ILFORD ID-11 stock, 9 minutes at 20\u00b0C, intermittent agitation (datasheet normal for EI 400)",
+    "digitization_date": "2026-07-31",
+    "digitization_notes": "Approximate Level-3 curve for core-shell Delta 400: finer grain and slightly cleaner toe than HP5 Plus, similar mid-scale gradient. Named developer times from ILFORD Delta 400 Professional technical information. Single-curve morph until multi-time plots are digitized.",
+    "chemistry_notes": "Named developers + EI 400 spiral-tank times from ILFORD Delta 400 Professional technical information."
+  },
+  "curve": {
+    "x_label": "relative_log_exposure",
+    "y_label": "density",
+    "base_plus_fog": 0.08,
+    "points": [
+      [
+        0.5,
+        0.08
+      ],
+      [
+        0.8,
+        0.085
+      ],
+      [
+        1.0,
+        0.105
+      ],
+      [
+        1.2,
+        0.15
+      ],
+      [
+        1.4,
+        0.23
+      ],
+      [
+        1.55,
+        0.33
+      ],
+      [
+        1.7,
+        0.45
+      ],
+      [
+        1.85,
+        0.58
+      ],
+      [
+        2.0,
+        0.72
+      ],
+      [
+        2.15,
+        0.86
+      ],
+      [
+        2.3,
+        1.0
+      ],
+      [
+        2.45,
+        1.14
+      ],
+      [
+        2.6,
+        1.27
+      ],
+      [
+        2.75,
+        1.4
+      ],
+      [
+        2.9,
+        1.52
+      ],
+      [
+        3.1,
+        1.66
+      ],
+      [
+        3.3,
+        1.78
+      ],
+      [
+        3.5,
+        1.88
+      ],
+      [
+        3.7,
+        1.96
+      ],
+      [
+        3.9,
+        2.02
+      ],
+      [
+        4.15,
+        2.08
+      ],
+      [
+        4.4,
+        2.12
+      ]
+    ]
+  },
+  "defaults": {
+    "developer_id": "id11_stock",
+    "development_minutes": 9.0,
+    "relative_time": 1.0,
+    "contrast_modifier": 0.0,
+    "grain_strength": 0.9
+  },
+  "chemistries": [
+    {
+      "id": "id11_stock",
+      "name": "ID-11 (stock)",
+      "normal_minutes": 9.0,
+      "time_min": 5.0,
+      "time_max": 18.0,
+      "temperature_c": 20,
+      "is_base": true,
+      "character": "solvent",
+      "ci_points": [
+        [
+          5.0,
+          0.4032
+        ],
+        [
+          5.4,
+          0.4424
+        ],
+        [
+          6.75,
+          0.4984
+        ],
+        [
+          9.0,
+          0.56
+        ],
+        [
+          11.25,
+          0.6384
+        ],
+        [
+          13.5,
+          0.7224
+        ],
+        [
+          16.2,
+          0.8176
+        ],
+        [
+          18.0,
+          0.8624
+        ]
+      ],
+      "source": "ILFORD Delta 400 Professional \u00b7 EI 400"
+    },
+    {
+      "id": "id11_1_1",
+      "name": "ID-11 (1+1)",
+      "normal_minutes": 14.0,
+      "time_min": 8.0,
+      "time_max": 24.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "solvent",
+      "ci_points": [
+        [
+          8.0,
+          0.4032
+        ],
+        [
+          8.4,
+          0.4424
+        ],
+        [
+          10.5,
+          0.4984
+        ],
+        [
+          14.0,
+          0.56
+        ],
+        [
+          17.5,
+          0.6384
+        ],
+        [
+          21.0,
+          0.7224
+        ],
+        [
+          24.0,
+          0.8176
+        ]
+      ],
+      "source": "ILFORD Delta 400 Professional \u00b7 EI 400"
+    },
+    {
+      "id": "ilfotec_ddx_1_4",
+      "name": "ILFOTEC DD-X (1+4)",
+      "normal_minutes": 8.0,
+      "time_min": 5.0,
+      "time_max": 16.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "balanced",
+      "ci_points": [
+        [
+          5.0,
+          0.4032
+        ],
+        [
+          6.0,
+          0.4984
+        ],
+        [
+          8.0,
+          0.56
+        ],
+        [
+          10.0,
+          0.6384
+        ],
+        [
+          12.0,
+          0.7224
+        ],
+        [
+          14.4,
+          0.8176
+        ],
+        [
+          16.0,
+          0.8624
+        ]
+      ],
+      "source": "ILFORD Delta 400 Professional \u00b7 EI 400"
+    },
+    {
+      "id": "ilfotec_hc_1_31",
+      "name": "ILFOTEC HC (1+31)",
+      "normal_minutes": 5.5,
+      "time_min": 3.5,
+      "time_max": 12.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "balanced",
+      "ci_points": [
+        [
+          3.5,
+          0.4032
+        ],
+        [
+          4.12,
+          0.4984
+        ],
+        [
+          5.5,
+          0.56
+        ],
+        [
+          6.88,
+          0.6384
+        ],
+        [
+          8.25,
+          0.7224
+        ],
+        [
+          9.9,
+          0.8176
+        ],
+        [
+          12.0,
+          0.8624
+        ]
+      ],
+      "source": "ILFORD Delta 400 Professional \u00b7 EI 400"
+    },
+    {
+      "id": "microphen_stock",
+      "name": "MICROPHEN (stock)",
+      "normal_minutes": 7.0,
+      "time_min": 4.0,
+      "time_max": 14.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "vigorous",
+      "ci_points": [
+        [
+          4.0,
+          0.4032
+        ],
+        [
+          4.2,
+          0.4424
+        ],
+        [
+          5.25,
+          0.4984
+        ],
+        [
+          7.0,
+          0.56
+        ],
+        [
+          8.75,
+          0.6384
+        ],
+        [
+          10.5,
+          0.7224
+        ],
+        [
+          12.6,
+          0.8176
+        ],
+        [
+          14.0,
+          0.8624
+        ]
+      ],
+      "source": "ILFORD Delta 400 Professional \u00b7 EI 400"
+    },
+    {
+      "id": "ilfosol3_1_9",
+      "name": "ILFOSOL 3 (1+9)",
+      "normal_minutes": 7.0,
+      "time_min": 4.0,
+      "time_max": 14.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "acutance",
+      "ci_points": [
+        [
+          4.0,
+          0.4032
+        ],
+        [
+          4.2,
+          0.4424
+        ],
+        [
+          5.25,
+          0.4984
+        ],
+        [
+          7.0,
+          0.56
+        ],
+        [
+          8.75,
+          0.6384
+        ],
+        [
+          10.5,
+          0.7224
+        ],
+        [
+          12.6,
+          0.8176
+        ],
+        [
+          14.0,
+          0.8624
+        ]
+      ],
+      "source": "ILFORD Delta 400 Professional \u00b7 EI 400"
+    },
+    {
+      "id": "d76",
+      "name": "D-76 (stock)",
+      "normal_minutes": 9.0,
+      "time_min": 5.0,
+      "time_max": 18.0,
+      "temperature_c": 20,
+      "is_base": false,
+      "character": "balanced",
+      "ci_points": [
+        [
+          5.0,
+          0.4032
+        ],
+        [
+          5.4,
+          0.4424
+        ],
+        [
+          6.75,
+          0.4984
+        ],
+        [
+          9.0,
+          0.56
+        ],
+        [
+          11.25,
+          0.6384
+        ],
+        [
+          13.5,
+          0.7224
+        ],
+        [
+          16.2,
+          0.8176
+        ],
+        [
+          18.0,
+          0.8624
+        ]
+      ],
+      "source": "ILFORD Delta 400 Professional \u00b7 EI 400 \u00b7 non-ILFORD table"
+    }
+  ],
+  "reciprocity": {
+    "threshold_s": 1.0,
+    "p": 0.8,
+    "contrast_gain": 0.1
+  }
+}

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from digital_negative.color_development import color_negative_lightbox_preview
 from digital_negative.curves import load_film_profile
 from digital_negative.development import develop
 from digital_negative.ingest import ingest_path
@@ -39,14 +40,31 @@ def test_profile_lists_split_by_chemistry_mode():
     bw_ids = {p.stem for p in bw_films}
     color_ids = {p.stem for p in color_films}
     assert "hp5-plus-v1" in bw_ids
+    assert "tmax-400-v1" in bw_ids
+    assert "delta-400-v1" in bw_ids
+    assert "acros-100-ii-v1" in bw_ids
     assert "portra-400-spectral-v1" in color_ids
+    assert "portra-160-spectral-v1" in color_ids
+    assert "portra-800-spectral-v1" in color_ids
     assert "ektachrome-100-spectral-v1" in color_ids
+    assert "provia-100f-spectral-v1" in color_ids
+    assert "velvia-50-spectral-v1" in color_ids
     assert not (bw_ids & color_ids)
 
     bw_papers = list_paper_profiles(chemistry_mode="bw")
     color_papers = list_paper_profiles(chemistry_mode="color")
     assert any(p.stem.startswith("mg-") or "fiber" in p.stem for p in bw_papers)
     assert any("ra4" in p.stem for p in color_papers)
+
+
+def test_named_color_profiles_use_brand_labels():
+    portra = load_film_profile(ROOT / "profiles" / "films" / "portra-400-spectral-v1.json")
+    e100 = load_film_profile(ROOT / "profiles" / "films" / "ektachrome-100-spectral-v1.json")
+    assert portra.name == "Kodak Portra 400"
+    assert "Kodak" in str(portra.raw.get("manufacturer", ""))
+    assert e100.name == "Kodak Ektachrome E100"
+    doc = portra.raw["source"]["document"].lower()
+    assert "approximate" in doc or "not a licensed" in doc
 
 
 def test_c41_develop_has_mask_and_inverted_preview():
@@ -66,6 +84,34 @@ def test_c41_develop_has_mask_and_inverted_preview():
     assert result.positive_preview.ndim == 3 and result.positive_preview.shape[-1] == 3
     # Dye concentrations include orange mask → not near-zero on mid grey.
     assert float(result.dye_concentrations.mean()) > 0.05
+    # Light-table negative is orange-masked (R > G); scan invert is distinct.
+    lightbox = color_negative_lightbox_preview(result.spectral_transmittance)
+    lb_mean = lightbox.reshape(-1, 3).mean(0)
+    pos_mean = result.positive_preview.reshape(-1, 3).mean(0)
+    assert float(lb_mean[0]) > float(lb_mean[1])
+    assert not np.allclose(lightbox, result.positive_preview, atol=1e-3)
+    # Scan invert should not keep the strong orange R≫G bias.
+    assert float(pos_mean[0] / max(float(pos_mean[1]), 1e-6)) < 1.35
+
+
+def test_ra4_live_print_is_not_orange_mask():
+    dn = ingest_path(None)
+    film = load_film_profile(ROOT / "profiles" / "films" / "portra-400-spectral-v1.json")
+    paper = load_paper_profile(ROOT / "profiles" / "papers" / "ra4-glossy-v1.json")
+    developed = develop(dn, film, developer_id="c41_standard", development_minutes=3.25, commit=False)
+    dn.metadata.setdefault("print", {}).update({"cc_cyan": 0, "cc_magenta": 0, "cc_yellow": 0})
+    printed = print_negative(
+        developed.spectral_transmittance, dn, paper, base_exposure_seconds=8.0, commit=False
+    )
+    lightbox = color_negative_lightbox_preview(developed.spectral_transmittance)
+    print_mean = printed.preview.reshape(-1, 3).mean(0)
+    lb_mean = lightbox.reshape(-1, 3).mean(0)
+    # Print should be brighter/neutraler than the orange light-table negative.
+    assert float(print_mean.mean()) > 0.25
+    assert float(print_mean[0]) < float(lb_mean[0]) * 1.15
+    # Channels roughly balanced after dichroic stand-in (not strong cyan sludge).
+    assert abs(float(print_mean[0] - print_mean[1])) < 0.12
+    assert abs(float(print_mean[1] - print_mean[2])) < 0.12
 
 
 def test_c41_push_pull_chemistries_resolve():

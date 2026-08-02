@@ -31,6 +31,20 @@ def test_spot_and_histogram():
     assert hist is not None and hist.ndim == 3
 
 
+def test_spot_accepts_color_reflectance():
+    """RA-4 / color prints are HxWx3 — spot meter must not crash."""
+    r = np.full((24, 24, 3), 0.18, dtype=np.float32)
+    r[..., 0] = 0.12
+    r[..., 2] = 0.22
+    d = -np.log10(np.maximum(r, 1e-6))
+    sample = spot_at(r, d, 0.5, 0.5)
+    assert sample["ok"] == 1
+    assert 0.15 < float(sample["reflectance"]) < 0.20
+    assert "Zone" in spot_markdown(sample)
+    hist = render_print_histogram(r)
+    assert hist is not None and hist.ndim == 3
+
+
 def test_clipping_overlay_tints():
     rgb = np.full((16, 16, 3), 120, dtype=np.uint8)
     refl = np.ones((16, 16), dtype=np.float32) * 0.95  # ~Zone VII+ / paper white

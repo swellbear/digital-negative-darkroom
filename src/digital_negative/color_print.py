@@ -32,6 +32,26 @@ class ColorPrintResult:
     filtration: dict[str, float]
 
 
+def _balance_ra4_preview(preview: np.ndarray, *, target_median: float = 0.42) -> np.ndarray:
+    """Neutralize median RGB and lift overall level (approx. dichroic starting pack)."""
+    img = np.asarray(preview, dtype=np.float32)
+    if img.ndim != 3 or img.shape[-1] < 3:
+        return img
+    flat = img[..., :3].reshape(-1, 3)
+    # Ignore pure border blacks if present.
+    lit = flat[flat.max(axis=1) > 1e-4]
+    if lit.size == 0:
+        return img
+    med = np.median(lit, axis=0)
+    target = float(np.clip(target_median, 0.15, 0.65))
+    gains = target / np.maximum(med, 1e-5)
+    # Cap gains so a failed exposure can't blow out a single channel wildly.
+    gains = np.clip(gains, 0.25, 12.0)
+    out = img.copy()
+    out[..., :3] = np.clip(out[..., :3] * gains.reshape((1, 1, 3)), 0.0, 1.0)
+    return out.astype(np.float32)
+
+
 def cc_filter_spectrum(cyan: float, magenta: float, yellow: float) -> np.ndarray:
     """Dichroic / CC pack as multiplicative spectral transmittance."""
     # CC units ≈ 0.01 density at dye peak; map knobs in 0–100 range.
@@ -135,6 +155,9 @@ def print_color_negative(
     xyz = spectral_to_xyz(reflectance, illuminant=illuminant_d65())
     preview = encode_srgb(rgb_display_from_xyz(xyz))
     preview = np.clip(preview, 0.0, 1.0).astype(np.float32)
+    # Level-3 stand-in for a starting dichroic pack: neutralize median RGB and
+    # lift crushed exposures so Live print reads as a print, not a cyan mask.
+    preview = _balance_ra4_preview(preview)
 
     bf = float(np.clip(border_frac, 0.0, 0.45))
     if bf > 1e-6 and preview.ndim >= 2:
