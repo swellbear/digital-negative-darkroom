@@ -62,3 +62,28 @@ def test_chem_time_update_never_narrows_below_tri_x_normal():
     update = _update_dict(mod._chem_time_update("portra-400-spectral-v1", "c41_standard"))
     assert float(update["maximum"]) >= 7.75
     assert float(update["value"]) == 3.25
+
+
+def test_stale_bw_film_ignored_after_color_switch():
+    """B&W→Color: film.change may re-fire with Acros against the Color catalog."""
+    mod = _load_ui()
+    # Stale Acros while Chemistry is already Color — must not overwrite C-41.
+    # gr.skip() is an empty update (no value/choices) in Gradio 6.
+    skipped = mod.on_film_change("acros-100-ii-v1", "color")
+    for upd in skipped:
+        payload = _update_dict(upd)
+        assert "value" not in payload
+        assert "choices" not in payload
+
+    coerced = mod._coerce_film_id("acros-100-ii-v1", "color")
+    assert coerced in {c[1] for c in mod.FILM_CHOICES_COLOR}
+    assert coerced != "acros-100-ii-v1"
+
+    # Valid Color film still refreshes developer / EI.
+    outs = mod.on_film_change(coerced, "color")
+    assert "value" in _update_dict(outs[0])
+
+    # Chemistry handler always lands on a Color catalog id.
+    film_u = _update_dict(mod.on_chemistry_mode_change("color")[0])
+    assert film_u.get("value") in {c[1] for c in mod.FILM_CHOICES_COLOR}
+    assert film_u.get("value") != "acros-100-ii-v1"

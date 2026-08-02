@@ -4,6 +4,8 @@
 
 **How to use:** After comparing a real raw → this app vs film + darkroom print (or a close proxy), fill one section per finding. Prefer concrete, observable language (“push +1 still too flat in the sky”) over vague (“contrast feels off”).
 
+**Parked:** automated scan-corpus / ML calibration helpers — see Critique_Roadmap “Parked”; stick to hand side-by-sides for now.
+
 ---
 
 ## Session meta
