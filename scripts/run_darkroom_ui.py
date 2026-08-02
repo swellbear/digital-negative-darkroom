@@ -126,6 +126,11 @@ CHEMISTRY_MODE_LABELS = [
     ("Color Chemistry", "color"),
 ]
 
+# Viewer chrome — exploratory until Print is locked.
+LIVE_PRINT_LABEL = "Live theoretical print — not committed"
+LIVE_WAVE_LABEL = "→ WAVE YOUR CARD OVER THIS PRINT ←"
+ADVANCED_DODGE_BURN_LABEL = "Advanced · Dodge & burn"
+
 # Filled after helper defs below (film-specific chemistry dropdown + minutes).
 _INIT_DEV_CHOICES: list = []
 _INIT_DEV_ID = "standard"
@@ -1763,7 +1768,7 @@ UI_JS = """
   installRailIcons();
   setInterval(installRailIcons, 1200);
 
-  // ——— Module panel header icons (Inspect / Dodge & burn / Crop & straighten) ———
+  // ——— Module panel header icons (Inspect / Advanced dodge&burn / Crop) ———
   const MODULE_ICONS = {
     mod_inspect: '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16" y2="16"/>',
     mod_curves: '<path d="M3 20V4"/><path d="M3 20h18"/><path d="M4 17c4-1 6-9 8-11s4 3 8 4"/>',
@@ -3994,9 +3999,21 @@ def _control_updates(state):
     return head + rest_dev + tuple(print_u)
 
 
+def _chemistry_help_update(state):
+    """Keep the Develop drawer chemistry blurb aligned with the active frame."""
+    mode = str(_merged_frame_controls(state).get("chemistry_mode") or "bw").lower()
+    if mode not in {"bw", "color"}:
+        mode = "bw"
+    return gr.update(value=_chemistry_help_md(mode))
+
+
 def _session_with_controls(state, *, drawer: str | None = "roll"):
     """Roll/ingest session outputs plus Develop/Print control restore."""
-    return (*_roll_session_outputs(state, drawer=drawer), *_control_updates(state))
+    return (
+        *_roll_session_outputs(state, drawer=drawer),
+        *_control_updates(state),
+        _chemistry_help_update(state),
+    )
 
 
 def _attach_controls(state, *control_args):
@@ -4131,9 +4148,9 @@ def _build_ingest_frame(path: str | None) -> dict:
     original_inspect = _downscale_rgb(original_full, INSPECT_MAX_SIDE)
     original_ref = _downscale_rgb(original_full, REF_MAX_SIDE)
     summary = (
-        f"{_stage_banner('development', ['ingest'], state)}\n\n"
+        f"{_stage_banner('development', ['ingest'], None)}\n\n"
         f"**Upload locked** — `{dn.metadata['source']['original_filename']}`  \n"
-        f"_Use the live preview tools: **Frame** to crop, **Inspect** to zoom._\n\n"
+        f"_Live exploring — not committed. Use **Frame** to crop, **Inspect** to zoom._\n\n"
         f"{_history_md(dn)}"
     )
     return {
@@ -4375,6 +4392,35 @@ def _path_label(state) -> str:
     return "B&W"
 
 
+def _lock_status_label(state) -> str | None:
+    """Banner chip: Live exploring vs Committed once a frame is loaded."""
+    if not state or state.get("dn") is None:
+        return None
+    locks = set(_locks(state))
+    if "print" in locks:
+        return "Committed"
+    if "ingest" in locks or "development" in locks:
+        return "Live exploring"
+    return None
+
+
+def _live_print_label(state=None, tool: str | None = None) -> str:
+    """Viewer chrome for the large print — exploratory vs committed."""
+    if state and _locked(state, "print"):
+        base = "Committed print"
+    elif state and state.get("dn") is not None:
+        base = "Live theoretical print — not committed"
+    else:
+        base = LIVE_PRINT_LABEL
+    tool = str(tool or "print")
+    suffix = {
+        "print": " · easel",
+        "frame": " · frame",
+        "inspect": " · inspect",
+    }.get(tool, "")
+    return base + suffix
+
+
 def _film_strip_short_label(mode: str, state=None) -> str:
     """Filmstrip chip label — E-6 uses Slide instead of Negative."""
     if mode == "negative":
@@ -4388,15 +4434,17 @@ def _film_strip_short_label(mode: str, state=None) -> str:
 
 
 def _viewer_label_for(mode: str, state=None) -> str:
+    if mode == "live" or mode not in _VIEWER_LABELS:
+        return _live_print_label(state, tool="print")
     if mode == "negative" and _path_label(state) == "E-6":
         return "Developed slide — click Live print below to swap back"
     if mode == "negative" and _path_label(state) == "C-41":
         return "Developed negative (light table) — click Live print below to swap back"
-    return _VIEWER_LABELS.get(mode, _VIEWER_LABELS["live"])
+    return _VIEWER_LABELS.get(mode, _live_print_label(state))
 
 
 def _stage_banner(stage: str, locked: list | None = None, state=None) -> str:
-    """Ritual progress: which stage you're working, which are locked."""
+    """Ritual progress: stage, lock/explore status, and chemistry path."""
     steps = [("ingest", "Upload"), ("development", "Develop"), ("print", "Print")]
     order = {"ingest": 0, "development": 1, "print": 2}
     cur = order.get(stage, -1)
@@ -4406,17 +4454,33 @@ def _stage_banner(stage: str, locked: list | None = None, state=None) -> str:
         n = i + 1
         done = key in locked_set
         if i == cur and not done:
-            parts.append(f"**{n}. {label} — working**")
+            # Develop/Print explore; Upload still uses "working".
+            if key in {"development", "print"}:
+                parts.append(f"**{n}. {label} — Live exploring**")
+            else:
+                parts.append(f"**{n}. {label} — working**")
         elif i == cur and done:
-            parts.append(f"**{n}. {label} — locked**")
+            if key == "print":
+                parts.append(f"**{n}. {label} — Committed**")
+            else:
+                parts.append(f"**{n}. {label} — locked**")
         elif done:
-            parts.append(f"{n}. {label} — locked")
+            if key == "print":
+                parts.append(f"{n}. {label} — Committed")
+            else:
+                parts.append(f"{n}. {label} — locked")
         else:
             parts.append(f"{n}. {label}")
     path = _path_label(state) if state is not None else None
+    explore = _lock_status_label(state) if state is not None else None
     banner = " → ".join(parts)
+    extras = []
     if path:
-        return f"{banner} · `{path}`"
+        extras.append(f"`{path}`")
+    if explore:
+        extras.append(f"**{explore}**")
+    if extras:
+        return f"{banner} · " + " · ".join(extras)
     return banner
 
 
@@ -4452,7 +4516,7 @@ def _color_or_bw_negative_view(development) -> np.ndarray:
 
 
 _VIEWER_LABELS = {
-    "live": "Commit preview (live) — theoretical print",
+    "live": "Live theoretical print — not committed",
     "original": "Original photo — click Live print below to swap back",
     "latent": "Latent DN — click Live print below to swap back",
     "negative": "Developed negative — click Live print below to swap back",
@@ -4552,8 +4616,17 @@ def _inspect_frame(state, live=None):
     elif mode == "negative" and _path_label(state) == "C-41":
         label = "Inspect — Developed negative / light table (scroll-wheel zoom, drag to pan, double-click reset)"
     else:
+        if mode == "live" and _locked(state, "print"):
+            live_inspect = "Inspect — Committed print (scroll-wheel zoom, drag to pan, double-click reset)"
+        elif mode == "live":
+            live_inspect = (
+                "Inspect — Live theoretical print — not committed "
+                "(scroll-wheel zoom, drag to pan, double-click reset)"
+            )
+        else:
+            live_inspect = None
         label = {
-            "live": "Inspect — Live theoretical print (scroll-wheel zoom, drag to pan, double-click reset)",
+            "live": live_inspect,
             "original": "Inspect — Original (scroll-wheel zoom, drag to pan, double-click reset)",
             "latent": "Inspect — Latent DN (scroll-wheel zoom, drag to pan, double-click reset)",
             "negative": "Inspect — Developed negative (scroll-wheel zoom, drag to pan, double-click reset)",
@@ -4614,7 +4687,12 @@ def swap_strip_slot(index: int):
             tip = "_Orange light-table negative in the preview — click it in the strip to swap back._"
         else:
             tip = {
-                "live": "_Live theoretical print. Use **Frame** to crop/straighten, **Inspect** to zoom._",
+                "live": (
+                    "_Live theoretical print — not committed. "
+                    "Use **Frame** to crop/straighten, **Inspect** to zoom._"
+                    if not _locked(state, "print")
+                    else "_Committed print. Use **Inspect** to zoom._"
+                ),
                 "original": "_Original in the preview — click it in the strip to swap back._",
                 "latent": "_Latent DN in the preview — click it in the strip to swap back._",
                 "negative": "_Developed negative in the preview — click it in the strip to swap back._",
@@ -4635,15 +4713,9 @@ def swap_strip_slot(index: int):
     return _fn
 
 
-def on_preview_tool_change(tool: str):
-    """Update the live preview label for the active tool mode."""
-    tool = str(tool or "print")
-    labels = {
-        "print": LIVE_PRINT_LABEL + " · easel",
-        "frame": LIVE_PRINT_LABEL + " · frame",
-        "inspect": LIVE_PRINT_LABEL + " · inspect",
-    }
-    return gr.update(label=labels.get(tool, LIVE_PRINT_LABEL))
+def on_preview_tool_change(tool: str, state=None):
+    """Update the live preview label for the active tool mode + lock state."""
+    return gr.update(label=_live_print_label(state, tool=str(tool or "print")))
 
 
 def set_workspace_drawer(name: str):
@@ -5177,7 +5249,7 @@ def _roll_session_outputs(state, *, drawer: str | None = "roll"):
     mode = state.get("viewer_mode", "live")
     active = drawer if drawer is not None else _drawer_for_frame(state)
     return (
-        gr.update(value=live, label=_VIEWER_LABELS.get(mode, _VIEWER_LABELS["live"])),
+        gr.update(value=live, label=_viewer_label_for(mode, state)),
         state.get("original_ref"),
         state.get("latent_ref"),
         state.get("neg_ref"),
@@ -5248,14 +5320,18 @@ def _roll_switch_bundle(state, *, drawer="roll", modal_visible=False, pending=-1
     base = _roll_session_outputs(state, drawer=drawer)
     if restore_controls:
         ctrls = _control_updates(state)
+        help_u = _chemistry_help_update(state)
     elif state and state.get("dn") is not None:
         # Stay on this frame's widget values (dirty prompt); only sync lock flags.
         ctrls = _control_interactivity_updates(state)
+        help_u = gr.skip()
     else:
         ctrls = tuple(gr.skip() for _ in range(_CONTROL_COUNT))
+        help_u = gr.skip()
     return (
         *base,
         *ctrls,
+        help_u,
         gr.update(visible=bool(modal_visible)),
         int(pending),
     )
@@ -5541,7 +5617,8 @@ def _run_live_develop_then_print(
         )
     summary = (
         f"{_stage_banner('development', _locks(state), state)}\n\n"
-        f"**Live print** {live_rgb.shape[1]}×{live_rgb.shape[0]} ({quality_note}){mode_note}  \n"
+        f"**Live exploring — not committed** · {live_rgb.shape[1]}×{live_rgb.shape[0]} "
+        f"({quality_note}){mode_note}  \n"
         f"{profile.name} · {developer_id} · {float(development_minutes):g} min · "
         f"curve={curve_src} · N±={float(contrast):+.2f} · grain={float(grain):.2f}  \n"
         f"{paper_line}\n\n"
@@ -5654,6 +5731,9 @@ def live_preview(
     if not state or state.get("dn") is None:
         return _pack_preview(None, None, None, None, "*Commit Ingest first.*", state)
 
+    # Keep path labels coherent when chemistry and roll index change together.
+    state = {**state, "chemistry_mode": str(chemistry_mode or "bw")}
+
     if _locked(state, "print"):
         return _pack_preview(
             state.get("live_rgb"),
@@ -5666,77 +5746,150 @@ def live_preview(
             controls=controls if mark_dirty else None,
         )
 
-    if _locked(state, "development"):
-        # Print-only commit preview
-        if state.get("development_full") is not None:
-            t = state["development_full"].transmittance
-            step = max(1, int(np.ceil(max(t.shape) / max_side)))
-            t = np.ascontiguousarray(t[::step, ::step])
-        else:
-            t = state.get("transmittance_proxy")
-            if t is None and state.get("development") is not None:
-                t = state["development"].transmittance
-            if t is None:
-                return _pack_preview(
-                    state.get("live_rgb"),
-                    state.get("original_ref"),
-                    state.get("latent_ref"),
-                    state.get("neg_ref"),
-                    state.get("summary_cache", ""),
-                    state,
-                    mark_dirty=mark_dirty,
-                    controls=controls if mark_dirty else None,
-                )
-            if max(t.shape) > max_side:
+    try:
+        if _locked(state, "development"):
+            # Print-only commit preview
+            if state.get("development_full") is not None:
+                t = state["development_full"].transmittance
                 step = max(1, int(np.ceil(max(t.shape) / max_side)))
                 t = np.ascontiguousarray(t[::step, ::step])
+            else:
+                t = state.get("transmittance_proxy")
+                if t is None and state.get("development") is not None:
+                    t = state["development"].transmittance
+                if t is None:
+                    return _pack_preview(
+                        state.get("live_rgb"),
+                        state.get("original_ref"),
+                        state.get("latent_ref"),
+                        state.get("neg_ref"),
+                        state.get("summary_cache", ""),
+                        state,
+                        mark_dirty=mark_dirty,
+                        controls=controls if mark_dirty else None,
+                    )
+                if max(t.shape) > max_side:
+                    step = max(1, int(np.ceil(max(t.shape) / max_side)))
+                    t = np.ascontiguousarray(t[::step, ::step])
 
-        paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
-        tech = _technique_kwargs(
-            split_on, soft_grade, hard_grade, soft_seconds, hard_seconds,
-            test_strips_on, test_bands, test_stops, flash_stops, dry_down, tone, border_frac,
+            paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
+            tech = _technique_kwargs(
+                split_on, soft_grade, hard_grade, soft_seconds, hard_seconds,
+                test_strips_on, test_bands, test_stops, flash_stops, dry_down, tone, border_frac,
+            )
+            dev_full = state.get("development_full") or state.get("development")
+            t_use = t
+            if dev_full is not None and getattr(dev_full, "spectral_transmittance", None) is not None:
+                t_use = dev_full.spectral_transmittance
+                if max(t_use.shape[:2]) > max_side:
+                    step = max(1, int(np.ceil(max(t_use.shape[:2]) / max_side)))
+                    t_use = np.ascontiguousarray(t_use[::step, ::step, ...])
+                _stash_color_filtration(state["dn"], cc_cyan, cc_magenta, cc_yellow)
+            result = print_negative(
+                t_use,
+                state["dn"],
+                paper,
+                base_exposure_seconds=float(print_exposure),
+                grade=float(print_grade),
+                contrast=float(print_contrast),
+                local_stops=local_stops_from_state(state),
+                commit=False,
+                **tech,
+            )
+            live_rgb = _to_rgb_u8(result.preview)
+            speed = state["dn"].metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
+            quality_note = "drag" if quality == "drag" else "hq"
+            strokes = state.get("db_strokes") or []
+            db_note = f" · dodge/burn ×{len(strokes)}" if strokes else ""
+            exposing = " · **EXPOSING**" if state.get("db_exposing") else ""
+            summary = (
+                f"{_stage_banner('print', _locks(state), state)}\n\n"
+                f"**Live exploring — not committed** · print preview "
+                f"{live_rgb.shape[1]}×{live_rgb.shape[0]} ({quality_note})  \n"
+                f"{paper.name} · g{float(print_grade):.1f} · {_print_timer_label(print_exposure)} · "
+                f"×{float(speed):.2f}{db_note}{exposing}\n\n{_history_md(state['dn'])}"
+            )
+            state = {
+                **state,
+                "print_draft": result,
+                "live_rgb": live_rgb,
+                "summary_cache": summary,
+                "print_technique": tech,
+            }
+            state = _remember_print_seconds(state, print_exposure)
+            return _pack_preview(
+                live_rgb,
+                state.get("original_ref"),
+                state.get("latent_ref"),
+                state.get("neg_ref"),
+                summary,
+                state,
+                mark_dirty=mark_dirty,
+                controls=controls if mark_dirty else None,
+            )
+
+        # Develop unlocked: show print through the working negative
+        live_rgb, neg_ref, summary, state = _run_live_develop_then_print(
+            film_id,
+            developer_id,
+            development_minutes,
+            contrast,
+            grain,
+            exposure_index,
+            contrast_filter,
+            scene_exposure,
+            halation,
+            paper_id,
+            print_exposure,
+            print_grade,
+            print_contrast,
+            split_on,
+            soft_grade,
+            hard_grade,
+            soft_seconds,
+            hard_seconds,
+            test_strips_on,
+            test_bands,
+            test_stops,
+            flash_stops,
+            dry_down,
+            tone,
+            border_frac,
+            state,
+            max_side=max_side,
+            chemistry_mode=str(chemistry_mode or "bw"),
+            cc_cyan=float(cc_cyan),
+            cc_magenta=float(cc_magenta),
+            cc_yellow=float(cc_yellow),
         )
-        dev_full = state.get("development_full") or state.get("development")
-        t_use = t
-        if dev_full is not None and getattr(dev_full, "spectral_transmittance", None) is not None:
-            t_use = dev_full.spectral_transmittance
-            if max(t_use.shape[:2]) > max_side:
-                step = max(1, int(np.ceil(max(t_use.shape[:2]) / max_side)))
-                t_use = np.ascontiguousarray(t_use[::step, ::step, ...])
-            _stash_color_filtration(state["dn"], cc_cyan, cc_magenta, cc_yellow)
-        result = print_negative(
-            t_use,
-            state["dn"],
-            paper,
-            base_exposure_seconds=float(print_exposure),
-            grade=float(print_grade),
-            contrast=float(print_contrast),
-            local_stops=local_stops_from_state(state),
-            commit=False,
-            **tech,
-        )
-        live_rgb = _to_rgb_u8(result.preview)
-        speed = state["dn"].metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
-        quality_note = "drag" if quality == "drag" else "hq"
-        strokes = state.get("db_strokes") or []
-        db_note = f" · dodge/burn ×{len(strokes)}" if strokes else ""
-        exposing = " · **EXPOSING**" if state.get("db_exposing") else ""
-        summary = (
-            f"{_stage_banner('print', _locks(state), state)}\n\n"
-            f"**Print preview** {live_rgb.shape[1]}×{live_rgb.shape[0]} ({quality_note})  \n"
-            f"{paper.name} · g{float(print_grade):.1f} · {_print_timer_label(print_exposure)} · "
-            f"×{float(speed):.2f}{db_note}{exposing}\n\n{_history_md(state['dn'])}"
-        )
-        state = {
-            **state,
-            "print_draft": result,
-            "live_rgb": live_rgb,
-            "summary_cache": summary,
-            "print_technique": tech,
-        }
-        state = _remember_print_seconds(state, print_exposure)
         return _pack_preview(
             live_rgb,
+            state.get("original_ref"),
+            state.get("latent_ref"),
+            neg_ref,
+            summary,
+            state,
+            mark_dirty=mark_dirty,
+            controls=controls if mark_dirty else None,
+        )
+    except Exception as exc:
+        # Chemistry / roll switches must not leave spot, histogram, or fit
+        # pointing at a half-built print_draft from the previous mode.
+        state = {
+            **state,
+            "print_draft": None,
+            "chemistry_mode": str(chemistry_mode or "bw"),
+        }
+        summary = (
+            f"{_stage_banner(state.get('stage', 'development'), _locks(state), state)}\n\n"
+            f"*Live preview paused after a chemistry or frame change — "
+            f"nudge a Develop/Print control to retry.*  \n"
+            f"`{type(exc).__name__}: {exc}`\n\n"
+            f"{_history_md(state['dn'])}"
+        )
+        state = {**state, "summary_cache": summary}
+        return _pack_preview(
+            state.get("live_rgb"),
             state.get("original_ref"),
             state.get("latent_ref"),
             state.get("neg_ref"),
@@ -5745,51 +5898,6 @@ def live_preview(
             mark_dirty=mark_dirty,
             controls=controls if mark_dirty else None,
         )
-
-    # Develop unlocked: show print through the working negative
-    live_rgb, neg_ref, summary, state = _run_live_develop_then_print(
-        film_id,
-        developer_id,
-        development_minutes,
-        contrast,
-        grain,
-        exposure_index,
-        contrast_filter,
-        scene_exposure,
-        halation,
-        paper_id,
-        print_exposure,
-        print_grade,
-        print_contrast,
-        split_on,
-        soft_grade,
-        hard_grade,
-        soft_seconds,
-        hard_seconds,
-        test_strips_on,
-        test_bands,
-        test_stops,
-        flash_stops,
-        dry_down,
-        tone,
-        border_frac,
-        state,
-        max_side=max_side,
-        chemistry_mode=str(chemistry_mode or "bw"),
-        cc_cyan=float(cc_cyan),
-        cc_magenta=float(cc_magenta),
-        cc_yellow=float(cc_yellow),
-    )
-    return _pack_preview(
-        live_rgb,
-        state.get("original_ref"),
-        state.get("latent_ref"),
-        neg_ref,
-        summary,
-        state,
-        mark_dirty=mark_dirty,
-        controls=controls if mark_dirty else None,
-    )
 
 
 def live_preview_drag(
@@ -6253,7 +6361,7 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
     db_note = f" · {len(strokes)} dodge/burn pass(es)" if strokes else ""
     summary = (
         f"{_stage_banner('print', locks, state)}\n\n"
-        f"**Print locked** — {paper.name} · g{float(print_grade):.1f} · "
+        f"**Committed print** — {paper.name} · g{float(print_grade):.1f} · "
         f"{_print_timer_label(print_exposure)}{db_note}\n\n{_history_md(dn)}"
     )
     print_only, print_plus_neg = _write_print_packages(
@@ -6425,10 +6533,6 @@ def _wave_banner_html(state) -> str:
         f'<span class="db-wave-arrow">↓</span>'
         f"</div>"
     )
-
-
-LIVE_PRINT_LABEL = "Live print — theoretical enlarger print"
-LIVE_WAVE_LABEL = "→ WAVE YOUR CARD OVER THIS PRINT ←"
 
 
 def start_dodge_burn(
@@ -6673,7 +6777,7 @@ def tick_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, pos, 
         except Exception:
             pass
     return (
-        gr.update(value=live, label=LIVE_PRINT_LABEL),
+        gr.update(value=live, label=_live_print_label(state)),
         timer_md,
         st,
         hi,
@@ -6702,7 +6806,7 @@ def reset_dodge_burn(paper_id, print_exposure, print_grade, print_contrast, stat
     )
     editor = _editor_from_print(live_rgb)
     return (
-        gr.update(value=live_rgb, label=LIVE_PRINT_LABEL),
+        gr.update(value=live_rgb, label=_live_print_label(state)),
         timer_line,
         status,
         history,
@@ -7310,7 +7414,9 @@ def build_ui() -> gr.Blocks:
                             "negative", size="sm", elem_id="dl_pkg_negative"
                         )
                         gr.Markdown(
-                            "_Dodge / burn: **right-click the print** → Dodge or Burn._",
+                            "_Default path: paper → exposure → filtration → **Commit Print**. "
+                            "Dodge/burn is optional under **Modules → Advanced** "
+                            "(only after Develop is locked)._",
                             elem_id="db_hint",
                         )
 
@@ -7362,7 +7468,7 @@ def build_ui() -> gr.Blocks:
                     show_label=False,
                 )
                 live_out = gr.Image(
-                    label=LIVE_PRINT_LABEL + " · easel",
+                    label="Live theoretical print — not committed · easel",
                     type="numpy",
                     elem_id="live_preview",
                     height=720,
@@ -7470,7 +7576,16 @@ def build_ui() -> gr.Blocks:
                         "_Save film / chemistry / print controls as JSON._"
                     )
 
-                with gr.Accordion("Dodge & burn", open=False, elem_id="mod_dodge_burn"):
+                with gr.Accordion(
+                    ADVANCED_DODGE_BURN_LABEL,
+                    open=False,
+                    elem_id="mod_dodge_burn",
+                ):
+                    gr.Markdown(
+                        "_Optional. Use only after **Commit Develop**, once paper / "
+                        "exposure / filtration look right. Skip this for a normal print._",
+                        elem_id="db_advanced_hint",
+                    )
                     db_shape = gr.Radio(
                         choices=[(label, key) for key, label in CARD_PRESETS],
                         value="soft_oval",
@@ -7675,7 +7790,8 @@ def build_ui() -> gr.Blocks:
         ]
         # Ingest/remove also restore Develop/Print interactivity — otherwise a
         # prior Commit Develop leaves film controls disabled on the new frame.
-        session_control_outputs = ingest_outputs + control_outputs
+        # chemistry_help is restore-only (not part of the per-frame control snapshot).
+        session_control_outputs = ingest_outputs + control_outputs + [chemistry_help]
         roll_switch_outputs = session_control_outputs + [
             roll_save_modal,
             roll_pending_index,
@@ -8049,7 +8165,7 @@ def build_ui() -> gr.Blocks:
         )
         preview_tool.change(
             fn=on_preview_tool_change,
-            inputs=[preview_tool],
+            inputs=[preview_tool, state],
             outputs=[live_out],
         )
 
