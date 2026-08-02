@@ -79,3 +79,33 @@ def test_develop_routes_instant_films():
         )
         assert out.color_process == "instant_integral"
         assert out.positive_preview.ndim == 3
+
+
+def test_instant_card_is_positive_not_negative():
+    """Scene highlights must print lighter than shadows on the finished card."""
+    img = np.zeros((32, 48, 3), dtype=np.float32)
+    img[:, :24] = 0.05  # shadow
+    img[:, 24:] = 1.0   # highlight
+    dn = DigitalNegative(image=img, metadata=default_metadata())
+    profile = load_film_profile(ROOT / "profiles" / "films" / "polaroid-600-instant-v1.json")
+    result = process_instant(dn, profile, process_temp_c=21.0, border=False, commit=False)
+    shadow = float(result.reflectance[:, :24].mean())
+    highlight = float(result.reflectance[:, 24:].mean())
+    assert highlight > shadow * 1.35
+    # Display preview (pre-border) must follow the same polarity.
+    shadow_p = float(result.preview[:, :24].mean())
+    highlight_p = float(result.preview[:, 24:].mean())
+    assert highlight_p > shadow_p * 1.25
+
+
+def test_commit_pull_enables_dev_unlock_button():
+    """Regression: Instant Commit pull used to enable Print Unlock (hidden)."""
+    source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
+    marker = "Unlock (Dev drawer) — was wrongly on Print Unlock"
+    assert marker in source
+    # Interactive True must land on Dev Unlock, with Commit/Unlock Print off.
+    idx = source.index(marker)
+    window = source[idx - 280 : idx + 200]
+    assert "gr.update(interactive=True)" in window
+    assert "Commit Print (hidden in Instant)" in window
+    assert "Unlock Print" in window
