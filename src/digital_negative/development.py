@@ -118,6 +118,7 @@ def develop(
             chroma=float(dev_meta.get("chroma", 1.0)),
             warmth=float(dev_meta.get("warmth", 0.0)),
             diffusion=dev_meta.get("diffusion"),
+            border=bool(dev_meta.get("card_border", True)),
             exposure_index=exposure_index,
             scene_exposure_seconds=scene_exposure_seconds,
             mid_log_e=mid_log_e,

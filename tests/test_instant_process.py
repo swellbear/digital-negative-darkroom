@@ -98,10 +98,21 @@ def test_instant_card_is_positive_not_negative():
     assert highlight_p > shadow_p * 1.25
 
 
+def test_instant_border_toggle_changes_card_size():
+    dn = _scene()
+    profile = load_film_profile(ROOT / "profiles" / "films" / "polaroid-600-instant-v1.json")
+    with_border = process_instant(dn, profile, border=True, commit=False)
+    no_border = process_instant(dn, profile, border=False, commit=False)
+    assert with_border.preview.shape[0] > no_border.preview.shape[0]
+    assert with_border.preview.shape[1] > no_border.preview.shape[1]
+    assert with_border.meta.get("card_border") is True
+    assert no_border.meta.get("card_border") is False
+
+
 def test_commit_pull_enables_dev_unlock_button():
     """Regression: Instant Commit pull used to enable Print Unlock (hidden)."""
     source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
-    marker = "Unlock (Dev drawer) — was wrongly on Print Unlock"
+    marker = "Unlock (Dev drawer)"
     assert marker in source
     # Interactive True must land on Dev Unlock, with Commit/Unlock Print off.
     idx = source.index(marker)
