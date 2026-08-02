@@ -39,6 +39,8 @@ def _upd(update) -> dict:
 
 
 def _default_controls(mod, *, mode="bw"):
+    # Trailing Instant knobs match live_preview / commit_develop arity on main.
+    instant_tail = (38.0, 0.0, 0.0, True)
     if mode == "color":
         film_id = mod.FILM_CHOICES_COLOR[0][1]
         for _label, fid in mod.FILM_CHOICES_COLOR:
@@ -83,6 +85,7 @@ def _default_controls(mod, *, mode="bw"):
             20.0,
             40.0,
             0.0,
+            *instant_tail,
         )
     return (
         "bw",
@@ -114,6 +117,7 @@ def _default_controls(mod, *, mode="bw"):
         0.0,
         0.0,
         0.0,
+        *instant_tail,
     )
 
 
@@ -196,7 +200,8 @@ def test_bw_color_roll_matrix_no_control_leakage():
     assert _upd(block[11]).get("interactive") is True
 
     banner = mod._stage_banner("print", mod._locks(state), state)
-    assert "`B&W`" in banner
+    # Bold chips (not markdown code) — code chips were white-on-white.
+    assert "**B&W**" in banner
     assert "Live exploring" in banner
 
 

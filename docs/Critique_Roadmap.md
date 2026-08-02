@@ -1,6 +1,6 @@
 # Critique Roadmap — Ordered Backlog
 
-**Updated:** 2026-07-31  
+**Updated:** 2026-08-02  
 **Repository:** https://github.com/swellbear/digital-negative-darkroom  
 
 **Compasses:**
@@ -11,24 +11,23 @@ The architecture works. Remaining risk is **clarity, density, and authenticity u
 
 ---
 
-## UI P0 — Clarity & Trust (current: drawer slice)
+## UI P0 — Clarity & Trust (**closed** 2026-08-02)
 
 Make the core Upload → Develop → Print loop readable and trustworthy.
 
-**Done (PR #86):**
-1. Stage / lock / chemistry path unambiguous (Live exploring vs Committed; B&W / C-41 / E-6).
-2. Harden B&W ↔ Color and camera-roll frame switching.
+**Done:**
+1. Stage / lock / chemistry path unambiguous (Live exploring vs Committed; B&W / C-41 / E-6 / Instant).
+2. Harden B&W ↔ Color ↔ Instant and camera-roll frame switching.
 3. Quarantine dodge/burn behind **Advanced**.
+4. Widen the control drawer (260px) and progressive-disclose Develop/Print More sections.
+5. In-UI **How this darkroom works** note in the Upload drawer.
+6. Instant / Polaroid path + framing reliability landed on `main` (PR stack #84–#101).
 
-**Now:**
-4. Widen the control drawer and use progressive disclosure so primary Develop/Print controls are easy to read and adjust.
-5. Seed an in-UI “How this darkroom works” note (Upload drawer).
-
-**Explicit non-goals until UI P0 closes:** JS architecture rewrite, replacing dodge/burn, mobile layout, new films/papers, `.exe`.
+**Explicit non-goals until Product P1 has started:** JS architecture rewrite, replacing dodge/burn, mobile layout, `.exe` / desktop installer.
 
 ---
 
-## UI P1 — Reduce Cognitive Load
+## UI P1 — Reduce Cognitive Load (**current**)
 
 1. Keep Advanced dodge/burn subordinate; simplify further only if the core loop is excellent.
 2. Reduce simultaneous competing panels when possible.

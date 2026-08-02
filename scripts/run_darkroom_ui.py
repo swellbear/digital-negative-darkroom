@@ -4537,6 +4537,10 @@ def _capture_controls(
     cc_cyan,
     cc_magenta,
     cc_yellow,
+    process_temp_c=21.0,
+    instant_chroma=1.0,
+    instant_warmth=0.0,
+    instant_border=True,
 ) -> dict:
     """Snapshot Develop/Print UI controls so each roll frame keeps its recipe."""
     mode = str(chemistry_mode or "bw").lower()
@@ -4572,10 +4576,14 @@ def _capture_controls(
         "cc_cyan": float(cc_cyan),
         "cc_magenta": float(cc_magenta),
         "cc_yellow": float(cc_yellow),
+        "process_temp_c": float(process_temp_c if process_temp_c is not None else 21.0),
+        "instant_chroma": float(instant_chroma if instant_chroma is not None else 1.0),
+        "instant_warmth": float(instant_warmth if instant_warmth is not None else 0.0),
+        "instant_border": bool(True if instant_border is None else instant_border),
     }
 
 
-_CONTROL_COUNT = 29
+_CONTROL_COUNT = 33
 
 # Develop recipe controls — Commit Develop sets these interactive=False.
 _DEV_CONTROL_KEYS = (
@@ -4611,6 +4619,13 @@ _PRINT_CONTROL_KEYS = (
     "cc_cyan",
     "cc_magenta",
     "cc_yellow",
+)
+# Instant Develop knobs — after print CC in the Gradio control_outputs order.
+_INSTANT_CONTROL_KEYS = (
+    "process_temp_c",
+    "instant_chroma",
+    "instant_warmth",
+    "instant_border",
 )
 
 # Print controls that only apply in one chemistry mode (others stay shared).
@@ -4733,8 +4748,10 @@ def _control_interactivity_updates(state):
     has_dn = bool(state and state.get("dn") is not None)
     dev_on = (not _locked(state, "development")) if has_dn else True
     print_on = (not _locked(state, "print")) if has_dn else True
-    return tuple(gr.update(interactive=dev_on) for _ in _DEV_CONTROL_KEYS) + tuple(
-        gr.update(interactive=print_on) for _ in _PRINT_CONTROL_KEYS
+    return (
+        tuple(gr.update(interactive=dev_on) for _ in _DEV_CONTROL_KEYS)
+        + tuple(gr.update(interactive=print_on) for _ in _PRINT_CONTROL_KEYS)
+        + tuple(gr.update(interactive=dev_on) for _ in _INSTANT_CONTROL_KEYS)
     )
 
 
@@ -4836,7 +4853,16 @@ def _control_updates(state):
             if vis is not None:
                 kwargs["visible"] = vis
             print_u.append(gr.update(**kwargs))
-    return head + rest_dev + tuple(print_u)
+    instant_u = []
+    for key in _INSTANT_CONTROL_KEYS:
+        kwargs = {"value": c[key], "interactive": dev_on}
+        # Instant-only widgets; B&W/Color hide them via chemistry visibility.
+        if mode != "instant":
+            kwargs["visible"] = False
+        else:
+            kwargs["visible"] = True
+        instant_u.append(gr.update(**kwargs))
+    return head + rest_dev + tuple(print_u) + tuple(instant_u)
 
 
 def _chemistry_help_update(state):
@@ -6757,7 +6783,7 @@ def live_preview(
         cc_magenta,
         cc_yellow,
     )
-    # Instant extras (not in the legacy 29-wide roll snapshot arity).
+    # Instant extras — also stored in the per-frame roll control snapshot.
     controls["process_temp_c"] = float(process_temp_c if process_temp_c is not None else 21.0)
     controls["instant_chroma"] = float(instant_chroma if instant_chroma is not None else 1.0)
     controls["instant_warmth"] = float(instant_warmth if instant_warmth is not None else 0.0)
@@ -9005,6 +9031,10 @@ def build_ui() -> gr.Blocks:
             cc_cyan,
             cc_magenta,
             cc_yellow,
+            process_temp,
+            instant_chroma,
+            instant_warmth,
+            instant_border,
         ]
         # Ingest/remove also restore Develop/Print interactivity — otherwise a
         # prior Commit Develop leaves film controls disabled on the new frame.
