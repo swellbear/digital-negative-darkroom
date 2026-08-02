@@ -2973,6 +2973,8 @@ UI_JS = """
     const t = e.target;
     if (!(t instanceof Element)) return;
     if (!t.closest || !t.closest('#apply_framing_btn')) return;
+    // Apply is exiting Frame — do not re-arm crop if Gradio echoes print.
+    window.__cropEngageUntil = 0;
     try { writeCropRectBox(); } catch (_) {}
   }, true);
 
@@ -2982,8 +2984,10 @@ UI_JS = """
     if (t.closest && t.closest('#preview_tool')) {
       syncPreviewToolClasses();
       syncOverlay();
-      // Server Apply sets preview_tool → print; close the crop accordion too.
+      // Leaving Frame tool closes the crop accordion — but not during the brief
+      // window after opening Crop (Gradio can echo the previous radio value).
       if (readPreviewTool() !== 'frame') {
+        if (Date.now() < (window.__cropEngageUntil || 0)) return;
         try { closeModule('mod_crop'); } catch (_) {}
         window.__cropBox = { x: 0, y: 0, w: 1, h: 1 };
       }
@@ -3014,7 +3018,16 @@ UI_JS = """
     const root = document.querySelector('#preview_tool');
     if (!root) return;
     const input = root.querySelector(`input[type="radio"][value="${tool}"]`);
-    if (input && !input.checked) {
+    if (!input || input.checked) {
+      syncPreviewToolClasses();
+      return;
+    }
+    // Prefer a real label click so Gradio/Svelte commits the value. Setting
+    // checked + dispatchEvent alone often loses the next render tick.
+    const label = input.closest('label');
+    if (label) {
+      label.click();
+    } else {
       input.checked = true;
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -3041,6 +3054,7 @@ UI_JS = """
   window.__drawerCollapsed = false;
   const applyDrawer = (name, { fromServer = false } = {}) => {
     const n = (name || 'ingest').toLowerCase();
+    const prev = (document.body.dataset.drawer || '').toLowerCase();
     if (!fromServer && document.body.dataset.drawer === n && !document.body.classList.contains('drawer-collapsed')) {
       document.body.classList.add('drawer-collapsed');
       window.__drawerCollapsed = true;
@@ -3058,11 +3072,14 @@ UI_JS = """
       b.classList.toggle('rail-active', id === n);
     });
     if (n === 'frame') {
+      window.__cropEngageUntil = Date.now() + 1000;
       setPreviewToolValue('frame');
       try { openModule('mod_crop'); } catch (_) {}
-    } else {
-      // Leaving Frame (Apply framing → Develop, or another rail) closes crop.
-      if (n === 'print' || readPreviewTool() === 'frame') {
+    } else if (prev === 'frame' && n !== 'frame') {
+      // Only when leaving the Frame rail — Modules crop must stay usable
+      // while Develop / Print / Upload drawers are active.
+      window.__cropEngageUntil = 0;
+      if (readPreviewTool() === 'frame') {
         setPreviewToolValue('print');
       }
       try { closeModule('mod_crop'); } catch (_) {}
@@ -3094,11 +3111,17 @@ UI_JS = """
       if (open) collapseOtherModules(id);
       if (id === 'mod_crop') {
         if (open) {
+          // Hold Frame tool through Gradio's radio reconcile so the accordion
+          // is not immediately closed by a stale preview_tool=print echo.
+          window.__cropEngageUntil = Date.now() + 1000;
           setPreviewToolValue('frame');
           syncOverlay();
-        } else if (readPreviewTool() === 'frame') {
-          setPreviewToolValue('print');
-          syncOverlay();
+        } else {
+          window.__cropEngageUntil = 0;
+          if (readPreviewTool() === 'frame') {
+            setPreviewToolValue('print');
+            syncOverlay();
+          }
         }
       } else if (id === 'mod_dodge_burn') {
         if (open) {
@@ -3382,9 +3405,13 @@ UI_JS = """
           });
         }, 0);
       } else if (act === 'crop') {
-        setTimeout(() => openModule('mod_crop'), 0);
+        setTimeout(() => {
+          window.__cropEngageUntil = Date.now() + 1000;
+          openModule('mod_crop');
+        }, 0);
       } else if (act === 'autostraighten') {
         setTimeout(() => {
+          window.__cropEngageUntil = Date.now() + 1000;
           openModule('mod_crop');
           waitForEl('#auto_straighten_btn:not(:disabled)', (btn) => btn.click());
         }, 0);
@@ -3392,6 +3419,7 @@ UI_JS = """
         // Never find buttons by label "Auto crop" — that matches this menu item
         // and recurses until the tab freezes.
         setTimeout(() => {
+          window.__cropEngageUntil = Date.now() + 1000;
           openModule('mod_crop');
           waitForEl('#auto_crop_btn:not(:disabled)', (autoBtn) => autoBtn.click());
         }, 0);
@@ -3513,6 +3541,9 @@ UI_JS = """
   };
   setInterval(syncDrawerFromBox, 400);
   applyDrawer(readActiveDrawer() || 'ingest', { fromServer: true });
+  // Avoid a second applyDrawer on the first poll (which used to close crop
+  // right after the user opened it during the initial 400ms window).
+  lastDrawerVal = readActiveDrawer() || 'ingest';
 
   // Camera roll HTML: real ✕ buttons (data-roll-remove) + frame clicks
   // (data-roll-switch). Write into off-screen Gradio inputs with the native
@@ -4244,7 +4275,7 @@ def on_developer_change(film_id: str, developer_id: str, chemistry_mode: str = "
     return _chem_time_update(film_id, developer_id, reset_to_normal=True)
 
 
-def on_chemistry_mode_change(mode: str, split_on=False):
+def on_chemistry_mode_change(mode: str, split_on=False, state=None):
     """Swap film/paper catalogs and control visibility for B&W / Color / Instant."""
     mode = str(mode or "bw").lower()
     if mode not in {"bw", "color", "instant"}:
@@ -4280,33 +4311,62 @@ def on_chemistry_mode_change(mode: str, split_on=False):
             show = _split_grade_child_visible(split_on, mode)
         else:
             show = _print_key_visible(mode, key)
-        vis.append(gr.update(visible=bool(show)))
+        # Re-enable after leaving a locked Instant/Color commit — visibility
+        # alone left Print sliders stuck non-interactive.
+        vis.append(gr.update(visible=bool(show), interactive=bool(show)))
     chem = get_chemistry(profile, chem_id) or {}
-    normal = float(chem.get("normal_minutes", profile.defaults.get("development_minutes", 8.0)))
+    _tmin, _tmax, normal = (
+        time_slider_bounds(chem)
+        if chem is not None
+        else (_DEV_TIME_SLIDER_MIN, _DEV_TIME_SLIDER_MAX, 8.0)
+    )
+    minutes_val = float(np.clip(float(normal), _DEV_TIME_SLIDER_MIN, _DEV_TIME_SLIDER_MAX))
     if is_instant:
-        minutes_u = gr.update(
-            minimum=_DEV_TIME_SLIDER_MIN,
-            maximum=_DEV_TIME_SLIDER_MAX,
-            value=float(np.clip(normal, _DEV_TIME_SLIDER_MIN, _DEV_TIME_SLIDER_MAX)),
-            step=0.25,
-            label=f"Process time · N={normal:g} min",
-        )
+        minutes_label = f"Process time · N={float(normal):g} min"
     else:
-        minutes_u = _chem_time_update(film_id, chem_id, reset_to_normal=True)
+        family = (chem or {}).get("curve_family") or []
+        if isinstance(family, list) and len(family) >= 2:
+            times = ", ".join(
+                f"{float(m['minutes']):g}" for m in sorted(family, key=lambda x: x["minutes"])
+            )
+            minutes_label = f"Dev time · N={float(normal):g} [{times}]"
+        else:
+            minutes_label = f"Dev time · N={float(normal):g} @20°C"
+    minutes_u = gr.update(
+        minimum=_DEV_TIME_SLIDER_MIN,
+        maximum=_DEV_TIME_SLIDER_MAX,
+        value=minutes_val,
+        step=0.25,
+        label=minutes_label,
+        interactive=True,
+    )
     temp_default = float(profile.defaults.get("process_temp_c", 21.0))
+    ei_val = float(profile.iso)
+    state = _reset_state_for_chemistry_switch(
+        state,
+        mode=mode,
+        film_id=film_id,
+        developer_id=chem_id,
+        development_minutes=minutes_val,
+        exposure_index=ei_val,
+        paper_id=paper_id,
+    )
+    on, off = gr.update(interactive=True), gr.update(interactive=False)
     return (
-        gr.update(choices=film_choices, value=film_id),
+        gr.update(choices=film_choices, value=film_id, interactive=True),
         gr.update(
             choices=chem_choices,
             value=chem_id,
             label="Reagent" if is_instant else "Developer",
+            interactive=True,
         ),
         minutes_u,
-        gr.update(value=float(profile.iso)),
+        gr.update(value=ei_val, interactive=True),
         gr.update(
             choices=paper_choices if paper_choices else PAPER_CHOICES_BW,
             value=paper_id if paper_id else (PAPER_CHOICES_BW[0][1] if PAPER_CHOICES_BW else None),
             visible=not is_instant,
+            interactive=not is_instant,
         ),
         gr.update(value=_chemistry_help_md(mode)),
         *vis,
@@ -4323,6 +4383,7 @@ def on_chemistry_mode_change(mode: str, split_on=False):
             visible=is_instant,
             value=bool(profile.defaults.get("card_border", True)),
         ),
+        gr.update(interactive=True, value=0.0),  # contrast — re-enable after Commit pull
         gr.update(
             label="Diffusion" if is_instant else "Grain",
             value=(
@@ -4333,13 +4394,23 @@ def on_chemistry_mode_change(mode: str, split_on=False):
             minimum=0.0,
             maximum=1.0 if is_instant else 2.5,
             step=0.05,
+            interactive=True,
         ),
-        gr.update(visible=not is_instant),  # contrast_filter
-        gr.update(visible=not is_instant),  # scene_exposure (reciprocity; tank path)
-        gr.update(visible=not is_instant),  # halation
-        gr.update(visible=not is_instant),  # print_exposure
+        gr.update(visible=not is_instant, interactive=not is_instant),  # contrast_filter
+        gr.update(visible=not is_instant, interactive=not is_instant),  # scene_exposure
+        gr.update(visible=not is_instant, interactive=not is_instant),  # halation
+        gr.update(visible=not is_instant, interactive=not is_instant),  # print_exposure
         gr.update(visible=not is_instant),  # print drawer host
-        gr.update(value="Commit pull" if is_instant else "Commit Develop"),
+        gr.update(
+            value="Commit pull" if is_instant else "Commit Develop",
+            interactive=True,
+        ),
+        off,  # unlock develop — nothing locked after a chemistry flip
+        gr.update(interactive=not is_instant),  # Commit Print
+        off,  # unlock print
+        gr.update(visible=False),  # download_trigger
+        "",  # download_modes
+        state if state is not None else gr.skip(),
     )
 
 
@@ -4771,9 +4842,64 @@ def _control_updates(state):
 def _chemistry_help_update(state):
     """Keep the Develop drawer chemistry blurb aligned with the active frame."""
     mode = str(_merged_frame_controls(state).get("chemistry_mode") or "bw").lower()
-    if mode not in {"bw", "color"}:
+    if mode not in {"bw", "color", "instant"}:
         mode = "bw"
     return gr.update(value=_chemistry_help_md(mode))
+
+
+def _reset_state_for_chemistry_switch(
+    state,
+    *,
+    mode: str,
+    film_id: str,
+    developer_id: str,
+    development_minutes: float,
+    exposure_index: float,
+    paper_id: str | None,
+):
+    """Drop develop/print locks and caches when B&W / Color / Instant changes.
+
+    Committed Instant pulls lock Print too, which froze Live forever after a
+    chemistry flip; Color↔B&W had the same trap. Exploring the new family
+    always starts from an unlocked Develop.
+    """
+    if not state or state.get("dn") is None:
+        return state
+    dn = state["dn"]
+    _unlock_develop_print(dn)
+    ctrl = {
+        **((state.get("controls") or {})),
+        "chemistry_mode": mode,
+        "film_id": film_id,
+        "developer_id": developer_id,
+        "development_minutes": float(development_minutes),
+        "exposure_index": float(exposure_index),
+    }
+    if paper_id is not None:
+        ctrl["paper_id"] = paper_id
+    return {
+        **state,
+        "chemistry_mode": mode,
+        "controls": ctrl,
+        "development": None,
+        "development_full": None,
+        "transmittance_proxy": None,
+        "spectral_transmittance": None,
+        "print": None,
+        "print_draft": None,
+        "neg_ref": None,
+        "neg_view": None,
+        "neg_inspect": None,
+        "dl_negative": None,
+        "dl_print_only": None,
+        "dl_print_negative": None,
+        "db_accum": None,
+        "db_exposing": False,
+        "db_seconds_left": 0,
+        "db_strokes": [],
+        "stage": "development",
+        "summary_cache": None,
+    }
 
 
 def _session_with_controls(state, *, drawer: str | None = "roll"):
@@ -5489,8 +5615,12 @@ def swap_strip_slot(index: int):
 
 
 def on_preview_tool_change(tool: str, state=None):
-    """Update the live preview label for the active tool mode + lock state."""
-    return gr.update(label=_live_print_label(state, tool=str(tool or "print")))
+    """Update the live preview label and keep Crop accordion aligned with Frame tool."""
+    tool = str(tool or "print")
+    return (
+        gr.update(label=_live_print_label(state, tool=tool)),
+        gr.update(open=(tool == "frame")),
+    )
 
 
 def set_workspace_drawer(name: str):
@@ -5789,6 +5919,7 @@ def apply_crop_straighten(straighten_deg, crop_rect, crop_ratio, state):
         gr.update(value="print"),
         "develop",
         crop_done_hint,
+        gr.update(open=False),
     )
 
 
@@ -5858,6 +5989,7 @@ def reset_crop_straighten(state):
         gr.update(value="frame"),
         "frame",
         reset_hint,
+        gr.update(open=True),
     )
 
 
@@ -8688,7 +8820,9 @@ def build_ui() -> gr.Blocks:
                     with gr.Column(elem_classes=["db_clock_hidden"]):
                         db_clock = gr.Timer(value=TICK_SECONDS, active=False)
 
-                with gr.Accordion("Crop & straighten", open=False, elem_id="mod_crop"):
+                with gr.Accordion(
+                    "Crop & straighten", open=False, elem_id="mod_crop"
+                ) as mod_crop_acc:
                     crop_hint = gr.Markdown(
                         "_Rotate if needed, auto-straighten / crop, then Apply._",
                         elem_id="crop_float_hint",
@@ -8951,7 +9085,7 @@ def build_ui() -> gr.Blocks:
         )
         chemistry_mode.change(
             fn=on_chemistry_mode_change,
-            inputs=[chemistry_mode, split_grade],
+            inputs=[chemistry_mode, split_grade, state],
             outputs=[
                 film,
                 developer,
@@ -8974,6 +9108,7 @@ def build_ui() -> gr.Blocks:
                 instant_chroma,
                 instant_warmth,
                 instant_border,
+                contrast,
                 grain,
                 contrast_filter,
                 scene_exposure,
@@ -8981,6 +9116,12 @@ def build_ui() -> gr.Blocks:
                 print_exposure,
                 print_drawer,
                 develop_btn,
+                unlock_develop_btn,
+                print_btn,
+                unlock_print_btn,
+                download_trigger,
+                download_modes,
+                state,
             ],
         ).then(
             fn=live_preview_edit,
@@ -9255,7 +9396,7 @@ def build_ui() -> gr.Blocks:
         preview_tool.change(
             fn=on_preview_tool_change,
             inputs=[preview_tool, state],
-            outputs=[live_out],
+            outputs=[live_out, mod_crop_acc],
         )
 
         # Rail drawers are driven by #active_drawer (JS) + workflow auto-switch.
@@ -9281,7 +9422,7 @@ def build_ui() -> gr.Blocks:
             develop_acc, print_acc, state,
             straighten_deg, crop_rect, crop_ratio,
             # Apply exits Frame → print preview + Develop drawer + closes crop UI.
-            preview_tool, active_drawer, crop_hint,
+            preview_tool, active_drawer, crop_hint, mod_crop_acc,
         ]
         apply_framing_btn.click(
             fn=apply_crop_straighten,

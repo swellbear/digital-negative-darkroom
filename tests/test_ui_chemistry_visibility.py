@@ -45,8 +45,8 @@ def test_print_key_visibility_bw_vs_color():
 def test_chemistry_mode_change_hides_mg_shows_cc():
     mod = _load_ui()
     outs = mod.on_chemistry_mode_change("color")
-    # film, developer, minutes, ei, paper, help, 11 print vis, then Instant knobs…
-    assert len(outs) == 6 + 11 + 11
+    # film…help (6) + 11 print vis + Instant/Dev knobs + commit/unlock/download/state
+    assert len(outs) == 6 + 11 + 12 + 6
     help_u = _upd(outs[5])
     assert "Color Chemistry" in str(help_u.get("value", ""))
     # print_grade is first visibility slot after help
@@ -65,17 +65,17 @@ def test_chemistry_mode_change_instant_shows_process_hides_print():
     if not mod.FILM_CHOICES_INSTANT:
         return
     outs = mod.on_chemistry_mode_change("instant")
-    assert len(outs) == 6 + 11 + 11
+    assert len(outs) == 6 + 11 + 12 + 6
     assert "Instant" in str(_upd(outs[5]).get("value", ""))
     assert _upd(outs[6]).get("visible") is False  # print_grade
     assert _upd(outs[17]).get("visible") is True  # process_temp
     assert _upd(outs[20]).get("visible") is True  # Polaroid border
     assert _upd(outs[20]).get("value") is True
-    assert _upd(outs[22]).get("visible") is False  # contrast_filter
-    assert _upd(outs[23]).get("visible") is False  # scene_exposure
-    assert _upd(outs[24]).get("visible") is False  # halation
-    assert _upd(outs[26]).get("visible") is False  # print_drawer
-    assert "Commit pull" in str(_upd(outs[27]).get("value", ""))
+    assert _upd(outs[23]).get("visible") is False  # contrast_filter
+    assert _upd(outs[24]).get("visible") is False  # scene_exposure
+    assert _upd(outs[25]).get("visible") is False  # halation
+    assert _upd(outs[27]).get("visible") is False  # print_drawer
+    assert "Commit pull" in str(_upd(outs[28]).get("value", ""))
     assert _upd(outs[4]).get("visible") is False  # paper
 
 
