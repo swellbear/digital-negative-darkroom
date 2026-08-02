@@ -55,6 +55,11 @@ def _default_controls(mod):
         0.0,
         0.0,
         0.0,
+        # Instant knobs (process_temp, chroma, warmth, border)
+        38.0,
+        0.0,
+        0.0,
+        True,
     )
 
 

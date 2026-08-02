@@ -130,9 +130,10 @@ def test_live_vs_committed_viewer_and_banner():
     assert mod._lock_status_label(exploring) == "Live exploring"
     assert mod._lock_status_label(committed) == "Committed"
     assert "easel" in mod._live_print_label(exploring, tool="print")
-    assert _upd(mod.on_preview_tool_change("frame", committed)).get("label", "").startswith(
-        "Committed print"
-    )
+    # on_preview_tool_change returns (live label update, crop accordion open).
+    label_u, crop_u = mod.on_preview_tool_change("frame", committed)
+    assert _upd(label_u).get("label", "").startswith("Committed print")
+    assert _upd(crop_u).get("open") is True
 
 
 def test_advanced_dodge_burn_is_quarantined():
