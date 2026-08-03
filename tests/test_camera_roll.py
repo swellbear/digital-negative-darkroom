@@ -35,6 +35,25 @@ def test_collect_input_paths_multi_and_sample():
     assert mod._collect_input_paths(None, "/sample.nef") == ["/sample.nef"]
     assert mod._collect_input_paths(None, None) == []
     assert mod._resolve_input(["/a.jpg", "/b.jpg"], "/sample.nef") == "/a.jpg"
+    # Synthetic sentinel (and legacy "") must yield a real ingest slot, not [].
+    assert mod._collect_input_paths(None, mod.SYNTHETIC_SAMPLE) == [None]
+    assert mod._collect_input_paths(None, "") == [None]
+    assert mod._resolve_input(None, mod.SYNTHETIC_SAMPLE) is None
+    assert mod._is_synthetic_sample(mod.SYNTHETIC_SAMPLE)
+    assert mod._is_synthetic_sample("")
+    assert not mod._is_synthetic_sample(None)
+    assert not mod._is_synthetic_sample("/sample.nef")
+
+
+def test_commit_ingest_synthetic_sample():
+    """Default Upload sample must Add to roll without a file on disk."""
+    mod = _load_ui()
+    outs = mod.commit_ingest(mod.SYNTHETIC_SAMPLE, None, None)
+    state = _state_from(outs)
+    assert state.get("dn") is not None
+    assert len(state.get("roll") or []) == 1
+    assert state["dn"].metadata["source"]["original_filename"] == "synthetic_scene.tif"
+    assert _active_drawer_from(outs) == "develop"
 
 
 def _active_drawer_from(outs):
