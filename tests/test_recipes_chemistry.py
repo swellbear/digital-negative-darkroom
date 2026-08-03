@@ -291,6 +291,19 @@ def test_apply_restores_instant_process_knobs():
     assert ctrl.get("instant_border") is False
 
 
+def test_recipe_upload_path_accepts_uploadbutton_payloads():
+    mod = _load_ui()
+    assert mod._recipe_upload_path(None) is None
+    assert mod._recipe_upload_path("/tmp/a.json") == "/tmp/a.json"
+    assert mod._recipe_upload_path(["/tmp/b.json"]) == "/tmp/b.json"
+    assert mod._recipe_upload_path({"path": "/tmp/c.json"}) == "/tmp/c.json"
+
+    class _F:
+        name = "/tmp/d.json"
+
+    assert mod._recipe_upload_path(_F()) == "/tmp/d.json"
+
+
 def test_apply_mode_mismatch_uses_ui_chemistry_radio():
     mod = _load_ui()
     outs = mod.commit_ingest(
