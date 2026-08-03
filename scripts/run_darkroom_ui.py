@@ -184,10 +184,11 @@ PAPER_CHOICES_BW = [_paper_choice_tuple(p) for p in list_paper_profiles(chemistr
 PAPER_CHOICES_COLOR = [_paper_choice_tuple(p) for p in list_paper_profiles(chemistry_mode="color")]
 PAPER_CHOICES = list(PAPER_CHOICES_BW)
 
+# Short drawer radios — full mode names live in chemistry_help below.
 CHEMISTRY_MODE_LABELS = [
-    ("Black & White Chemistry", "bw"),
-    ("Color Chemistry", "color"),
-    ("Instant / Polaroid", "instant"),
+    ("B&W", "bw"),
+    ("Color", "color"),
+    ("Instant", "instant"),
 ]
 
 # Viewer chrome — exploratory until Print is locked.
@@ -474,14 +475,23 @@ footer, .gradio-container footer {
 }
 #icon_rail .rail-spacer { flex: 1 1 auto !important; min-height: 8px !important; }
 #chemistry_help {
-  margin: 0 0 6px !important;
+  margin: 0 0 4px !important;
   padding: 0 !important;
-  font-size: var(--dr-fs-label) !important;
+  font-size: var(--dr-fs-note) !important;
   line-height: 1.25 !important;
   color: var(--dr-text-dim) !important;
 }
 #chemistry_help p {
   margin: 0 !important;
+}
+/* Chemistry radios: short labels on one compact row in the Dev drawer. */
+#chemistry_mode fieldset,
+#chemistry_mode .wrap {
+  gap: 2px 6px !important;
+}
+#chemistry_mode label {
+  margin: 0 !important;
+  padding: 1px 4px 1px 0 !important;
 }
 
 /* Drawer host — one panel visible; compressed.
@@ -626,12 +636,14 @@ footer, .gradio-container footer {
   gap: 2px !important;
   width: 100% !important;
 }
+/* Drawer number boxes must fit EI up to 6400 (was 40px — clipped "160"/"1600"). */
 #drawer_host .head input[type="number"] {
-  width: 40px !important;
-  min-width: 0 !important;
-  max-width: 44px !important;
-  flex: 0 0 40px !important;
+  width: 52px !important;
+  min-width: 52px !important;
+  max-width: 56px !important;
+  flex: 0 0 52px !important;
   box-sizing: border-box !important;
+  text-align: right !important;
 }
 /* Camera roll tab — server-rendered HTML list (✕ is a real button).
    Thumbs keep a fixed height (flex-shrink: 0); the list scrolls instead of
@@ -930,7 +942,7 @@ body.drawer-collapsed #drawer_host,
   flex: 0 0 auto !important;
   gap: 0 !important;
 }
-#drawer_host .head input[type="number"],
+/* Modules column stays tighter; drawer width is handled above. */
 #module_panel .head input[type="number"] {
   width: 38px !important;
   min-width: 38px !important;
@@ -5487,21 +5499,13 @@ _COLOR_ONLY_PRINT_KEYS = frozenset({"cc_cyan", "cc_magenta", "cc_yellow"})
 
 
 def _chemistry_help_md(mode: str) -> str:
+    """One short line under the Chemistry radios (drawer is ~230px wide)."""
     m = str(mode or "bw").lower()
     if m == "color":
-        return (
-            "_**Color Chemistry** — Develop is C-41 / E-6; Print is RA-4 "
-            "(CC filtration) or slide finish._"
-        )
+        return "_C-41 / E-6 develop · RA-4 (CC) or slide print._"
     if m == "instant":
-        return (
-            "_**Instant / Polaroid** — integral film: expose → reagent pod → "
-            "finished card. No enlarger paper. Temperature matters._"
-        )
-    return (
-        "_**Black & White Chemistry** — Develop is tank chemistry; "
-        "Print is multigrade (MG grade / split-grade)._"
-    )
+        return "_Expose → pod → card. No enlarger. Temp matters._"
+    return "_Tank develop · multigrade print (MG / split-grade)._"
 
 
 def _print_key_visible(mode: str, key: str) -> bool | None:
@@ -9807,7 +9811,7 @@ def build_ui() -> gr.Blocks:
                             elem_classes=["drawer-more"],
                         ):
                             exposure_index = gr.Slider(
-                                25, 6400, value=400, step=25, label="Exposure index (EI)"
+                                25, 6400, value=400, step=25, label="EI"
                             )
                             contrast_filter = gr.Dropdown(
                                 choices=FILTER_LABELS,
@@ -9816,7 +9820,7 @@ def build_ui() -> gr.Blocks:
                             )
                             scene_exposure = gr.Slider(
                                 0.01, 60.0, value=0.01, step=0.01,
-                                label="Scene shutter (s)",
+                                label="Shutter (s)",
                             )
                             halation = gr.Slider(
                                 0.0, 1.5, value=0.0, step=0.05, label="Halation"
