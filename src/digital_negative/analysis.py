@@ -699,10 +699,13 @@ def suggest_tone_fit(
 ) -> dict[str, Any]:
     """Suggest exposure / filtration so the print sits on paper instead of clipping.
 
-    First-order darkroom intuition: +1 enlarger stop ≈ 1 Zone darker. When the
-    scene is too contrasty, soften filtration a little (MG grade for B&W, RA-4
-    paper contrast for Color), then park the midtone near Zone V.
+    First-order darkroom intuition: +1 enlarger stop ≈ 1 Zone darker. Park the
+    midtone near Zone V first (what the timer actually does). Soften filtration
+    a little when the scale is too long (MG grade for B&W, RA-4 paper contrast
+    for Color). Only chase highlight/shadow ends when mids are already close.
 
+    Important: real paper reflectance tops out near 1.0 → ~Zone VII½. A lone
+    ``p95 ≥ 7.2`` tick is normal specular/sky, not a signal to keep darkening.
     Instant has no enlarger — returns ``ok=0``.
     """
     mode = str(chemistry_mode or "bw").lower()
@@ -740,39 +743,86 @@ def suggest_tone_fit(
         }
 
     p5, p50, p95 = (float(x) for x in np.percentile(zones, (5, 50, 95)))
-    blown = p95 >= hi_zone
-    crushed = p5 <= lo_zone
+    # Reflectance 1.0 → Zone ≈ 7.47. Ends are judged by mass near paper white /
+    # Dmax so a few speculars don't force "protect highlights" forever.
+    paper_white_zone = 5.0 + float(np.log2(1.0 / 0.18))
+    frac_hi = float(np.mean(zones >= hi_zone))
+    frac_lo = float(np.mean(zones <= lo_zone))
+    blown = bool(frac_hi >= 0.08 or p95 >= hi_zone + 0.45)
+    crushed = bool(frac_lo >= 0.08 or p5 <= lo_zone)
     span = p95 - p5
 
     new_grade = float(np.clip(grade, 0.0, 5.0))
     new_contrast = float(np.clip(print_contrast, -1.0, 1.0))
     filt_note = ""
-    # Too much scene contrast for this filtration — open the scale a notch.
-    if span > 6.2 and (blown or crushed):
+    # Printable scale is only ~7.5 zones; both ends loaded + long span → soften.
+    # Keep the old span>6.2 path so synthetic over-range fixtures still trip it.
+    too_contrasty = (span > 5.5 and frac_hi >= 0.05 and frac_lo >= 0.05) or (
+        span > 6.2 and (blown or crushed)
+    )
+    if too_contrasty:
+        over = max(0.0, span - 5.5)
         if mode == "color":
             # RA-4 contrast is −1…+1; soften toward negative.
-            soften = float(np.clip(0.15 + 0.12 * (span - 6.2), 0.15, 0.55))
+            soften = float(np.clip(0.15 + 0.12 * over, 0.15, 0.55))
             softened = max(-1.0, new_contrast - soften)
             if softened < new_contrast - 0.02:
                 filt_note = f" · contrast {new_contrast:+.2f}→{softened:+.2f}"
                 new_contrast = float(round(softened * 20.0) / 20.0)
         else:
-            soften = float(np.clip(0.5 + 0.35 * (span - 6.2), 0.5, 1.5))
+            soften = float(np.clip(0.5 + 0.35 * over, 0.5, 1.5))
             softened = max(0.0, new_grade - soften)
             if softened < new_grade - 0.05:
                 filt_note = f" · grade {new_grade:.1f}→{softened:.1f}"
                 new_grade = softened
 
-    # d(zone)/d(exposure_stops) ≈ −1 on the print.
-    if blown and not crushed:
-        delta_stops = p95 - target_hi  # darken hot highlights
+    # d(zone)/d(exposure_stops) ≈ −1 near the straight-line, but paper toe /
+    # shoulder (and paper-white clipping) make a full closed-form solve wrong.
+    # Aim midtones at Zone V, take a conservative step, let the user click again.
+    max_step = 1.75
+    damp = 0.72
+    delta_mid = p50 - target_mid
+    delta_hi = p95 - target_hi
+    delta_lo = p5 - target_lo
+    # When p95 is stuck on the paper-white ceiling, p95−target_hi under-reads
+    # (always ~0.3–0.5 stop). Recover severity from highlight mass instead.
+    if p95 >= paper_white_zone - 0.15:
+        ceiling_severity = float(
+            np.clip(0.25 + 2.8 * max(0.0, frac_hi - 0.05), 0.0, 3.0)
+        )
+        delta_hi = max(float(delta_hi), ceiling_severity)
+
+    mid_clipped = p50 >= paper_white_zone - 0.35
+    if mid_clipped and frac_hi >= 0.12:
+        # Zone arithmetic can't see past paper white — estimate from mass.
+        delta_stops = float(
+            np.clip(0.55 + 2.0 * max(0.0, frac_hi - 0.10), 0.6, max_step)
+        )
+        intent = "balance midtones"
+    elif abs(delta_mid) >= 0.35:
+        # Timer's job: park Zone V. Don't let leftover speculars veto this.
+        delta_stops = float(np.clip(damp * delta_mid, -max_step, max_step))
+        intent = "balance midtones"
+    elif blown and delta_hi > 0.12 and p95 >= paper_white_zone + 0.3:
+        # Real paper can't exceed ~Z7.5 — this path is for synthetic over-range
+        # (or meters that still report Zone VIII+). Ordinary sky/speculars at
+        # paper white with mids near V are already "on paper".
+        delta_stops = float(np.clip(delta_hi, -max_step, max_step))
         intent = "protect highlights"
-    elif crushed and not blown:
-        delta_stops = p5 - target_lo  # lighten crushed shadows
+    elif crushed and delta_lo < -0.12 and delta_mid <= 0.25:
+        delta_stops = float(np.clip(delta_lo, -max_step, max_step))
         intent = "lift shadows"
+    elif blown and crushed:
+        delta_stops = float(np.clip(damp * delta_mid, -max_step, max_step))
+        intent = "compromise both ends"
     else:
-        delta_stops = p50 - target_mid
-        intent = "balance midtones" if not (blown or crushed) else "compromise both ends"
+        delta_stops = float(np.clip(damp * delta_mid, -max_step, max_step))
+        intent = "balance midtones"
+
+    # Heavy paper-white mass means we're still on the shoulder — zone deltas
+    # overshoot if we take a full 1.75-stop leap. Keep positive moves modest.
+    if delta_stops > 0 and frac_hi >= 0.4:
+        delta_stops = float(min(delta_stops, 1.25))
 
     # Tiny moves aren't worth a timer click.
     if abs(delta_stops) < 0.08 and not filt_note:
