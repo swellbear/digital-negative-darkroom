@@ -3825,6 +3825,12 @@ def read_spot(spot_pos, state):
     return spot_markdown(spot_at(refl, dens, nx, ny))
 
 
+def remember_spot(spot_pos, state):
+    """Persist pointer + refresh readout (hover path)."""
+    state = {**(state or {}), "spot_pos": str(spot_pos or "").strip()}
+    return read_spot(spot_pos, state), state
+
+
 def refresh_inspect_tools(clip_hi, clip_lo, state):
     """Histogram + clipping overlay for the Inspect module.
 
@@ -5676,6 +5682,9 @@ def _pack_preview(live, original, latent, neg, summary, state, *, mark_dirty=Fal
     slot_a, slot_b, slot_c = _strip_updates(
         state, live=live, original=original, latent=latent, neg=neg
     )
+    # Spot meter must re-sample after every live print bake — otherwise film /
+    # developer / timer swaps leave a sticky Zone/D/R from the previous image.
+    spot_md = read_spot((state or {}).get("spot_pos", "0.5000,0.5000"), state)
     return (
         shown,
         slot_a,
@@ -5684,6 +5693,7 @@ def _pack_preview(live, original, latent, neg, summary, state, *, mark_dirty=Fal
         status,
         hist,
         _inspect_frame(state, live=live),
+        spot_md,
         state,
     )
 
@@ -8448,7 +8458,17 @@ def guided_first_print(
         False, 5, 0.5, 0.0, 0.0, "none", 0.0,
         state,
     )
-    live_rgb, original_ref, latent_ref, neg_ref, status, history, inspect_out, state = packed
+    (
+        live_rgb,
+        original_ref,
+        latent_ref,
+        neg_ref,
+        status,
+        history,
+        inspect_out,
+        _spot_md,
+        state,
+    ) = packed
     state = _remember_print_seconds(state, print_exposure)
     if not state.get("db_exposing"):
         state = reset_local_work({**state})
@@ -9268,7 +9288,15 @@ def build_ui() -> gr.Blocks:
             state,
         ]
         preview_outputs = [
-            live_out, original_out, latent_out, neg_out, status, history, inspect_out, state
+            live_out,
+            original_out,
+            latent_out,
+            neg_out,
+            status,
+            history,
+            inspect_out,
+            spot_readout,
+            state,
         ]
 
         ingest_outputs = [
@@ -9843,7 +9871,11 @@ def build_ui() -> gr.Blocks:
                 fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
             )
 
-        spot_pos.change(fn=read_spot, inputs=[spot_pos, state], outputs=[spot_readout])
+        spot_pos.change(
+            fn=remember_spot,
+            inputs=[spot_pos, state],
+            outputs=[spot_readout, state],
+        )
 
         inspect_inputs = [clip_hi, clip_lo, state]
         inspect_outputs = [hist_plot, inspect_tip, live_out, state]
