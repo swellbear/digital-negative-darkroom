@@ -17,7 +17,7 @@ from .curves import FilmProfile, modify_curve
 from .development import linear_to_relative_log_exposure
 from .digital_negative import DigitalNegative
 from .papers import PaperProfile
-from .print_engine import _filter_speed, paper_response
+from .print_engine import REFERENCE_LOG_TRANSMITTANCE, _filter_speed, paper_response
 
 # Zone system anchors: Zone V is the mid grey the meter aims for, and each
 # zone is one stop. Print reflectance is what the eye judges, so zones are
@@ -162,14 +162,8 @@ def build_curve_report(
         # Negative density -> transmittance -> enlarger light -> paper.
         transmittance = np.power(10.0, -active_d)
         light = transmittance * (2.0**stops) * _filter_speed(eff_grade)
-        # Anchor the paper the same way print_negative does, off the scene's
-        # own midtone when we have one.
-        if scene.size:
-            mid_d = active.density_from_log_exposure(np.asarray([pct["p50"]]))[0]
-            centre = float(np.log10(max(10.0 ** (-float(mid_d)), 1e-6)))
-            centre += float(stops * np.log10(2.0) + np.log10(_filter_speed(eff_grade)))
-        else:
-            centre = float(np.percentile(np.log10(np.maximum(light, 1e-6)), 48))
+        # Same fixed enlarger anchor as print_negative — preserves stock density.
+        centre = float(REFERENCE_LOG_TRANSMITTANCE)
         print_d = paper_response(
             light, paper=paper, grade=eff_grade, log_center=centre
         ).astype(np.float64)

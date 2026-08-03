@@ -19,6 +19,13 @@ from .digital_negative import DigitalNegative
 from .dodge_burn import REFERENCE_BASE_SECONDS, base_seconds_to_stops, stops_to_base_seconds
 from .papers import PaperProfile
 
+# Fixed enlarger calibration: midtone paper response when negative transmittance
+# ≈ 0.10 at grade 2 / 8s (0 stops, speed 1.0). Chosen to match typical developed
+# mid-T from this engine's log-E placement (Tri-X-class ~0.09–0.12) so 8s stays
+# printable, while thinner stocks (Acros/FP4) print darker at the same timer —
+# real enlarger behavior. Per-negative percentile centering cancelled that.
+REFERENCE_LOG_TRANSMITTANCE = float(np.log10(0.10))
+
 # Approximate relative speeds vs grade 2 (Ilford MG filter family, simplified).
 # Multiplicative light factors before the paper curve — soft filters are "faster"
 # (more effective light), hard filters need more timer for the same midtone.
@@ -84,7 +91,8 @@ def paper_response(
 
     log_e = np.log10(np.maximum(exposure, 1e-6))
     if log_center is None:
-        log_center = float(np.percentile(log_e, 50))
+        # Match print_negative's fixed enlarger anchor (not per-frame percentile).
+        log_center = float(REFERENCE_LOG_TRANSMITTANCE)
     x = log_e - float(log_center)
 
     # Grade span: 00 long & soft; 5 short & steep — like swapping MG filters.
@@ -352,8 +360,9 @@ def print_negative(
     contrast_nudge = float(contrast if contrast is not None else print_meta.get("contrast", 0.0))
     effective_grade = float(np.clip(grade_value + 0.55 * contrast_nudge, 0.0, 5.0))
 
-    log_t = np.log10(np.maximum(transmittance, 1e-6))
-    log_center = float(np.percentile(log_t, 48))
+    # Anchor paper midtones to the fixed enlarger calibration, not this frame's
+    # percentile. Stock density / fog then survive into the print at a given timer.
+    log_center = float(REFERENCE_LOG_TRANSMITTANCE)
 
     split = bool(split_grade)
     if split:
