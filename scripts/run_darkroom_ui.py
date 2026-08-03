@@ -6964,55 +6964,81 @@ def live_preview(
 
     try:
         if _locked(state, "development"):
-            # Print-only commit preview
-            if state.get("development_full") is not None:
-                t = state["development_full"].transmittance
-                step = max(1, int(np.ceil(max(t.shape) / max_side)))
-                t = np.ascontiguousarray(t[::step, ::step])
-            else:
-                t = state.get("transmittance_proxy")
-                if t is None and state.get("development") is not None:
-                    t = state["development"].transmittance
-                if t is None:
-                    return _pack_preview(
-                        state.get("live_rgb"),
-                        state.get("original_ref"),
-                        state.get("latent_ref"),
-                        state.get("neg_ref"),
-                        state.get("summary_cache", ""),
-                        state,
-                        mark_dirty=mark_dirty,
-                        controls=controls if mark_dirty else None,
-                    )
-                if max(t.shape) > max_side:
-                    step = max(1, int(np.ceil(max(t.shape) / max_side)))
-                    t = np.ascontiguousarray(t[::step, ::step])
-
+            # Print-only commit preview.
+            # High quality: print the full developed T (same as Commit Print), then
+            # Lanczos-fit to the viewer — striding T *before* print exaggerated
+            # grain into chunky aliasing that vanished on commit.
+            # Drag: keep the fast stride proxy.
             paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
             tech = _technique_kwargs(
                 split_on, soft_grade, hard_grade, soft_seconds, hard_seconds,
                 test_strips_on, test_bands, test_stops, flash_stops, dry_down, tone, border_frac,
             )
             dev_full = state.get("development_full") or state.get("development")
-            t_use = t
-            if dev_full is not None and getattr(dev_full, "spectral_transmittance", None) is not None:
-                t_use = dev_full.spectral_transmittance
-                if max(t_use.shape[:2]) > max_side:
-                    step = max(1, int(np.ceil(max(t_use.shape[:2]) / max_side)))
+            if quality != "drag" and dev_full is not None:
+                t_use = _print_transmittance(dev_full)
+                if getattr(dev_full, "spectral_transmittance", None) is not None:
+                    _stash_color_filtration(state["dn"], cc_cyan, cc_magenta, cc_yellow)
+                # Cap pathological sizes so a 40MP frame can't freeze the UI.
+                cap = max(INSPECT_MAX_SIDE, max_side)
+                if max(t_use.shape[:2]) > cap:
+                    step = max(1, int(np.ceil(max(t_use.shape[:2]) / cap)))
                     t_use = np.ascontiguousarray(t_use[::step, ::step, ...])
-                _stash_color_filtration(state["dn"], cc_cyan, cc_magenta, cc_yellow)
-            result = print_negative(
-                t_use,
-                state["dn"],
-                paper,
-                base_exposure_seconds=float(print_exposure),
-                grade=float(print_grade),
-                contrast=float(print_contrast),
-                local_stops=local_stops_from_state(state),
-                commit=False,
-                **tech,
-            )
-            live_rgb = _to_rgb_u8(result.preview)
+                result = print_negative(
+                    t_use,
+                    state["dn"],
+                    paper,
+                    base_exposure_seconds=float(print_exposure),
+                    grade=float(print_grade),
+                    contrast=float(print_contrast),
+                    local_stops=local_stops_from_state(state),
+                    commit=False,
+                    **tech,
+                )
+                live_rgb = _downscale_rgb_hq(_to_rgb_u8(result.preview), max_side)
+            else:
+                if state.get("development_full") is not None:
+                    t = state["development_full"].transmittance
+                    step = max(1, int(np.ceil(max(t.shape) / max_side)))
+                    t = np.ascontiguousarray(t[::step, ::step])
+                else:
+                    t = state.get("transmittance_proxy")
+                    if t is None and state.get("development") is not None:
+                        t = state["development"].transmittance
+                    if t is None:
+                        return _pack_preview(
+                            state.get("live_rgb"),
+                            state.get("original_ref"),
+                            state.get("latent_ref"),
+                            state.get("neg_ref"),
+                            state.get("summary_cache", ""),
+                            state,
+                            mark_dirty=mark_dirty,
+                            controls=controls if mark_dirty else None,
+                        )
+                    if max(t.shape) > max_side:
+                        step = max(1, int(np.ceil(max(t.shape) / max_side)))
+                        t = np.ascontiguousarray(t[::step, ::step])
+
+                t_use = t
+                if dev_full is not None and getattr(dev_full, "spectral_transmittance", None) is not None:
+                    t_use = dev_full.spectral_transmittance
+                    if max(t_use.shape[:2]) > max_side:
+                        step = max(1, int(np.ceil(max(t_use.shape[:2]) / max_side)))
+                        t_use = np.ascontiguousarray(t_use[::step, ::step, ...])
+                    _stash_color_filtration(state["dn"], cc_cyan, cc_magenta, cc_yellow)
+                result = print_negative(
+                    t_use,
+                    state["dn"],
+                    paper,
+                    base_exposure_seconds=float(print_exposure),
+                    grade=float(print_grade),
+                    contrast=float(print_contrast),
+                    local_stops=local_stops_from_state(state),
+                    commit=False,
+                    **tech,
+                )
+                live_rgb = _to_rgb_u8(result.preview)
             speed = state["dn"].metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
             quality_note = "drag" if quality == "drag" else "hq"
             strokes = state.get("db_strokes") or []
