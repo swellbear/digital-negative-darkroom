@@ -7,6 +7,7 @@ import base64
 import copy
 import html as html_lib
 import io
+import itertools
 import json
 import sys
 import tempfile
@@ -25,6 +26,8 @@ from digital_negative.auto_crop import (
     estimate_straighten_degrees,
     format_crop_rect,
     parse_aspect_ratio,
+    fit_box_to_aspect_inside,
+    remap_crop_box_to_parent,
     suggest_crop_box,
 )
 from digital_negative.analysis import (
@@ -37,7 +40,7 @@ from digital_negative.analysis import (
     suggest_tone_fit,
 )
 from digital_negative.curve_edit import apply_curve_handle_edit, curve_overlay_payload
-from digital_negative.spectral import is_instant_film_type
+from digital_negative.spectral import chemistry_mode_for_film_type, is_instant_film_type
 from digital_negative.recipes import build_recipe, load_recipe, save_recipe
 from digital_negative.chemistry import (
     chemistry_choices,
@@ -78,10 +81,11 @@ from digital_negative.dodge_burn import (
     stamp_to_png_data_url,
     tool_workshop_canvas,
 )
+from digital_negative.enhance import enhance_available, maybe_ai_upscale_rgb
 from digital_negative.ingest import ingest_path
 from digital_negative.papers import load_paper_profile
 from digital_negative.pipeline import list_film_profiles, list_paper_profiles
-from digital_negative.print_engine import TONE_LABELS, print_negative
+from digital_negative.print_engine import PrintResult, TONE_LABELS, print_negative
 
 # Match commit look as closely as practical while staying interactive.
 LIVE_MAX_SIDE = 2000
@@ -89,6 +93,54 @@ DRAG_MAX_SIDE = 1280  # high enough for critical judgment while dragging
 INSPECT_MAX_SIDE = 3600  # high-res for zoom / inspect panel
 REF_MAX_SIDE = 420
 CROP_STAGE_MAX_SIDE = 1400
+
+# Film/developer swaps update minutes + EI + developer together. Each of those
+# widgets also has its own live_preview_edit handler, so one stock change used
+# to enqueue several concurrent bakes. Gradio can apply their outputs out of
+# order (Acros status + Delta washout pixels).
+# Fix: bake once inside the film/developer handler with *resolved* chem, then
+# suppress a few cascaded slider/developer preview events. Epoch drops any bake
+# that finished after a newer one started.
+_PREVIEW_EPOCH = itertools.count(1)
+_PREVIEW_LATEST = {"token": 0}
+_CHEM_UI_BATCH = {"active": False, "suppress_cascades": 0}
+_PREVIEW_OUTPUT_COUNT = 9  # live, orig, latent, neg, status, hist, inspect, spot, state
+
+
+def _begin_chem_ui_batch(*, suppress_cascades: int = 0) -> None:
+    _CHEM_UI_BATCH["active"] = True
+    if suppress_cascades > 0:
+        _CHEM_UI_BATCH["suppress_cascades"] = max(
+            int(_CHEM_UI_BATCH.get("suppress_cascades") or 0), int(suppress_cascades)
+        )
+
+
+def _end_chem_ui_batch() -> None:
+    _CHEM_UI_BATCH["active"] = False
+
+
+def _consume_chem_cascade_skip() -> bool:
+    """True if this preview event should be dropped as a film/dev cascade."""
+    if _CHEM_UI_BATCH.get("active"):
+        return True
+    n = int(_CHEM_UI_BATCH.get("suppress_cascades") or 0)
+    if n <= 0:
+        return False
+    _CHEM_UI_BATCH["suppress_cascades"] = n - 1
+    return True
+
+
+def _preview_output_skips():
+    return tuple(gr.skip() for _ in range(_PREVIEW_OUTPUT_COUNT))
+
+
+def _normal_dev_minutes(film_id: str, developer_id: str) -> float:
+    profile = _film_profile(film_id)
+    chem = get_chemistry(profile, developer_id)
+    if chem is None:
+        return 8.0
+    _tmin, _tmax, normal = time_slider_bounds(chem)
+    return float(np.clip(float(normal), _DEV_TIME_SLIDER_MIN, _DEV_TIME_SLIDER_MAX))
 
 CROP_RATIO_CHOICES = [
     ("Free", "free"),
@@ -3279,7 +3331,7 @@ UI_JS = """
         <div class="curve-float-panel" id="curve_panel_film"></div>
         <div class="curve-float-panel" id="curve_panel_print"></div>
       </div>
-      <div class="curve-float-foot">Drag handles — updates Dev time, N±, base exposure, and MG grade so the curve stays possible.</div>
+      <div class="curve-float-foot">Drag handles — updates real process controls for the active chemistry.</div>
     `;
     col.appendChild(el);
     el.querySelector('[data-act="close"]').addEventListener('click', () => showCurveFloat(false));
@@ -3323,8 +3375,13 @@ UI_JS = """
       renderCurveSvg(printHost, payload.print, { showBase: false });
     } else {
       printHost.style.display = 'none';
-      printHost.innerHTML = '<h4>Print curve — set paper / wait for Live print</h4>';
+      const mode = (payload.chemistry_mode || '').toLowerCase();
+      printHost.innerHTML = mode === 'instant'
+        ? '<h4>No enlarger paper — Instant is the finished card</h4>'
+        : '<h4>Print curve — set paper / wait for Live print</h4>';
     }
+    const foot = el.querySelector('.curve-float-foot');
+    if (foot && payload.foot) foot.textContent = payload.foot;
     // Bind handle drags (re-bound each paint). Commit only on release —
     // mid-drag server round-trips were freezing the preview every ~100ms.
     el.querySelectorAll('[data-handle]').forEach((g) => {
@@ -3785,6 +3842,35 @@ def _print_maps(state):
     return getattr(draft, "reflectance", None), getattr(draft, "print_density", None)
 
 
+def _instant_print_draft(development) -> PrintResult | None:
+    """Build a PrintResult from an Instant DevelopmentResult for spot / hist."""
+    if development is None:
+        return None
+    if getattr(development, "color_process", None) != "instant_integral":
+        return None
+    refl = getattr(development, "card_reflectance", None)
+    dens = getattr(development, "card_density", None)
+    if refl is None:
+        return None
+    refl_a = np.asarray(refl, dtype=np.float32)
+    if dens is None:
+        dens_a = (-np.log10(np.maximum(refl_a, 1e-6))).astype(np.float32)
+        if dens_a.ndim == 3:
+            dens_a = (
+                0.2126 * dens_a[..., 0]
+                + 0.7152 * dens_a[..., 1]
+                + 0.0722 * dens_a[..., 2]
+            ).astype(np.float32)
+    else:
+        dens_a = np.asarray(dens, dtype=np.float32)
+    preview = np.asarray(development.positive_preview, dtype=np.float32)
+    return PrintResult(
+        preview=preview,
+        reflectance=refl_a,
+        print_density=dens_a,
+    )
+
+
 def _display_live_rgb(state, live=None):
     """Live RGB with optional A/B swap and clipping overlay."""
     s = state or {}
@@ -3824,6 +3910,12 @@ def read_spot(spot_pos, state):
     return spot_markdown(spot_at(refl, dens, nx, ny))
 
 
+def remember_spot(spot_pos, state):
+    """Persist pointer + refresh readout (hover path)."""
+    state = {**(state or {}), "spot_pos": str(spot_pos or "").strip()}
+    return read_spot(spot_pos, state), state
+
+
 def refresh_inspect_tools(clip_hi, clip_lo, state):
     """Histogram + clipping overlay for the Inspect module.
 
@@ -3837,16 +3929,36 @@ def refresh_inspect_tools(clip_hi, clip_lo, state):
     hist = render_print_histogram(refl)
     if hist is None:
         hist = gr.update()
+    mode = _curve_chemistry_mode(state)
+    if mode == "instant":
+        fit_tip = (
+            "**Fit to paper** is for enlarger prints — Instant is a finished card "
+            "(use process time / N±)."
+        )
+    elif mode == "color":
+        fit_tip = (
+            "**Fit to paper** auto-sets the timer (and softens RA-4 contrast if needed)."
+        )
+    else:
+        fit_tip = (
+            "**Fit to paper** auto-sets the timer (and softens MG grade if needed)."
+        )
     tip = (
         "_Histogram of print reflectance with Zone ticks. "
         "Clipping paints blown paper-white (red) and crushed Dmax (blue). "
-        "**Fit to paper** auto-sets the timer (and softens grade if needed)._"
+        f"{fit_tip}_"
     )
     return hist, tip, _inspect_frame(state), state
 
 
-def auto_fit_print_tones(print_exposure, print_grade, state):
+def auto_fit_print_tones(chemistry_mode, print_exposure, print_grade, print_contrast, state):
     """One-click: pull blown / crushed tones back onto the paper."""
+    mode = str(chemistry_mode or _curve_chemistry_mode(state)).lower()
+    if mode == "instant":
+        raise gr.Error(
+            "Instant is a finished card — no enlarger paper to fit. "
+            "Adjust process time, N±, or temperature instead."
+        )
     if not state or state.get("print_draft") is None:
         if state and state.get("live_rgb") is not None:
             raise gr.Error("Print meter map not ready — nudge Base exposure once, then Fit again.")
@@ -3856,6 +3968,8 @@ def auto_fit_print_tones(print_exposure, print_grade, state):
         refl,
         base_seconds=float(print_exposure),
         grade=float(print_grade),
+        print_contrast=float(print_contrast or 0.0),
+        chemistry_mode=mode,
     )
     if not fit.get("ok"):
         raise gr.Error(fit.get("message") or "Could not fit tones.")
@@ -3873,11 +3987,23 @@ def auto_fit_print_tones(print_exposure, print_grade, state):
         "summary_cache": summary,
     }
     tip = fit["message"]
+    # Color: timer + RA-4 contrast. B&W: timer + MG grade. Never write the dead knob.
+    if mode == "color":
+        return (
+            gr.update(value=float(fit["base_seconds"])),
+            gr.skip(),  # print_grade unused on RA-4
+            gr.update(value=float(fit.get("print_contrast", print_contrast or 0.0))),
+            gr.update(value=True),  # clip_hi
+            gr.update(value=True),  # clip_lo
+            tip,
+            state,
+        )
     return (
         gr.update(value=float(fit["base_seconds"])),
         gr.update(value=float(fit["grade"])),
-        gr.update(value=True),  # clip_hi
-        gr.update(value=True),  # clip_lo
+        gr.skip(),  # print_contrast / Filter — leave B&W filter alone
+        gr.update(value=True),
+        gr.update(value=True),
         tip,
         state,
     )
@@ -4041,14 +4167,32 @@ def apply_recipe_file(recipe_file, state):
     )
 
 
+def _curve_chemistry_mode(state, film_id=None) -> str:
+    """Resolve B&W / Color / Instant for curve editor honesty."""
+    mode = str(
+        ((state or {}).get("controls") or {}).get("chemistry_mode")
+        or (state or {}).get("chemistry_mode")
+        or ""
+    ).lower()
+    if mode in {"bw", "color", "instant"}:
+        return mode
+    if film_id:
+        try:
+            return chemistry_mode_for_film_type(_film_profile(film_id).type)
+        except Exception:
+            pass
+    return "bw"
+
+
 def _curve_report_for_ui(
     film_id, developer_id, development_minutes, contrast, paper_id, print_grade,
-    print_exposure, state,
+    print_exposure, state, *, print_contrast=0.0, chemistry_mode=None,
 ):
     """Build the in-play film/paper CurveReport for the floating editor."""
     if not state or state.get("dn") is None:
         return None, None, None
     profile = _film_profile(film_id)
+    mode = str(chemistry_mode or _curve_chemistry_mode(state, film_id)).lower()
     chem = get_chemistry(profile, developer_id)
     minutes = float(development_minutes) if chem is not None else None
     rel, minutes_resolved, _style = resolve_relative_time(
@@ -4057,12 +4201,15 @@ def _curve_report_for_ui(
         development_minutes=minutes,
         relative_time=None if minutes is not None else 1.0,
     )
-    # Always include paper when we can — Live already shows a theoretical print.
+    # Instant has no enlarger paper. Color/B&W include paper when available.
     paper = None
-    try:
-        paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
-    except Exception:
-        paper = None
+    if mode != "instant":
+        try:
+            paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
+        except Exception:
+            paper = None
+    ctrl = (state or {}).get("controls") or {}
+    temp_c = float(ctrl.get("process_temp_c", 21.0))
     report = build_curve_report(
         state["dn"],
         profile,
@@ -4073,13 +4220,16 @@ def _curve_report_for_ui(
         paper=paper,
         grade=float(print_grade),
         base_exposure_seconds=float(print_exposure),
+        print_contrast=float(print_contrast),
+        process_temp_c=temp_c,
     )
     return report, minutes_resolved, profile
 
 
 def refresh_curves(
+    chemistry_mode,
     film_id, developer_id, development_minutes, contrast, paper_id, print_grade,
-    print_exposure, state,
+    print_exposure, print_contrast, state,
 ):
     """Sample curves for the floating editor (summary + interactive JSON)."""
     if not state or state.get("dn") is None:
@@ -4088,9 +4238,12 @@ def refresh_curves(
             "_Commit Ingest first — the scene is what makes these curves useful._",
             empty,
         )
+    mode = str(chemistry_mode or _curve_chemistry_mode(state, film_id)).lower()
     report, minutes_resolved, _profile = _curve_report_for_ui(
         film_id, developer_id, development_minutes, contrast, paper_id,
         print_grade, print_exposure, state,
+        print_contrast=print_contrast,
+        chemistry_mode=mode,
     )
     mins = float(minutes_resolved if minutes_resolved is not None else development_minutes)
     payload = curve_overlay_payload(
@@ -4099,12 +4252,15 @@ def refresh_curves(
         contrast=float(contrast),
         print_grade=float(print_grade),
         print_exposure=float(print_exposure),
+        print_contrast=float(print_contrast or 0.0),
+        chemistry_mode=mode,
     )
     return curve_summary_markdown(report), json.dumps(payload)
 
 
 def apply_curve_edit_cmd(
     cmd_raw,
+    chemistry_mode,
     film_id,
     developer_id,
     development_minutes,
@@ -4112,42 +4268,24 @@ def apply_curve_edit_cmd(
     paper_id,
     print_grade,
     print_exposure,
+    print_contrast,
     state,
 ):
-    """JS handle drag → update Dev / N± / Grade / Exp, then refresh the float."""
+    """JS handle drag → update Dev / N± / Grade|Ctr / Exp, then refresh the float."""
     raw = str(cmd_raw or "").strip()
+    skip7 = (gr.skip(),) * 7
     if not raw:
-        return (
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-        )
+        return skip7
     try:
         cmd = json.loads(raw)
     except json.JSONDecodeError:
-        return (
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-        )
+        return skip7
     handle = str(cmd.get("id") or cmd.get("handle") or "")
     dy = float(cmd.get("dy") or 0.0)
     if abs(dy) < 1e-4 or not handle:
-        return (
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-        )
+        return skip7
 
+    mode = str(chemistry_mode or _curve_chemistry_mode(state, film_id)).lower()
     edit = apply_curve_handle_edit(
         handle,
         dy=dy,
@@ -4155,28 +4293,26 @@ def apply_curve_edit_cmd(
         contrast=float(contrast),
         print_grade=float(print_grade),
         print_exposure=float(print_exposure),
+        print_contrast=float(print_contrast or 0.0),
+        chemistry_mode=mode,
         minutes_min=_DEV_TIME_SLIDER_MIN,
         minutes_max=_DEV_TIME_SLIDER_MAX,
     )
     if not edit.get("ok"):
-        return (
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-        )
+        return skip7
 
     minutes = float(edit["development_minutes"])
     n_mod = float(edit["contrast"])
     grade = float(edit["print_grade"])
     exposure = float(edit["print_exposure"])
+    p_contrast = float(edit.get("print_contrast", print_contrast or 0.0))
     summary = gr.skip()
     overlay = gr.skip()
     if state and state.get("dn") is not None:
         report, minutes_resolved, _p = _curve_report_for_ui(
             film_id, developer_id, minutes, n_mod, paper_id, grade, exposure, state,
+            print_contrast=p_contrast,
+            chemistry_mode=mode,
         )
         if report is not None:
             mins = float(minutes_resolved if minutes_resolved is not None else minutes)
@@ -4186,6 +4322,8 @@ def apply_curve_edit_cmd(
                 contrast=n_mod,
                 print_grade=grade,
                 print_exposure=exposure,
+                print_contrast=p_contrast,
+                chemistry_mode=mode,
             )
             tip = edit.get("message") or ""
             summary = curve_summary_markdown(report) + (f"\n\n_{tip}_" if tip else "")
@@ -4196,6 +4334,7 @@ def apply_curve_edit_cmd(
         gr.update(value=n_mod),
         gr.update(value=grade),
         gr.update(value=exposure),
+        gr.update(value=p_contrast),
         summary,
         overlay,
     )
@@ -4297,12 +4436,7 @@ def _coerce_paper_id(paper_id: str | None, mode: str) -> str | None:
 
 
 def on_film_change(film_id: str, chemistry_mode: str = "bw"):
-    """Refresh developer / time / EI for the selected film.
-
-    When Chemistry flips B&W ↔ Color, Gradio often re-fires this with the
-    *previous* catalog's film id against the new choices. Ignore that stale
-    event — ``on_chemistry_mode_change`` already wrote the correct film + chem.
-    """
+    """Refresh developer / time / EI for the selected film (controls only)."""
     mode = str(chemistry_mode or "bw").lower()
     if film_id not in _film_choice_ids(mode):
         return gr.skip(), gr.skip(), gr.skip()
@@ -4321,6 +4455,204 @@ def on_developer_change(film_id: str, developer_id: str, chemistry_mode: str = "
     if film_id not in _film_choice_ids(mode):
         return gr.skip()
     return _chem_time_update(film_id, developer_id, reset_to_normal=True)
+
+
+def on_film_change_and_preview(
+    chemistry_mode,
+    film_id,
+    developer_id,
+    development_minutes,
+    contrast,
+    grain,
+    exposure_index,
+    contrast_filter,
+    scene_exposure,
+    halation,
+    paper_id,
+    print_exposure,
+    print_grade,
+    print_contrast,
+    split_on,
+    soft_grade,
+    hard_grade,
+    soft_seconds,
+    hard_seconds,
+    test_strips_on,
+    test_bands,
+    test_stops,
+    flash_stops,
+    dry_down,
+    tone,
+    border_frac,
+    cc_cyan,
+    cc_magenta,
+    cc_yellow,
+    process_temp_c,
+    instant_chroma,
+    instant_warmth,
+    instant_border,
+    state,
+):
+    """Atomic stock swap: resolve default chem/time/EI and bake once.
+
+    Avoids the Gradio race where film.then + developer.then + minutes/EI
+    .change each bake and interleave Acros labels onto Tri-X/Delta pixels.
+    Same-default developer pairs (Acros/Tri-X both ``d76``) are the sharp edge —
+    developer.change may not fire at all, so the bake must live here.
+    """
+    mode = str(chemistry_mode or "bw").lower()
+    if film_id not in _film_choice_ids(mode):
+        # Stale catalog id during chemistry-mode flip — leave UI alone.
+        return (gr.skip(), gr.skip(), gr.skip(), *_preview_output_skips())
+    profile = _film_profile(film_id)
+    chem_id = default_chemistry_id(profile)
+    minutes = _normal_dev_minutes(film_id, chem_id)
+    ei = float(profile.iso)
+    # Suppress cascaded developer/minutes/EI preview events after our outputs land.
+    _begin_chem_ui_batch(suppress_cascades=4)
+    try:
+        packed = live_preview(
+            chemistry_mode,
+            film_id,
+            chem_id,
+            minutes,
+            contrast,
+            grain,
+            ei,
+            contrast_filter,
+            scene_exposure,
+            halation,
+            paper_id,
+            print_exposure,
+            print_grade,
+            print_contrast,
+            split_on,
+            soft_grade,
+            hard_grade,
+            soft_seconds,
+            hard_seconds,
+            test_strips_on,
+            test_bands,
+            test_stops,
+            flash_stops,
+            dry_down,
+            tone,
+            border_frac,
+            cc_cyan,
+            cc_magenta,
+            cc_yellow,
+            process_temp_c,
+            instant_chroma,
+            instant_warmth,
+            instant_border,
+            state,
+            quality="high",
+            mark_dirty=True,
+        )
+    finally:
+        _end_chem_ui_batch()
+    return (
+        gr.update(choices=chemistry_choices(profile), value=chem_id),
+        _chem_time_update(film_id, chem_id, reset_to_normal=True),
+        gr.update(value=ei),
+        *packed,
+    )
+
+
+def on_developer_change_and_preview(
+    chemistry_mode,
+    film_id,
+    developer_id,
+    development_minutes,
+    contrast,
+    grain,
+    exposure_index,
+    contrast_filter,
+    scene_exposure,
+    halation,
+    paper_id,
+    print_exposure,
+    print_grade,
+    print_contrast,
+    split_on,
+    soft_grade,
+    hard_grade,
+    soft_seconds,
+    hard_seconds,
+    test_strips_on,
+    test_bands,
+    test_stops,
+    flash_stops,
+    dry_down,
+    tone,
+    border_frac,
+    cc_cyan,
+    cc_magenta,
+    cc_yellow,
+    process_temp_c,
+    instant_chroma,
+    instant_warmth,
+    instant_border,
+    state,
+):
+    """User (or film-cascade) developer change: update N time + bake if needed."""
+    mode = str(chemistry_mode or "bw").lower()
+    if film_id not in _film_choice_ids(mode):
+        return (gr.skip(), *_preview_output_skips())
+    # Film swap already baked with the resolved developer — only retarget the
+    # minutes slider, do not enqueue a second overlapping preview.
+    if _consume_chem_cascade_skip():
+        return (
+            _chem_time_update(film_id, developer_id, reset_to_normal=True),
+            *_preview_output_skips(),
+        )
+    minutes = _normal_dev_minutes(film_id, str(developer_id))
+    _begin_chem_ui_batch(suppress_cascades=2)
+    try:
+        packed = live_preview(
+            chemistry_mode,
+            film_id,
+            developer_id,
+            minutes,
+            contrast,
+            grain,
+            exposure_index,
+            contrast_filter,
+            scene_exposure,
+            halation,
+            paper_id,
+            print_exposure,
+            print_grade,
+            print_contrast,
+            split_on,
+            soft_grade,
+            hard_grade,
+            soft_seconds,
+            hard_seconds,
+            test_strips_on,
+            test_bands,
+            test_stops,
+            flash_stops,
+            dry_down,
+            tone,
+            border_frac,
+            cc_cyan,
+            cc_magenta,
+            cc_yellow,
+            process_temp_c,
+            instant_chroma,
+            instant_warmth,
+            instant_border,
+            state,
+            quality="high",
+            mark_dirty=True,
+        )
+    finally:
+        _end_chem_ui_batch()
+    return (
+        _chem_time_update(film_id, developer_id, reset_to_normal=True),
+        *packed,
+    )
 
 
 def on_chemistry_mode_change(mode: str, split_on=False, state=None):
@@ -4357,11 +4689,27 @@ def on_chemistry_mode_change(mode: str, split_on=False, state=None):
             show = False
         elif key in {"soft_grade", "hard_grade", "soft_seconds", "hard_seconds"}:
             show = _split_grade_child_visible(split_on, mode)
+        elif key == "print_contrast":
+            # Shared slider: MG Filter (B&W) / RA-4 paper contrast (Color).
+            show = mode in {"bw", "color"}
         else:
             show = _print_key_visible(mode, key)
         # Re-enable after leaving a locked Instant/Color commit — visibility
         # alone left Print sliders stuck non-interactive.
-        vis.append(gr.update(visible=bool(show), interactive=bool(show)))
+        if key == "print_contrast" and mode == "color" and show:
+            vis.append(
+                gr.update(
+                    visible=True,
+                    interactive=True,
+                    label="Paper contrast",
+                )
+            )
+        elif key == "print_contrast" and mode == "bw" and show:
+            vis.append(
+                gr.update(visible=True, interactive=True, label="Filter")
+            )
+        else:
+            vis.append(gr.update(visible=bool(show), interactive=bool(show)))
     chem = get_chemistry(profile, chem_id) or {}
     _tmin, _tmax, normal = (
         time_slider_bounds(chem)
@@ -4680,7 +5028,6 @@ _INSTANT_CONTROL_KEYS = (
 _BW_ONLY_PRINT_KEYS = frozenset(
     {
         "print_grade",
-        "print_contrast",
         "split_grade",
         "soft_grade",
         "hard_grade",
@@ -4689,6 +5036,7 @@ _BW_ONLY_PRINT_KEYS = frozenset(
         "tone",
     }
 )
+# print_contrast: B&W = MG filter nudge; Color = RA-4 paper contrast (both live).
 _COLOR_ONLY_PRINT_KEYS = frozenset({"cc_cyan", "cc_magenta", "cc_yellow"})
 
 
@@ -5163,6 +5511,11 @@ def _to_rgb_u8(gray_float: np.ndarray, *, assume_linear: bool = False) -> np.nda
 
 
 def _downscale_rgb(rgb: np.ndarray, max_side: int) -> np.ndarray:
+    """Stride fit for the viewer — preserves film grain energy.
+
+    Lanczos/"HQ" downscale was wiping Tri-X grain and reading as a cleaner
+    stock than the profile. Film-true preview > smooth HD proxy.
+    """
     h, w = rgb.shape[:2]
     m = max(h, w)
     if m <= max_side:
@@ -5210,19 +5563,91 @@ def _straighten_preview_rgb(src, straighten_deg: float = 0.0) -> np.ndarray | No
     return img
 
 
+def _inner_size_after_easel_border(outer: int, border_frac: float) -> int:
+    """Invert :func:`print_engine.apply_border` padding for one axis."""
+    f = float(np.clip(border_frac, 0.0, 0.25))
+    if f <= 1e-6 or outer <= 2:
+        return int(outer)
+    for inner in range(int(outer), max(1, int(outer) // 2) - 1, -1):
+        pad = max(1, int(round(inner * f)))
+        if inner + 2 * pad == int(outer):
+            return int(inner)
+    return max(1, int(round(float(outer) / (1.0 + 2.0 * f))))
+
+
+def _strip_easel_border_rgb(rgb: np.ndarray, border_frac: float) -> np.ndarray:
+    """Remove white easel padding so Frame coords match the picture / DN."""
+    f = float(np.clip(border_frac or 0.0, 0.0, 0.25))
+    img = np.asarray(rgb)
+    if f <= 1e-6:
+        return img
+    h, w = img.shape[:2]
+    ih = _inner_size_after_easel_border(h, f)
+    iw = _inner_size_after_easel_border(w, f)
+    bh = max(0, (h - ih) // 2)
+    bw = max(0, (w - iw) // 2)
+    if bh <= 0 and bw <= 0:
+        return img
+    return np.ascontiguousarray(img[bh : bh + ih, bw : bw + iw, ...])
+
+
+def _framing_picture_rgb(state):
+    """Picture-only RGB for Frame — excludes Instant card / print easel borders.
+
+    Apply framing bakes into ``geometry_base`` / the DN (no decorative border).
+    Crop overlays and straighten must use the same picture well, otherwise
+    Instant white frames and easel borders become part of the crop math.
+    """
+    if not state:
+        return None
+    dev = state.get("development_full") or state.get("development")
+    if (
+        dev is not None
+        and getattr(dev, "color_process", None) == "instant_integral"
+        and getattr(dev, "well_preview", None) is not None
+    ):
+        well = _to_rgb_u8(np.asarray(dev.well_preview, dtype=np.float32))
+        return _downscale_rgb(well, LIVE_MAX_SIDE)
+
+    live = _display_live_rgb(state)
+    if live is None:
+        return None
+    ctrl = state.get("controls") or {}
+    bf = float(ctrl.get("border_frac", 0.0) or 0.0)
+    # Instant with border but missing well_preview — never feed the card into Frame.
+    if getattr(dev, "color_process", None) == "instant_integral" and bf <= 1e-6:
+        meta = {}
+        if state.get("dn") is not None:
+            meta = (state["dn"].metadata.get("instant") or {})
+        if bool(ctrl.get("instant_border", meta.get("card_border", True))):
+            # Last resort: original / geometry are picture-shaped.
+            orig = state.get("original_base")
+            if orig is not None:
+                return _downscale_rgb(np.asarray(orig), LIVE_MAX_SIDE)
+            base = state.get("geometry_base")
+            if base is not None:
+                return _downscale_rgb(
+                    _to_rgb_u8(np.asarray(base), assume_linear=True), LIVE_MAX_SIDE
+                )
+    if bf > 1e-6:
+        return _strip_easel_border_rgb(np.asarray(live), bf)
+    return np.asarray(live)
+
+
 def _framing_stage_preview(state, straighten_deg: float = 0.0):
-    """RGB preview for Frame tools — straighten the live print in place.
+    """RGB preview for Frame tools — straighten the picture well in place.
 
     Frame / Crop / Auto straighten sit on the theoretical print (not a separate
-    crop stage). Prefer ``live_rgb`` so Auto does not appear to "revert" to the
-    original photo; fall back to original / geometry bases only when needed.
+    crop stage), but decorative Instant card / easel borders are excluded so
+    crop fractions match Apply → DN. Prefer the film look over the original
+    photo; fall back to original / geometry bases only when needed.
     """
     if not state:
         return None
     deg = float(straighten_deg or 0.0)
-    live = _display_live_rgb(state)
-    if live is not None:
-        out = _straighten_preview_rgb(live, deg)
+    picture = _framing_picture_rgb(state)
+    if picture is not None:
+        out = _straighten_preview_rgb(picture, deg)
         return None if out is None else np.ascontiguousarray(out)
     orig = state.get("original_base")
     if orig is not None:
@@ -5230,7 +5655,7 @@ def _framing_stage_preview(state, straighten_deg: float = 0.0):
         return None if out is None else _downscale_rgb(out, CROP_STAGE_MAX_SIDE)
     base = state.get("geometry_base")
     if base is None and state.get("dn") is not None:
-        base = state["dn"].image
+        base = getattr(state["dn"], "image", None)
     if base is None:
         return None
     img = np.asarray(base)
@@ -5670,6 +6095,9 @@ def _pack_preview(live, original, latent, neg, summary, state, *, mark_dirty=Fal
     slot_a, slot_b, slot_c = _strip_updates(
         state, live=live, original=original, latent=latent, neg=neg
     )
+    # Spot meter must re-sample after every live print bake — otherwise film /
+    # developer / timer swaps leave a sticky Zone/D/R from the previous image.
+    spot_md = read_spot((state or {}).get("spot_pos", "0.5000,0.5000"), state)
     return (
         shown,
         slot_a,
@@ -5678,6 +6106,7 @@ def _pack_preview(live, original, latent, neg, summary, state, *, mark_dirty=Fal
         status,
         hist,
         _inspect_frame(state, live=live),
+        spot_md,
         state,
     )
 
@@ -5732,6 +6161,9 @@ def on_preview_tool_change(tool: str, state=None):
     Inspect loads the high-res ``*_inspect`` buffer onto the large preview so
     scroll-zoom is not limited to the LIVE_MAX_SIDE proxy. Leaving Inspect
     restores the normal stage viewer. Crop accordion tracks Frame only.
+
+    Frame shows the picture well only (no Instant card / easel border) so the
+    crop overlay shares coordinates with Apply → DN.
     """
     tool = str(tool or "print")
     if tool == "inspect":
@@ -5739,9 +6171,14 @@ def on_preview_tool_change(tool: str, state=None):
     if state is not None and state.get("dn") is not None:
         mode = (state or {}).get("viewer_mode", "live")
         if mode == "live" or mode not in _VIEWER_LABELS:
+            if tool == "frame":
+                picture = _framing_stage_preview(state, 0.0)
+                value = picture if picture is not None else _display_live_rgb(state)
+            else:
+                value = _display_live_rgb(state)
             return (
                 gr.update(
-                    value=_display_live_rgb(state),
+                    value=value,
                     label=_live_print_label(state, tool=tool),
                 ),
                 gr.update(open=(tool == "frame")),
@@ -6124,24 +6561,35 @@ def reset_crop_straighten(state):
 
 
 def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
-    """Set the interactive crop box from classical composition heuristics."""
+    """Set the interactive crop box from classical composition heuristics.
+
+    Analyzes the same picture Frame shows (film look / Instant well / easel
+    stripped) — not the raw original — so the orange box matches what Apply
+    bakes into the DN. When straighten is active, scores inside the safe
+    content window then remaps, preserving aspect (no axis-aligned crush).
+    """
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
     state = _ensure_geometry_bases(state)
     deg = float(straighten_deg or 0.0)
-    # Analyze the same picture the crop stage shows (prefer original photo).
-    src = state.get("original_base")
+    # Same picture the Frame stage / overlay use (not original_base).
+    src = _framing_picture_rgb(state)
     if src is None:
         src = state.get("geometry_base")
     if src is None:
+        src = state.get("original_base")
+    if src is None:
         raise gr.Error("No framing base to analyze.")
     img = np.asarray(src)
+    src_u8 = img.dtype == np.uint8 or (
+        img.ndim == 3 and img.shape[-1] >= 3 and float(np.max(img)) > 1.5
+    )
     # Composition heuristics don't need full-res — keep the UI responsive.
     h0, w0 = img.shape[:2]
     max_side = 960
     m = max(h0, w0)
     if m > max_side:
-        if img.dtype == np.uint8 or (img.ndim == 3 and img.shape[2] >= 3):
+        if src_u8 or (img.ndim == 3 and img.shape[2] >= 3):
             img = _downscale_rgb(img, max_side)
         else:
             scale = max_side / float(m)
@@ -6151,37 +6599,64 @@ def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
             img = img[yy][:, xx]
     if abs(deg) >= 1e-6:
         img = straighten_image(
-            img.astype(np.float32) if img.dtype == np.uint8 else img,
+            img.astype(np.float32) if src_u8 else img,
             deg,
             fill=0.0,
         )
-        if np.asarray(src).dtype == np.uint8:
+        if src_u8:
             img = np.clip(img, 0, 255).astype(np.uint8)
     h, w = img.shape[:2]
     image_aspect = w / max(h, 1)
     aspect = parse_aspect_ratio(crop_ratio, image_aspect)
     rule = str(auto_rule or "auto")
-    result = suggest_crop_box(img, rule=rule, aspect_ratio=aspect)
-    # Keep composition inside the straighten-safe rect so black wedges stay out.
+    # Straighten fill wedges are not composition — score inside the safe
+    # window, then remap so locked ratios stay intact.
+    ratio_key = str(crop_ratio or "free").lower()
+    locked_aspect = (
+        None if ratio_key in {"free", "original", ""} else aspect
+    )
     if abs(deg) >= 0.05:
-        ratio = str(crop_ratio or "free").lower()
-        forced = None if ratio in {"free", "original", ""} else aspect
-        safe = straighten_safe_crop_box(w, h, deg, aspect_ratio=forced)
-        x0 = max(float(result["x"]), float(safe["x"]))
-        y0 = max(float(result["y"]), float(safe["y"]))
-        x1 = min(float(result["x"] + result["w"]), float(safe["x"] + safe["w"]))
-        y1 = min(float(result["y"] + result["h"]), float(safe["y"] + safe["h"]))
-        if x1 - x0 >= 0.08 and y1 - y0 >= 0.08:
-            result = {**result, "x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0}
+        safe = straighten_safe_crop_box(w, h, deg, aspect_ratio=None)
+        sx = float(safe["x"])
+        sy = float(safe["y"])
+        sw = float(safe["w"])
+        sh = float(safe["h"])
+        x0 = int(np.clip(round(sx * (w - 1)), 0, max(w - 2, 0)))
+        y0 = int(np.clip(round(sy * (h - 1)), 0, max(h - 2, 0)))
+        x1 = int(np.clip(round((sx + sw) * (w - 1)) + 1, x0 + 2, w))
+        y1 = int(np.clip(round((sy + sh) * (h - 1)) + 1, y0 + 2, h))
+        region = np.ascontiguousarray(img[y0:y1, x0:x1, ...])
+        if region.shape[0] >= 16 and region.shape[1] >= 16:
+            local_aspect = region.shape[1] / max(region.shape[0], 1)
+            ask = parse_aspect_ratio(crop_ratio, local_aspect)
+            local = suggest_crop_box(region, rule=rule, aspect_ratio=ask)
+            result = remap_crop_box_to_parent(
+                local, {"x": sx, "y": sy, "w": sw, "h": sh}
+            )
+            # Remap through a non-square safe window breaks locked ratios —
+            # re-fit in normalized space inside the same safe bounds.
+            if locked_aspect is not None:
+                result = fit_box_to_aspect_inside(result, locked_aspect, safe)
         else:
-            result = {**result, **safe}
+            result = suggest_crop_box(img, rule=rule, aspect_ratio=aspect)
+            result = {
+                **result,
+                **straighten_safe_crop_box(w, h, deg, aspect_ratio=locked_aspect),
+            }
+    else:
+        result = suggest_crop_box(img, rule=rule, aspect_ratio=aspect)
     rect = format_crop_rect(result)
     used = AUTO_CROP_RULE_LABELS.get(result.get("rule"), result.get("rule"))
     asked = AUTO_CROP_RULE_LABELS.get(rule, rule)
+    aspect_note = ""
+    if str(crop_ratio or "free").lower() in {"free", ""} and result.get("aspect"):
+        aspect_note = f" · aspect ≈ {float(result['aspect']):.2f}"
+    sub = result.get("subject") or {}
     hint = (
         f"_Auto crop ready — **{asked}**"
         + (f" → scored as **{used}**" if rule in {"auto", "best"} else "")
-        + f" · subject ≈ ({result['subject']['x']:.0%}, {result['subject']['y']:.0%}). "
+        + aspect_note
+        + f" · subject ≈ ({float(sub.get('x', 0.5)):.0%}, {float(sub.get('y', 0.5)):.0%}). "
         f"Tweak the box if needed, then **Apply framing**._"
     )
     return rect, hint
@@ -6189,9 +6664,9 @@ def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
 
 def _stage_shape_for_straighten_crop(state) -> tuple[int, int]:
     """HxW used for the on-stage crop overlay while straightening."""
-    live = _display_live_rgb(state)
-    if live is not None:
-        h, w = np.asarray(live).shape[:2]
+    picture = _framing_picture_rgb(state)
+    if picture is not None:
+        h, w = np.asarray(picture).shape[:2]
         return int(h), int(w)
     for key in ("original_base", "geometry_base"):
         src = (state or {}).get(key)
@@ -6230,8 +6705,8 @@ def suggest_auto_straighten(state, crop_ratio="free"):
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
     state = _ensure_geometry_bases(state)
-    # Analyze the same picture Frame shows (live print), then geometry/original.
-    src = _display_live_rgb(state)
+    # Analyze the same picture Frame shows (picture well, not card/easel border).
+    src = _framing_picture_rgb(state)
     if src is None:
         src = state.get("original_base")
     if src is None:
@@ -6676,17 +7151,32 @@ def _run_live_develop_then_print(
 
     Large viewer shows the theoretical final print — what you'd get after
     Commit Develop + Commit Print with these controls.
+
+    High-quality *interactive* path bakes on a LIVE_MAX_SIDE proxy then
+    stride-fits the print — fast enough for film/developer swaps without
+    hanging the UI. Commit Develop still uses the full Digital Negative.
+    Drag keeps an even smaller proxy for slider scrubbing.
     """
-    if max_side <= DRAG_MAX_SIDE:
-        proxy = state.get("proxy_drag") or _proxy_dn(state["dn"], DRAG_MAX_SIDE)
+    drag = max_side <= DRAG_MAX_SIDE
+    if drag:
+        base_proxy = state.get("proxy_drag") or _proxy_dn(state["dn"], DRAG_MAX_SIDE)
     else:
-        proxy = state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE)
-    proxy.metadata["process_seed"] = state["dn"].metadata.get("process_seed")
+        # Cap interactive develops at LIVE_MAX_SIDE. Using the full / inspect
+        # frame here made each film switch take multiple seconds (and film
+        # change also retriggers developer.change → a second full bake).
+        base_proxy = state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE)
+    # develop(commit=False) writes film/chem into DN metadata — never mutate the
+    # cached roll proxy in place or the next stock inherits the previous tank.
+    working = DigitalNegative(
+        image=base_proxy.image,
+        metadata=copy.deepcopy(base_proxy.metadata),
+    )
+    working.metadata["process_seed"] = state["dn"].metadata.get("process_seed")
     profile = load_film_profile(_profile_path(list_film_profiles(), film_id))
     # Instant knobs travel on development metadata (read by process_instant).
     ctrl = (state or {}).get("controls") or {}
     if is_instant_film_type(profile.type):
-        dev_m = proxy.metadata.setdefault("development", {})
+        dev_m = working.metadata.setdefault("development", {})
         dev_m["process_temp_c"] = float(
             ctrl.get("process_temp_c", profile.defaults.get("process_temp_c", 21.0))
         )
@@ -6696,7 +7186,7 @@ def _run_live_develop_then_print(
         dev_m["diffusion"] = float(grain)
         dev_m["card_border"] = bool(ctrl.get("instant_border", True))
     development = develop(
-        proxy,
+        working,
         profile,
         development_minutes=float(development_minutes),
         contrast_modifier=float(contrast),
@@ -6710,9 +7200,9 @@ def _run_live_develop_then_print(
         commit=False,
     )
     if is_instant_film_type(profile.type):
-        live_rgb = _to_rgb_u8(development.positive_preview)
-        quality_note = "drag" if max_side <= DRAG_MAX_SIDE else "hq"
-        temp_c = float(proxy.metadata.get("development", {}).get("process_temp_c", 21.0))
+        live_rgb = _downscale_rgb(_to_rgb_u8(development.positive_preview), max_side)
+        quality_note = "drag" if drag else "hq"
+        temp_c = float(working.metadata.get("development", {}).get("process_temp_c", 21.0))
         summary = (
             f"{_stage_banner('development', _locks(state), state)}\n\n"
             f"**Live exploring — Instant card** · {live_rgb.shape[1]}×{live_rgb.shape[0]} "
@@ -6723,6 +7213,8 @@ def _run_live_develop_then_print(
             f"_No enlarger paper — Commit pull locks the finished card._\n\n"
             f"{_history_md(state['dn'])}"
         )
+        # Spot / histogram need reflectance maps — Instant has no enlarger print,
+        # so attach the finished-card meter maps as print_draft (same as B&W/Color).
         state = {
             **state,
             "proxy": state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE),
@@ -6732,7 +7224,7 @@ def _run_live_develop_then_print(
             "chemistry_mode": "instant",
             "live_rgb": live_rgb,
             "live_inspect": live_rgb,
-            "print_draft": None,
+            "print_draft": _instant_print_draft(development),
             "neg_ref": None,
             "neg_view": None,
             "neg_inspect": None,
@@ -6760,7 +7252,8 @@ def _run_live_develop_then_print(
         commit=False,
         **tech,
     )
-    live_rgb = _to_rgb_u8(printed.preview)
+    # Stride-fit — keeps stock grain; do not Lanczos-clean the film look.
+    live_rgb = _downscale_rgb(_to_rgb_u8(printed.preview), max_side)
     neg_full = _color_or_bw_negative_view(development)
     neg_inspect = _downscale_rgb(neg_full, INSPECT_MAX_SIDE)
     neg_view = _downscale_rgb(neg_full, LIVE_MAX_SIDE)
@@ -6768,8 +7261,8 @@ def _run_live_develop_then_print(
     speed = state["dn"].metadata.get("print", {}).get("filtration", {}).get("values", {}).get(
         "filter_speed", 1.0
     )
-    quality_note = "drag" if max_side <= DRAG_MAX_SIDE else "hq"
-    curve_src = proxy.metadata.get("development", {}).get("curve_source", "?")
+    quality_note = "drag" if drag else "hq"
+    curve_src = working.metadata.get("development", {}).get("curve_source", "?")
     process = getattr(development, "color_process", None) or "bw"
     mode_note = f" · {process.upper()}" if process != "bw" else ""
     if process in {"c41", "e6"}:
@@ -6825,6 +7318,90 @@ def _run_live_develop_then_print(
 
 
 def live_preview(
+    chemistry_mode,
+    film_id,
+    developer_id,
+    development_minutes,
+    contrast,
+    grain,
+    exposure_index,
+    contrast_filter,
+    scene_exposure,
+    halation,
+    paper_id,
+    print_exposure,
+    print_grade,
+    print_contrast,
+    split_on,
+    soft_grade,
+    hard_grade,
+    soft_seconds,
+    hard_seconds,
+    test_strips_on,
+    test_bands,
+    test_stops,
+    flash_stops,
+    dry_down,
+    tone,
+    border_frac,
+    cc_cyan,
+    cc_magenta,
+    cc_yellow,
+    process_temp_c,
+    instant_chroma,
+    instant_warmth,
+    instant_border,
+    state,
+    quality: str = "high",
+    mark_dirty: bool = False,
+):
+    """Unified live viewer with stale-bake suppression for overlapping Gradio events."""
+    token = next(_PREVIEW_EPOCH)
+    _PREVIEW_LATEST["token"] = token
+    packed = _live_preview_body(
+        chemistry_mode,
+        film_id,
+        developer_id,
+        development_minutes,
+        contrast,
+        grain,
+        exposure_index,
+        contrast_filter,
+        scene_exposure,
+        halation,
+        paper_id,
+        print_exposure,
+        print_grade,
+        print_contrast,
+        split_on,
+        soft_grade,
+        hard_grade,
+        soft_seconds,
+        hard_seconds,
+        test_strips_on,
+        test_bands,
+        test_stops,
+        flash_stops,
+        dry_down,
+        tone,
+        border_frac,
+        cc_cyan,
+        cc_magenta,
+        cc_yellow,
+        process_temp_c,
+        instant_chroma,
+        instant_warmth,
+        instant_border,
+        state,
+        quality=quality,
+        mark_dirty=mark_dirty,
+    )
+    if token != _PREVIEW_LATEST["token"]:
+        return _preview_output_skips()
+    return packed
+
+
+def _live_preview_body(
     chemistry_mode,
     film_id,
     developer_id,
@@ -6945,55 +7522,81 @@ def live_preview(
 
     try:
         if _locked(state, "development"):
-            # Print-only commit preview
-            if state.get("development_full") is not None:
-                t = state["development_full"].transmittance
-                step = max(1, int(np.ceil(max(t.shape) / max_side)))
-                t = np.ascontiguousarray(t[::step, ::step])
-            else:
-                t = state.get("transmittance_proxy")
-                if t is None and state.get("development") is not None:
-                    t = state["development"].transmittance
-                if t is None:
-                    return _pack_preview(
-                        state.get("live_rgb"),
-                        state.get("original_ref"),
-                        state.get("latent_ref"),
-                        state.get("neg_ref"),
-                        state.get("summary_cache", ""),
-                        state,
-                        mark_dirty=mark_dirty,
-                        controls=controls if mark_dirty else None,
-                    )
-                if max(t.shape) > max_side:
-                    step = max(1, int(np.ceil(max(t.shape) / max_side)))
-                    t = np.ascontiguousarray(t[::step, ::step])
-
+            # Print-only commit preview.
+            # High quality: print the full developed T (same as Commit Print), then
+            # stride-fit the viewer so film grain stays with the stock.
+            # Drag: keep the fast stride proxy on T.
             paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
             tech = _technique_kwargs(
                 split_on, soft_grade, hard_grade, soft_seconds, hard_seconds,
                 test_strips_on, test_bands, test_stops, flash_stops, dry_down, tone, border_frac,
             )
             dev_full = state.get("development_full") or state.get("development")
-            t_use = t
-            if dev_full is not None and getattr(dev_full, "spectral_transmittance", None) is not None:
-                t_use = dev_full.spectral_transmittance
-                if max(t_use.shape[:2]) > max_side:
-                    step = max(1, int(np.ceil(max(t_use.shape[:2]) / max_side)))
+            if quality != "drag" and dev_full is not None:
+                t_use = _print_transmittance(dev_full)
+                if getattr(dev_full, "spectral_transmittance", None) is not None:
+                    _stash_color_filtration(state["dn"], cc_cyan, cc_magenta, cc_yellow)
+                # Cap pathological sizes so a 40MP frame can't freeze the UI.
+                cap = max(INSPECT_MAX_SIDE, max_side)
+                if max(t_use.shape[:2]) > cap:
+                    step = max(1, int(np.ceil(max(t_use.shape[:2]) / cap)))
                     t_use = np.ascontiguousarray(t_use[::step, ::step, ...])
-                _stash_color_filtration(state["dn"], cc_cyan, cc_magenta, cc_yellow)
-            result = print_negative(
-                t_use,
-                state["dn"],
-                paper,
-                base_exposure_seconds=float(print_exposure),
-                grade=float(print_grade),
-                contrast=float(print_contrast),
-                local_stops=local_stops_from_state(state),
-                commit=False,
-                **tech,
-            )
-            live_rgb = _to_rgb_u8(result.preview)
+                result = print_negative(
+                    t_use,
+                    state["dn"],
+                    paper,
+                    base_exposure_seconds=float(print_exposure),
+                    grade=float(print_grade),
+                    contrast=float(print_contrast),
+                    local_stops=local_stops_from_state(state),
+                    commit=False,
+                    **tech,
+                )
+                # Same stride fit as Commit Print — film grain stays with the stock.
+                live_rgb = _downscale_rgb(_to_rgb_u8(result.preview), max_side)
+            else:
+                if state.get("development_full") is not None:
+                    t = state["development_full"].transmittance
+                    step = max(1, int(np.ceil(max(t.shape) / max_side)))
+                    t = np.ascontiguousarray(t[::step, ::step])
+                else:
+                    t = state.get("transmittance_proxy")
+                    if t is None and state.get("development") is not None:
+                        t = state["development"].transmittance
+                    if t is None:
+                        return _pack_preview(
+                            state.get("live_rgb"),
+                            state.get("original_ref"),
+                            state.get("latent_ref"),
+                            state.get("neg_ref"),
+                            state.get("summary_cache", ""),
+                            state,
+                            mark_dirty=mark_dirty,
+                            controls=controls if mark_dirty else None,
+                        )
+                    if max(t.shape) > max_side:
+                        step = max(1, int(np.ceil(max(t.shape) / max_side)))
+                        t = np.ascontiguousarray(t[::step, ::step])
+
+                t_use = t
+                if dev_full is not None and getattr(dev_full, "spectral_transmittance", None) is not None:
+                    t_use = dev_full.spectral_transmittance
+                    if max(t_use.shape[:2]) > max_side:
+                        step = max(1, int(np.ceil(max(t_use.shape[:2]) / max_side)))
+                        t_use = np.ascontiguousarray(t_use[::step, ::step, ...])
+                    _stash_color_filtration(state["dn"], cc_cyan, cc_magenta, cc_yellow)
+                result = print_negative(
+                    t_use,
+                    state["dn"],
+                    paper,
+                    base_exposure_seconds=float(print_exposure),
+                    grade=float(print_grade),
+                    contrast=float(print_contrast),
+                    local_stops=local_stops_from_state(state),
+                    commit=False,
+                    **tech,
+                )
+                live_rgb = _to_rgb_u8(result.preview)
             speed = state["dn"].metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
             quality_note = "drag" if quality == "drag" else "hq"
             strokes = state.get("db_strokes") or []
@@ -7287,6 +7890,10 @@ def live_preview_edit(
     instant_border,
     state,
 ):
+    # Cascaded minutes/EI/developer changes during a film swap — skip; the
+    # atomic film/developer handler already owns the bake.
+    if _consume_chem_cascade_skip():
+        return _preview_output_skips()
     return live_preview(
         chemistry_mode,
         film_id,
@@ -7327,10 +7934,24 @@ def live_preview_edit(
     )
 
 
+def live_preview_after_chem(*args):
+    """End chem UI batch, then bake once with the settled film/developer/time."""
+    _end_chem_ui_batch()
+    return live_preview_edit(*args)
+
+
+
+def _ai_enlarge_scale(value) -> int:
+    raw = str(value or "4").strip().lower().replace("×", "x").replace("*", "x")
+    if raw.startswith("2"):
+        return 2
+    return 4
+
 
 def commit_develop(
     film_id, developer_id, development_minutes, contrast, grain,
-    exposure_index, contrast_filter, scene_exposure, halation, state,
+    exposure_index, contrast_filter, scene_exposure, halation,
+    ai_enlarge, ai_enlarge_scale, state,
 ):
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
@@ -7388,10 +8009,16 @@ def commit_develop(
         neg_inspect = neg_full
         neg_view = neg_full
         neg_ref = neg_full
+        ai_note = ""
+        if bool(ai_enlarge):
+            ai_note = (
+                f" AI enlarge {_ai_enlarge_scale(ai_enlarge_scale)}× applies to "
+                f"the **download card only**."
+            )
         summary = (
             f"{_stage_banner('development', locks, state)}\n\n"
             f"**Pull locked** — integral card committed "
-            f"({profile.name}). Unlock to revise.\n\n{_history_md(dn)}"
+            f"({profile.name}). Unlock to revise.{ai_note}\n\n{_history_md(dn)}"
         )
     else:
         neg_full = _color_or_bw_negative_view(development)
@@ -7437,8 +8064,25 @@ def commit_develop(
         "db_strokes": [],
     }
     if is_instant_film_type(profile.type):
+        # Keep Zone meter / histogram alive after Commit pull (print is locked).
+        state["print_draft"] = _instant_print_draft(development)
         # Finished card is the deliverable — no enlarger negative package.
-        card_download = _write_instant_card_package(live_view, dn, profile)
+        # Default download matches the on-screen card (film look). AI enlarge
+        # optionally upscales from the full card for large-file export only.
+        card_full = _to_rgb_u8(development.positive_preview)
+        card_view = _downscale_rgb(card_full, LIVE_MAX_SIDE)
+        try:
+            if bool(ai_enlarge):
+                card_pkg = maybe_ai_upscale_rgb(
+                    card_full,
+                    enabled=True,
+                    scale=_ai_enlarge_scale(ai_enlarge_scale),
+                )
+            else:
+                card_pkg = card_view
+        except Exception as exc:
+            raise gr.Error(f"AI enlarge failed: {exc}") from exc
+        card_download = _write_instant_card_package(card_pkg, dn, profile)
         state["dl_negative"] = None
         state["dl_print_only"] = card_download
         state = _sync_active_into_roll(state)
@@ -7564,7 +8208,11 @@ def _write_print_packages(print_rgb, dn, paper, grade, exposure) -> tuple[str, s
 
 
 def _write_instant_card_package(card_rgb, dn, profile) -> str:
-    """Finished integral card — unpacks into card/ (no enlarger negative)."""
+    """Finished integral card — unpacks into card/ (no enlarger negative).
+
+    ``card_rgb`` should already be the full-resolution (optionally AI-enlarged)
+    export pixels — never the live preview proxy.
+    """
     stem = _source_stem(dn)
     film_bit = _safe_name(getattr(profile, "name", None) or getattr(profile, "id", "instant"))
     card_png = _save_png(card_rgb, _downloads_dir() / f"{stem}__{film_bit}_card.png")
@@ -7605,11 +8253,38 @@ def _technique_kwargs(
 
 
 def _technique_from_state(state) -> dict:
+    """Print-technique kwargs for Commit — prefer last live draft, else controls.
+
+    Falling back to ``{}`` made Commit Print use engine defaults (no tone /
+    border / split-grade) even when the Live exploring print had those knobs
+    baked into ``state['controls']``, so the committed print lost the look.
+    """
     tech = (state or {}).get("print_technique")
-    return dict(tech) if isinstance(tech, dict) else {}
+    if isinstance(tech, dict) and tech:
+        return dict(tech)
+    ctrl = (state or {}).get("controls") or {}
+    if not ctrl:
+        return {}
+    return _technique_kwargs(
+        ctrl.get("split_grade", False),
+        ctrl.get("soft_grade", 0.0),
+        ctrl.get("hard_grade", 5.0),
+        ctrl.get("soft_seconds", 4.0),
+        ctrl.get("hard_seconds", 4.0),
+        ctrl.get("test_strips", False),
+        ctrl.get("test_strip_bands", 5),
+        ctrl.get("test_strip_stops", 0.5),
+        ctrl.get("flash_stops", 0.0),
+        ctrl.get("dry_down_percent", 0.0),
+        ctrl.get("tone", "none"),
+        ctrl.get("border_frac", 0.0),
+    )
 
 
-def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
+def commit_print(
+    paper_id, print_exposure, print_grade, print_contrast,
+    ai_enlarge, ai_enlarge_scale, state,
+):
     if not state or state.get("development_full") is None:
         raise gr.Error("Commit Develop first.")
     if _locked(state, "print"):
@@ -7644,16 +8319,36 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
         locks.append("print")
 
     print_full = _to_rgb_u8(result.preview)
+    # Stride-fit committed print for the viewer — preserves film grain.
     live_rgb = _downscale_rgb(print_full, LIVE_MAX_SIDE)
+    # Default download = same pixels as the committed on-screen print (film-true).
+    # Full-res PNG looked "smoothed" in Photos/Drive when fitted; AI enlarge
+    # still starts from print_full when explicitly armed.
+    try:
+        if bool(ai_enlarge):
+            package_rgb = maybe_ai_upscale_rgb(
+                print_full,
+                enabled=True,
+                scale=_ai_enlarge_scale(ai_enlarge_scale),
+            )
+        else:
+            package_rgb = live_rgb
+    except Exception as exc:
+        raise gr.Error(f"AI enlarge failed: {exc}") from exc
     speed = dn.metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
     db_note = f" · {len(strokes)} dodge/burn pass(es)" if strokes else ""
+    ai_note = ""
+    if bool(ai_enlarge):
+        ai_note = f" · AI enlarge {_ai_enlarge_scale(ai_enlarge_scale)}× (download only)"
+    else:
+        ai_note = " · download matches on-screen print"
     summary = (
         f"{_stage_banner('print', locks, state)}\n\n"
         f"**Committed print** — {paper.name} · g{float(print_grade):.1f} · "
-        f"{_print_timer_label(print_exposure)}{db_note}\n\n{_history_md(dn)}"
+        f"{_print_timer_label(print_exposure)}{db_note}{ai_note}\n\n{_history_md(dn)}"
     )
     print_only, print_plus_neg = _write_print_packages(
-        print_full, dn, paper, print_grade, print_exposure
+        package_rgb, dn, paper, print_grade, print_exposure
     )
     state = {
         **state,
@@ -8326,7 +9021,17 @@ def guided_first_print(
         False, 5, 0.5, 0.0, 0.0, "none", 0.0,
         state,
     )
-    live_rgb, original_ref, latent_ref, neg_ref, status, history, inspect_out, state = packed
+    (
+        live_rgb,
+        original_ref,
+        latent_ref,
+        neg_ref,
+        status,
+        history,
+        inspect_out,
+        _spot_md,
+        state,
+    ) = packed
     state = _remember_print_seconds(state, print_exposure)
     if not state.get("db_exposing"):
         state = reset_local_work({**state})
@@ -8782,6 +9487,28 @@ def build_ui() -> gr.Blocks:
 
                 # Shared download strip — outside Print drawer so Instant (which
                 # hides Print) can still offer the finished card after Commit pull.
+                # AI enlarge is an export helper only — never feeds Develop/Print.
+                ai_enlarge = gr.Checkbox(
+                    label="AI enlarge for large-print download",
+                    value=False,
+                    elem_id="ai_enlarge",
+                )
+                ai_enlarge_scale = gr.Radio(
+                    choices=[("2×", "2"), ("4×", "4")],
+                    value="4",
+                    label="AI enlarge scale",
+                    elem_id="ai_enlarge_scale",
+                )
+                _ai_tip = (
+                    "_Download matches the committed on-screen print (film look). "
+                    "Check AI enlarge only if you want a larger invented-detail file._"
+                )
+                if not enhance_available():
+                    _ai_tip += (
+                        "  \n_Install `pip install -r requirements-enhance.txt` "
+                        "then restart to enable (first use downloads ONNX weights)._"
+                    )
+                ai_enlarge_tip = gr.Markdown(_ai_tip, elem_id="ai_enlarge_tip")
                 with gr.Row(elem_id="download_row"):
                     download_trigger = gr.Button(
                         "⇣ Download",
@@ -9124,7 +9851,15 @@ def build_ui() -> gr.Blocks:
             state,
         ]
         preview_outputs = [
-            live_out, original_out, latent_out, neg_out, status, history, inspect_out, state
+            live_out,
+            original_out,
+            latent_out,
+            neg_out,
+            status,
+            history,
+            inspect_out,
+            spot_readout,
+            state,
         ]
 
         ingest_outputs = [
@@ -9328,11 +10063,16 @@ def build_ui() -> gr.Blocks:
             outputs=[test_bands, test_stops],
         )
 
+        # Minutes / EI are rewritten by film+developer swaps. Use release (not
+        # change) for hq so programmatic gr.update from a stock swap does not
+        # enqueue a racing second bake. Drag still uses .input.
+        for ctrl in (development_minutes, exposure_index):
+            ctrl.input(fn=live_preview_drag, inputs=preview_inputs, outputs=preview_outputs)
+            ctrl.release(fn=live_preview_edit, inputs=preview_inputs, outputs=preview_outputs)
+
         for ctrl in (
-            development_minutes,
             contrast,
             grain,
-            exposure_index,
             contrast_filter,
             scene_exposure,
             halation,
@@ -9416,31 +10156,29 @@ def build_ui() -> gr.Blocks:
             outputs=[db_editor, state, db_flag],
         )
 
-        # Film / developer swap chemistry list + datasheet-normal minutes, then refresh.
+        # Atomic stock / developer swaps: resolve chem+time+EI and bake in the
+        # same event. Cascaded widget .change handlers are suppressed so Acros
+        # cannot pick up a late Tri-X/Delta washout (same default d76 is the
+        # sharp case — developer.change may not fire at all).
         film.change(
-            fn=on_film_change,
-            inputs=[film, chemistry_mode],
-            outputs=[developer, development_minutes, exposure_index],
-        ).then(
-            fn=live_preview_edit,
+            fn=on_film_change_and_preview,
             inputs=preview_inputs,
-            outputs=preview_outputs,
+            outputs=[developer, development_minutes, exposure_index, *preview_outputs],
+            show_progress="minimal",
         )
         developer.change(
-            fn=on_developer_change,
-            inputs=[film, developer, chemistry_mode],
-            outputs=[development_minutes],
-        ).then(
-            fn=live_preview_edit,
+            fn=on_developer_change_and_preview,
             inputs=preview_inputs,
-            outputs=preview_outputs,
+            outputs=[development_minutes, *preview_outputs],
+            show_progress="minimal",
         )
 
         develop_btn.click(
             fn=commit_develop,
             inputs=[
                 film, developer, development_minutes, contrast, grain,
-                exposure_index, contrast_filter, scene_exposure, halation, state,
+                exposure_index, contrast_filter, scene_exposure, halation,
+                ai_enlarge, ai_enlarge_scale, state,
             ],
             outputs=[
                 download_trigger, download_modes, dl_pkg_negative,
@@ -9538,7 +10276,10 @@ def build_ui() -> gr.Blocks:
 
         print_btn.click(
             fn=commit_print,
-            inputs=[paper, print_exposure, print_grade, print_contrast, state],
+            inputs=[
+                paper, print_exposure, print_grade, print_contrast,
+                ai_enlarge, ai_enlarge_scale, state,
+            ],
             outputs=[
                 live_out, original_out, latent_out, neg_out, status, history,
                 paper, print_exposure, print_grade, print_contrast,
@@ -9648,8 +10389,8 @@ def build_ui() -> gr.Blocks:
         )
 
         curve_inputs = [
-            film, developer, development_minutes, contrast,
-            paper, print_grade, print_exposure, state,
+            chemistry_mode, film, developer, development_minutes, contrast,
+            paper, print_grade, print_exposure, print_contrast, state,
         ]
         curve_outputs = [curve_summary, curve_overlay_json]
         curve_refresh_btn.click(
@@ -9667,28 +10408,35 @@ def build_ui() -> gr.Blocks:
         curve_edit_cmd.change(
             fn=apply_curve_edit_cmd,
             inputs=[
-                curve_edit_cmd, film, developer, development_minutes, contrast,
-                paper, print_grade, print_exposure, state,
+                curve_edit_cmd, chemistry_mode, film, developer,
+                development_minutes, contrast, paper, print_grade, print_exposure,
+                print_contrast, state,
             ],
             outputs=[
                 development_minutes, contrast, print_grade, print_exposure,
-                curve_summary, curve_overlay_json,
+                print_contrast, curve_summary, curve_overlay_json,
             ],
         ).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
         )
         # Re-snap float handles after drawer edits settle (release), not on every
         # drag tick — avoids fighting the curve editor mid-gesture.
-        for _curve_ctrl in (development_minutes, contrast, print_grade, print_exposure):
+        for _curve_ctrl in (
+            development_minutes, contrast, print_grade, print_exposure, print_contrast,
+        ):
             _curve_ctrl.release(
                 fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
             )
-        for _curve_ctrl in (paper, film, developer):
+        for _curve_ctrl in (paper, film, developer, chemistry_mode):
             _curve_ctrl.change(
                 fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
             )
 
-        spot_pos.change(fn=read_spot, inputs=[spot_pos, state], outputs=[spot_readout])
+        spot_pos.change(
+            fn=remember_spot,
+            inputs=[spot_pos, state],
+            outputs=[spot_readout, state],
+        )
 
         inspect_inputs = [clip_hi, clip_lo, state]
         inspect_outputs = [hist_plot, inspect_tip, live_out, state]
@@ -9699,8 +10447,11 @@ def build_ui() -> gr.Blocks:
         )
         fit_tones_btn.click(
             fn=auto_fit_print_tones,
-            inputs=[print_exposure, print_grade, state],
-            outputs=[print_exposure, print_grade, clip_hi, clip_lo, inspect_tip, state],
+            inputs=[chemistry_mode, print_exposure, print_grade, print_contrast, state],
+            outputs=[
+                print_exposure, print_grade, print_contrast,
+                clip_hi, clip_lo, inspect_tip, state,
+            ],
         ).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
         ).then(

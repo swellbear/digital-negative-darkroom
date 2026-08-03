@@ -30,6 +30,11 @@ class DevelopmentResult:
     spectral_transmittance: np.ndarray | None = None
     color_process: str | None = None
     dye_concentrations: np.ndarray | None = None
+    # Instant finished-card meter maps (match positive_preview size; None elsewhere)
+    card_reflectance: np.ndarray | None = None
+    card_density: np.ndarray | None = None
+    # Instant picture well only (no card border) — Frame crop/straighten coords
+    well_preview: np.ndarray | None = None
 
 
 def linear_to_relative_log_exposure(

@@ -25,15 +25,20 @@ from .display import linear_to_srgb
 class InstantResult:
     """Finished integral card + mono proxies for shared UI strips."""
 
-    reflectance: np.ndarray  # HxWx3 linear-ish reflectance 0..~1
+    reflectance: np.ndarray  # HxWx3 linear-ish reflectance 0..~1 (image well)
     preview: np.ndarray  # bordered sRGB-ish 0..1 for display
-    density: np.ndarray  # mono print density proxy
+    density: np.ndarray  # mono print density proxy (image well)
     transmittance: np.ndarray  # unused for enlarger; 10^(-D) proxy
     log_exposure: np.ndarray
     profile: FilmProfile
     process: str
     card_rgb: np.ndarray  # HxWx3 uint8 display card
     meta: dict[str, Any]
+    # Meter maps matching ``preview`` / ``card_rgb`` (incl. white border when on).
+    card_reflectance: np.ndarray | None = None
+    card_density: np.ndarray | None = None
+    # Picture well only (no integral frame) — Frame crop/straighten use this.
+    well_preview: np.ndarray | None = None
 
 
 def _sigmoid_curve(
@@ -117,7 +122,13 @@ def _scene_linear_rgb(dn: DigitalNegative) -> np.ndarray:
     return np.stack([img[..., 0], img[..., 0], img[..., 0]], axis=-1)
 
 
-def _apply_border(rgb: np.ndarray, border: dict[str, float]) -> np.ndarray:
+def _apply_border(
+    rgb: np.ndarray,
+    border: dict[str, float],
+    *,
+    fill: float = 0.96,
+    shade_well: bool = True,
+) -> np.ndarray:
     """Composite the image into a classic white integral card."""
     h, w = rgb.shape[:2]
     left = float(border.get("left", 0.08))
@@ -129,16 +140,49 @@ def _apply_border(rgb: np.ndarray, border: dict[str, float]) -> np.ndarray:
     card_h = int(round(h / max(1.0 - top - bottom, 0.2)))
     card_w = max(card_w, w + 8)
     card_h = max(card_h, h + 8)
-    card = np.ones((card_h, card_w, 3), dtype=np.float32) * 0.96
+    card = np.ones((card_h, card_w, 3), dtype=np.float32) * float(fill)
     x0 = int(round(left * card_w))
     y0 = int(round(top * card_h))
     x1 = min(card_w, x0 + w)
     y1 = min(card_h, y0 + h)
     patch = rgb[: y1 - y0, : x1 - x0]
     card[y0:y1, x0:x1] = patch
-    # Soft drop-shadow along the image well.
-    card[y0 : min(y0 + 2, y1), x0:x1] *= 0.92
+    # Soft drop-shadow along the image well (display only — skip for meter maps).
+    if shade_well:
+        card[y0 : min(y0 + 2, y1), x0:x1] *= 0.92
     return card
+
+
+def _card_meter_maps(
+    reflectance: np.ndarray,
+    density_mono: np.ndarray,
+    *,
+    border: bool,
+    border_spec: dict[str, float],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Reflectance + density sized like the displayed card for Zone metering."""
+    if not border:
+        return (
+            np.asarray(reflectance, dtype=np.float32),
+            np.asarray(density_mono, dtype=np.float32),
+        )
+    # White integral frame ≈ paper white; density near fog floor.
+    fill_r = 0.96
+    fill_d = float(-np.log10(fill_r))
+    card_refl = _apply_border(
+        np.clip(reflectance, 0.0, 1.25).astype(np.float32),
+        border_spec,
+        fill=fill_r,
+        shade_well=False,
+    )
+    dens_rgb = np.stack([density_mono, density_mono, density_mono], axis=-1)
+    card_dens = _apply_border(
+        dens_rgb.astype(np.float32),
+        border_spec,
+        fill=fill_d,
+        shade_well=False,
+    )[..., 0].astype(np.float32)
+    return card_refl.astype(np.float32), card_dens
 
 
 def process_instant(
@@ -271,6 +315,12 @@ def process_instant(
         + 0.0722 * density_rgb[..., 2]
     ).astype(np.float32)
     t_proxy = np.power(10.0, -np.clip(dens_mono, 0.0, 4.0)).astype(np.float32)
+    card_reflectance, card_density = _card_meter_maps(
+        reflectance,
+        dens_mono,
+        border=bool(border),
+        border_spec=border_spec,
+    )
 
     meta = {
         "process": "instant_integral",
@@ -321,6 +371,9 @@ def process_instant(
         process="instant_integral",
         card_rgb=card_u8,
         meta=meta,
+        card_reflectance=card_reflectance,
+        card_density=card_density,
+        well_preview=disp.astype(np.float32),
     )
 
 
@@ -332,6 +385,9 @@ def develop_instant_as_result(
     """Adapter so ``develop()`` can return a DevelopmentResult for Instant films."""
     inst = process_instant(dn, profile, **kwargs)
     # positive_preview is the finished card (0..1 float), matching color path usage.
+    # card_* maps feed the UI spot meter / histogram (no enlarger PrintResult).
+    # well_preview is the picture only — Frame crop/straighten must not include
+    # the integral white border in their coordinate system.
     return DevelopmentResult(
         density=inst.density,
         transmittance=inst.transmittance,
@@ -341,4 +397,7 @@ def develop_instant_as_result(
         spectral_transmittance=None,
         color_process=inst.process,
         dye_concentrations=None,
+        card_reflectance=inst.card_reflectance,
+        card_density=inst.card_density,
+        well_preview=inst.well_preview,
     )

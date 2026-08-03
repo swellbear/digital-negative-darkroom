@@ -53,3 +53,12 @@ def test_instant_commit_shows_download_card():
 def test_download_labels_include_card():
     source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
     assert "card: 'Finished card'" in source or 'card: "Finished card"' in source
+
+
+def test_default_download_matches_onscreen_film_look():
+    """AI off → package the viewer card/print; AI on → upscale from full."""
+    source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
+    assert "card_pkg = card_view" in source
+    assert "package_rgb = live_rgb" in source
+    assert "download matches on-screen print" in source
+    assert "maybe_ai_upscale_rgb" in source

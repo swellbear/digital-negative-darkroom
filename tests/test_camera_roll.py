@@ -138,6 +138,8 @@ def test_develop_preserves_camera_roll():
         "none",
         0.01,
         0.0,
+        False,
+        "4",
         state,
     )
     # state is near the end of commit_develop outputs

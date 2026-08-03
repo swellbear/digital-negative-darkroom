@@ -83,6 +83,18 @@ scripts/run_darkroom_ui.py
 scripts/deploy_space.sh
 ```
 
+## Optional: AI enlarge for large-print downloads
+
+Export-only Real-ESRGAN-style upscale of the **already finished** print or Instant card when packaging the download ZIP. Develop / Print math and live preview stay unchanged — AI invents plausible detail for poster-sized files; it does not recover true lost scene information.
+
+```bash
+pip install -r requirements-enhance.txt   # onnxruntime
+# Restart the app. First AI enlarge downloads ONNX weights via huggingface_hub.
+# Override the model path with DIGITAL_NEGATIVE_ESRGAN_ONNX=/path/to/model.onnx
+```
+
+In the UI: leave **AI enlarge** off to download the same film-true print you see after Commit. Check it (2× / 4×) only when you want a larger invented-detail file for posters.
+
 ## Tests
 
 ```bash

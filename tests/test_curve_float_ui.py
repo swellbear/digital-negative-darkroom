@@ -17,3 +17,8 @@ def test_curve_float_ui_wiring():
     assert "writeCurveEditCmd" in source
     assert "#curve_float" in source
     assert "curve_outputs = [curve_summary, curve_overlay_json]" in source
+    # Chemistry-aware inputs: mode + RA-4 print_contrast.
+    assert "chemistry_mode, film, developer, development_minutes, contrast" in source.replace(
+        "\n", " "
+    ) or "chemistry_mode" in source.split("curve_inputs = [")[1].split("]")[0]
+    assert "print_contrast" in source.split("curve_inputs = [")[1].split("]")[0]
