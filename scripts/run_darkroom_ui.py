@@ -64,7 +64,6 @@ from digital_negative.display import (
     to_u8_gray,
 )
 from digital_negative.dodge_burn import (
-    CARD_PRESETS,
     REFERENCE_BASE_SECONDS,
     TICK_SECONDS,
     apply_exposure_tick,
@@ -195,6 +194,19 @@ CHEMISTRY_MODE_LABELS = [
 LIVE_PRINT_LABEL = "Live theoretical print — not committed"
 LIVE_WAVE_LABEL = "→ WAVE YOUR CARD OVER THIS PRINT ←"
 ADVANCED_DODGE_BURN_LABEL = "Advanced · Dodge & burn"
+# Short Modules-column labels — full CARD_PRESETS / mode sentences wrap and
+# dominate the 190px panel.
+DB_SHAPE_UI_CHOICES = [
+    ("Soft oval", "soft_oval"),
+    ("Circle", "circle"),
+    ("Finger", "finger"),
+    ("Hard rect", "card"),
+    ("Custom", "custom"),
+]
+DB_MODE_UI_CHOICES = [
+    ("Dodge · lighter", "dodge"),
+    ("Burn · darker", "burn"),
+]
 # Stage drawer width (px) — keep in sync with --dr-drawer-width in UI_CSS.
 DRAWER_WIDTH_PX = 260
 HOW_DARKROOM_WORKS_MD = (
@@ -1842,6 +1854,60 @@ body.module-collapsed #module_panel {
   width: 100% !important;
   flex: 1 1 auto !important;
   margin: 0 0 4px 0 !important;
+}
+/* Dodge & burn: stack actions; keep radios/math readable in 190px. */
+#mod_dodge_burn #db_actions {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  margin: 2px 0 0 0 !important;
+}
+#mod_dodge_burn #db_actions > * {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  flex: none !important;
+}
+#mod_dodge_burn #db_start_btn,
+#mod_dodge_burn #db_reset_btn {
+  width: 100% !important;
+}
+#mod_dodge_burn #pass_math,
+#mod_dodge_burn #db_timer_md,
+#mod_dodge_burn #db_advanced_hint {
+  max-width: 100% !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+#mod_dodge_burn #pass_math .prose,
+#mod_dodge_burn #pass_math .md,
+#mod_dodge_burn #db_timer_md .prose,
+#mod_dodge_burn #db_timer_md .md {
+  font-size: var(--dr-fs-tiny) !important;
+  line-height: 1.25 !important;
+}
+#mod_dodge_burn fieldset label {
+  max-width: 100% !important;
+  white-space: normal !important;
+}
+#mod_dodge_burn #db_custom_editor {
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+#mod_dodge_burn #db_custom_editor .image-container,
+#mod_dodge_burn #db_custom_editor .wrap {
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+#mod_dodge_burn #db_pos,
+#mod_dodge_burn #db_flag {
+  position: absolute !important;
+  left: -9999px !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
 }
 /* Crop module: full-width stacked controls — a Row crushed the Rule
    dropdown beside Auto crop so "Auto (best score)" became "Auto (best...". */
@@ -8450,22 +8516,20 @@ def _print_timer_label(print_seconds) -> str:
 
 
 def _pass_math_md(base_seconds, pass_seconds, mode) -> str:
-    """Light darkroom math under the dodge/burn timer."""
+    """Compact darkroom math for the narrow Modules dodge/burn panel."""
     base = max(float(base_seconds), 1e-6)
     sec = max(float(pass_seconds), 0.0)
     mode_key = "dodge" if str(mode).lower().startswith("dodge") else "burn"
     stops = relative_pass_stops(sec, base, mode_key)
     if mode_key == "dodge":
+        area = max(base - min(sec, base * 0.95), base * 0.05)
         return (
-            f"**Pass math** — dodge **{sec:g}s** of **{base:g}s** base "
-            f"≈ **{stops:+.2f} stops** if the card is held still "
-            f"(holds back light → **lighter** print; area gets "
-            f"{max(base - min(sec, base * 0.95), base * 0.05):.1f}s of enlarger light)."
+            f"**Pass** — dodge **{sec:g}s** / **{base:g}s** ≈ **{stops:+.2f} stop** "
+            f"· area **{area:.1f}s** light"
         )
     return (
-        f"**Pass math** — burn **{sec:g}s** on **{base:g}s** base "
-        f"≈ **{stops:+.2f} stops** if held still "
-        f"(adds enlarger light → **darker** print; area gets {base + sec:.1f}s of light)."
+        f"**Pass** — burn **{sec:g}s** / **{base:g}s** ≈ **{stops:+.2f} stop** "
+        f"· area **{base + sec:.1f}s** light"
     )
 
 
@@ -8704,7 +8768,7 @@ def _db_refresh_print(paper_id, print_exposure, print_grade, print_contrast, sta
         timer_line = f"**Ready** — {len(strokes)} local pass(es). Reset clears them."
     else:
         timer_line = (
-            "**Ready** — cut a card, then **Start — wave over print** "
+            "**Ready** — cut a card, then **Start wave** "
             "(highlighted on the right)."
         )
 
@@ -8921,7 +8985,7 @@ def seed_dodge_burn_editor(state):
     return (
         gr.update(value=editor, visible=False),
         "**Ready** — pick a card shape (oval is fine), set pass seconds, then "
-        "**Start — wave over print →**. The print on the right is the easel.",
+        "**Start wave**. The print on the right is the easel.",
         _base_math_md(base),
         _pass_math_md(base, 4.0, "burn"),
         "soft_oval",
@@ -9092,7 +9156,7 @@ def guided_first_print(
         f"1. Base timer **{float(print_exposure):g}s** (change if you want)  \n"
         f"2. Soft-oval card loaded — **scroll** over the print to resize  \n"
         f"3. Mode defaults to **burn (darker)** — switch to dodge for lighter  \n"
-        f"4. **Start — wave over print →** and move on the highlighted print  \n"
+        f"4. **Start wave** and move on the highlighted print  \n"
         f"5. When the timer ends, read the before/after note · Reset clears the pass\n\n"
         f"{_history_md(state['dn'])}"
     )
@@ -9803,20 +9867,20 @@ def build_ui() -> gr.Blocks:
                     elem_id="mod_dodge_burn",
                 ):
                     gr.Markdown(
-                        "_Optional. Use only after **Commit Develop**, once paper / "
-                        "exposure / filtration look right. Skip this for a normal print._",
+                        "_After **Commit Develop**. Wave the card on the print._",
                         elem_id="db_advanced_hint",
                     )
                     db_shape = gr.Radio(
-                        choices=[(label, key) for key, label in CARD_PRESETS],
+                        choices=DB_SHAPE_UI_CHOICES,
                         value="soft_oval",
-                        label="Card shape",
+                        label="Card",
+                        elem_id="db_shape",
                     )
                     db_editor = gr.ImageEditor(
-                        label="Custom card (paint only if shape = Custom)",
+                        label="Paint custom card",
                         type="numpy",
                         image_mode="RGBA",
-                        height=160,
+                        height=120,
                         value=tool_workshop_canvas(),
                         brush=gr.Brush(
                             default_size=48,
@@ -9830,27 +9894,44 @@ def build_ui() -> gr.Blocks:
                         sources=(),
                         buttons=["fullscreen"],
                         visible=False,
+                        elem_id="db_custom_editor",
                     )
                     db_mode = gr.Radio(
-                        choices=[
-                            ("Dodge — hold back light (lighter)", "dodge"),
-                            ("Burn — add enlarger light (darker)", "burn"),
-                        ],
+                        choices=DB_MODE_UI_CHOICES,
                         value="burn",
                         label="Mode",
+                        elem_id="db_mode",
                     )
                     db_seconds = gr.Slider(
-                        1, 32, value=4, step=1, label="Pass (s)"
+                        1, 32, value=4, step=1, label="Pass (s)", elem_id="db_seconds"
                     )
-                    pass_math_md = gr.Markdown(_pass_math_md(8.0, 4.0, "burn"), elem_id="pass_math")
-                    db_timer_md = gr.Markdown("**Ready** — Start, then wave over the print")
-                    with gr.Row(elem_id="db_actions"):
+                    pass_math_md = gr.Markdown(
+                        _pass_math_md(8.0, 4.0, "burn"), elem_id="pass_math"
+                    )
+                    db_timer_md = gr.Markdown(
+                        "**Ready** — Start, then wave on the print",
+                        elem_id="db_timer_md",
+                    )
+                    with gr.Column(elem_id="db_actions"):
                         db_start_btn = gr.Button(
-                            "Start — wave over print →", variant="primary", size="sm"
+                            "Start wave",
+                            variant="primary",
+                            size="sm",
+                            elem_id="db_start_btn",
                         )
-                        db_reset_btn = gr.Button("Reset local work", size="sm")
+                        db_reset_btn = gr.Button(
+                            "Reset",
+                            size="sm",
+                            elem_id="db_reset_btn",
+                        )
                     db_flag = gr.HTML(_db_flag_html(None), elem_id="db_flag")
-                    db_pos = gr.Textbox(value="0.5000,0.5000", elem_id="db_pos", show_label=False)
+                    # Pointer sync for Timer.tick — CSS-hidden, must stay in DOM.
+                    db_pos = gr.Textbox(
+                        value="0.5000,0.5000",
+                        elem_id="db_pos",
+                        show_label=False,
+                        label="db_pos",
+                    )
                     with gr.Column(elem_classes=["db_clock_hidden"]):
                         db_clock = gr.Timer(value=TICK_SECONDS, active=False)
 
