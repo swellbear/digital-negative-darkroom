@@ -68,11 +68,17 @@ Runs **after** UI trust, not instead of it. B&W Develop → Print authenticity f
 
 ---
 
+## Optional export — AI enlarge for large prints
+
+Export-only Real-ESRGAN-style upscale of the **already finished** print/Instant card for poster-sized downloads. Does **not** feed back into Develop/Print; invents plausible detail (not true optical recovery). Optional `onnxruntime` extra — see `requirements-enhance.txt`.
+
 ## Parked (do not start)
 
 **Scan-corpus / ML calibration model** — using public 35mm negative scans (or a trained appearance model) to bulk up Level-3 feel. Interesting as a later Level-3 appearance bench fed by **owned or properly licensed** paired captures + datasheets; **not** scraped web training. Tabled 2026-07-31 until Product P1 hand calibration is underway.
 
 **Instant peel-apart (Type 55 etc.)** — classic Polaroid +/- datasheets are strong, but the UI ritual differs from integral 600/SX-70 (peel timing, clearing bath, usable negative). Integral Instant mode shipped first; peel-apart stays parked until that path is calibrated.
+
+**Handwritten border / Polaroid caption text** — realistic writing on the Instant bottom strip (and later B&W/color easel borders). Tabled 2026-08-03; do not start until core export enlarge and Product P1 calibration are underway.
 
 ---
 

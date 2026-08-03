@@ -78,6 +78,7 @@ from digital_negative.dodge_burn import (
     stamp_to_png_data_url,
     tool_workshop_canvas,
 )
+from digital_negative.enhance import enhance_available, maybe_ai_upscale_rgb
 from digital_negative.ingest import ingest_path
 from digital_negative.papers import load_paper_profile
 from digital_negative.pipeline import list_film_profiles, list_paper_profiles
@@ -7328,9 +7329,17 @@ def live_preview_edit(
 
 
 
+def _ai_enlarge_scale(value) -> int:
+    raw = str(value or "4").strip().lower().replace("×", "x").replace("*", "x")
+    if raw.startswith("2"):
+        return 2
+    return 4
+
+
 def commit_develop(
     film_id, developer_id, development_minutes, contrast, grain,
-    exposure_index, contrast_filter, scene_exposure, halation, state,
+    exposure_index, contrast_filter, scene_exposure, halation,
+    ai_enlarge, ai_enlarge_scale, state,
 ):
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
@@ -7388,10 +7397,16 @@ def commit_develop(
         neg_inspect = neg_full
         neg_view = neg_full
         neg_ref = neg_full
+        ai_note = ""
+        if bool(ai_enlarge):
+            ai_note = (
+                f" AI enlarge {_ai_enlarge_scale(ai_enlarge_scale)}× applies to "
+                f"the **download card only**."
+            )
         summary = (
             f"{_stage_banner('development', locks, state)}\n\n"
             f"**Pull locked** — integral card committed "
-            f"({profile.name}). Unlock to revise.\n\n{_history_md(dn)}"
+            f"({profile.name}). Unlock to revise.{ai_note}\n\n{_history_md(dn)}"
         )
     else:
         neg_full = _color_or_bw_negative_view(development)
@@ -7438,7 +7453,18 @@ def commit_develop(
     }
     if is_instant_film_type(profile.type):
         # Finished card is the deliverable — no enlarger negative package.
-        card_download = _write_instant_card_package(live_view, dn, profile)
+        # Package the full-res card (not the LIVE_MAX_SIDE preview). AI enlarge
+        # is export-only and never written back into live_rgb / process state.
+        card_full = _to_rgb_u8(development.positive_preview)
+        try:
+            card_pkg = maybe_ai_upscale_rgb(
+                card_full,
+                enabled=bool(ai_enlarge),
+                scale=_ai_enlarge_scale(ai_enlarge_scale),
+            )
+        except Exception as exc:
+            raise gr.Error(f"AI enlarge failed: {exc}") from exc
+        card_download = _write_instant_card_package(card_pkg, dn, profile)
         state["dl_negative"] = None
         state["dl_print_only"] = card_download
         state = _sync_active_into_roll(state)
@@ -7564,7 +7590,11 @@ def _write_print_packages(print_rgb, dn, paper, grade, exposure) -> tuple[str, s
 
 
 def _write_instant_card_package(card_rgb, dn, profile) -> str:
-    """Finished integral card — unpacks into card/ (no enlarger negative)."""
+    """Finished integral card — unpacks into card/ (no enlarger negative).
+
+    ``card_rgb`` should already be the full-resolution (optionally AI-enlarged)
+    export pixels — never the live preview proxy.
+    """
     stem = _source_stem(dn)
     film_bit = _safe_name(getattr(profile, "name", None) or getattr(profile, "id", "instant"))
     card_png = _save_png(card_rgb, _downloads_dir() / f"{stem}__{film_bit}_card.png")
@@ -7609,7 +7639,10 @@ def _technique_from_state(state) -> dict:
     return dict(tech) if isinstance(tech, dict) else {}
 
 
-def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
+def commit_print(
+    paper_id, print_exposure, print_grade, print_contrast,
+    ai_enlarge, ai_enlarge_scale, state,
+):
     if not state or state.get("development_full") is None:
         raise gr.Error("Commit Develop first.")
     if _locked(state, "print"):
@@ -7645,15 +7678,27 @@ def commit_print(paper_id, print_exposure, print_grade, print_contrast, state):
 
     print_full = _to_rgb_u8(result.preview)
     live_rgb = _downscale_rgb(print_full, LIVE_MAX_SIDE)
+    # AI enlarge is export-only — packages may be larger; live preview is not.
+    try:
+        package_rgb = maybe_ai_upscale_rgb(
+            print_full,
+            enabled=bool(ai_enlarge),
+            scale=_ai_enlarge_scale(ai_enlarge_scale),
+        )
+    except Exception as exc:
+        raise gr.Error(f"AI enlarge failed: {exc}") from exc
     speed = dn.metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
     db_note = f" · {len(strokes)} dodge/burn pass(es)" if strokes else ""
+    ai_note = ""
+    if bool(ai_enlarge):
+        ai_note = f" · AI enlarge {_ai_enlarge_scale(ai_enlarge_scale)}× (download only)"
     summary = (
         f"{_stage_banner('print', locks, state)}\n\n"
         f"**Committed print** — {paper.name} · g{float(print_grade):.1f} · "
-        f"{_print_timer_label(print_exposure)}{db_note}\n\n{_history_md(dn)}"
+        f"{_print_timer_label(print_exposure)}{db_note}{ai_note}\n\n{_history_md(dn)}"
     )
     print_only, print_plus_neg = _write_print_packages(
-        print_full, dn, paper, print_grade, print_exposure
+        package_rgb, dn, paper, print_grade, print_exposure
     )
     state = {
         **state,
@@ -8782,6 +8827,28 @@ def build_ui() -> gr.Blocks:
 
                 # Shared download strip — outside Print drawer so Instant (which
                 # hides Print) can still offer the finished card after Commit pull.
+                # AI enlarge is an export helper only — never feeds Develop/Print.
+                ai_enlarge = gr.Checkbox(
+                    label="AI enlarge for large-print download",
+                    value=False,
+                    elem_id="ai_enlarge",
+                )
+                ai_enlarge_scale = gr.Radio(
+                    choices=[("2×", "2"), ("4×", "4")],
+                    value="4",
+                    label="AI enlarge scale",
+                    elem_id="ai_enlarge_scale",
+                )
+                _ai_tip = (
+                    "_Export only — invents detail for the download file. "
+                    "Develop / Print look stay the same; preview stays interactive-res._"
+                )
+                if not enhance_available():
+                    _ai_tip += (
+                        "  \n_Install `pip install -r requirements-enhance.txt` "
+                        "then restart to enable (first use downloads ONNX weights)._"
+                    )
+                ai_enlarge_tip = gr.Markdown(_ai_tip, elem_id="ai_enlarge_tip")
                 with gr.Row(elem_id="download_row"):
                     download_trigger = gr.Button(
                         "⇣ Download",
@@ -9440,7 +9507,8 @@ def build_ui() -> gr.Blocks:
             fn=commit_develop,
             inputs=[
                 film, developer, development_minutes, contrast, grain,
-                exposure_index, contrast_filter, scene_exposure, halation, state,
+                exposure_index, contrast_filter, scene_exposure, halation,
+                ai_enlarge, ai_enlarge_scale, state,
             ],
             outputs=[
                 download_trigger, download_modes, dl_pkg_negative,
@@ -9538,7 +9606,10 @@ def build_ui() -> gr.Blocks:
 
         print_btn.click(
             fn=commit_print,
-            inputs=[paper, print_exposure, print_grade, print_contrast, state],
+            inputs=[
+                paper, print_exposure, print_grade, print_contrast,
+                ai_enlarge, ai_enlarge_scale, state,
+            ],
             outputs=[
                 live_out, original_out, latent_out, neg_out, status, history,
                 paper, print_exposure, print_grade, print_contrast,

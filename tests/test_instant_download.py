@@ -53,3 +53,22 @@ def test_instant_commit_shows_download_card():
 def test_download_labels_include_card():
     source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
     assert "card: 'Finished card'" in source or 'card: "Finished card"' in source
+
+
+def test_instant_package_uses_full_res_card_not_live_max():
+    """Commit pull packages positive_preview; LIVE_MAX_SIDE is preview-only."""
+    source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
+    # Full card for ZIP
+    assert "card_full = _to_rgb_u8(development.positive_preview)" in source
+    assert "_write_instant_card_package(card_pkg" in source
+    # Live preview still downscaled
+    assert (
+        "live_view = _downscale_rgb(\n"
+        "            _to_rgb_u8(development.positive_preview), LIVE_MAX_SIDE"
+    ) in source or (
+        "_downscale_rgb(\n"
+        "            _to_rgb_u8(development.positive_preview), LIVE_MAX_SIDE"
+    ) in source
+    # Must not package the downscaled live view
+    assert "_write_instant_card_package(live_view" not in source
+    assert "_write_instant_card_package(live_rgb" not in source

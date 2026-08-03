@@ -1,0 +1,7 @@
+# Optional: AI enlarge for large-print downloads (Real-ESRGAN ONNX).
+# Install alongside requirements.txt when you want poster-sized upscales:
+#   pip install -r requirements-enhance.txt
+#
+# Does not change Develop/Print math — export/download only.
+# First use downloads ONNX weights via huggingface_hub (already in base deps).
+onnxruntime>=1.17

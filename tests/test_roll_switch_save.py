@@ -146,7 +146,7 @@ def test_switch_after_develop_reenables_film_controls():
         0.01,
         0.0,
     )
-    state = _state_from(mod.commit_develop(*develop_args, state))
+    state = _state_from(mod.commit_develop(*develop_args, False, "4", state))
     assert mod._locked(state, "development")
 
     # Simulate locked Develop UI, then save-and-switch to the other undeveloped frame.
@@ -166,7 +166,7 @@ def test_switch_after_develop_reenables_film_controls():
     assert contrast_u.get("interactive") is True
 
     # And Commit Develop must succeed on the newly active frame.
-    state = _state_from(mod.commit_develop(*develop_args, state))
+    state = _state_from(mod.commit_develop(*develop_args, False, "4", state))
     assert mod._locked(state, "development")
 
 

@@ -139,7 +139,7 @@ def test_bw_color_roll_matrix_no_control_leakage():
     # Frame 1: Commit Develop in B&W — film controls lock.
     bw = _default_controls(mod, mode="bw")
     develop_args = bw[1:10]  # film…halation (no chemistry_mode)
-    state = _state_from(mod.commit_develop(*develop_args, state))
+    state = _state_from(mod.commit_develop(*develop_args, False, "4", state))
     assert mod._locked(state, "development")
     assert not mod._locked(state, "print")
 
@@ -211,7 +211,7 @@ def test_default_print_flow_without_dodge_burn():
     path = str(FIXTURE)
     state = _state_from(mod.commit_ingest(None, path, None))
     bw = _default_controls(mod, mode="bw")
-    state = _state_from(mod.commit_develop(*bw[1:10], state))
+    state = _state_from(mod.commit_develop(*bw[1:10], False, "4", state))
     assert mod._locked(state, "development")
     assert not (state.get("db_strokes") or [])
 
@@ -221,7 +221,7 @@ def test_default_print_flow_without_dodge_burn():
     assert state.get("print_draft") is not None
     assert "not committed" in mod._viewer_label_for("live", state).lower()
 
-    outs = mod.commit_print(bw[10], bw[11], bw[12], bw[13], state)
+    outs = mod.commit_print(bw[10], bw[11], bw[12], bw[13], False, "4", state)
     state = outs[-1]
     assert mod._locked(state, "print")
     assert "Committed" in (state.get("summary_cache") or "")
