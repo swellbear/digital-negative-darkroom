@@ -132,10 +132,13 @@ def test_live_vs_committed_viewer_and_banner():
     # Default Live print stays quiet — "easel" implied dodge/burn was required.
     assert "easel" not in mod._live_print_label(exploring, tool="print").lower()
     assert "frame" in mod._live_print_label(exploring, tool="frame").lower()
-    # on_preview_tool_change returns (live label update, crop accordion open).
+    # on_preview_tool_change returns (stage update, crop accordion open).
     label_u, crop_u = mod.on_preview_tool_change("frame", committed)
     assert _upd(label_u).get("label", "").startswith("Committed print")
     assert _upd(crop_u).get("open") is True
+    inspect_u, inspect_crop = mod.on_preview_tool_change("inspect", exploring)
+    assert "inspect" in str(_upd(inspect_u).get("label", "")).lower()
+    assert _upd(inspect_crop).get("open") is False
 
 
 def test_advanced_dodge_burn_is_quarantined():

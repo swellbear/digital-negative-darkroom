@@ -2266,9 +2266,19 @@ UI_JS = """
 
     const mo = new MutationObserver(() => {
       if (!root.classList.contains('db-waving')) {
-        scale = 1; panX = 0; panY = 0;
+        // Keep Inspect zoom across Gradio image refreshes (open module,
+        // clipping toggles, live tick). Other tools still reset to 1:1.
+        const keepZoom =
+          sel === '#live_preview' &&
+          readPreviewTool() === 'inspect' &&
+          scale > 1.02;
+        if (!keepZoom) {
+          scale = 1; panX = 0; panY = 0;
+        }
       }
-      apply(findImg());
+      const img = findImg();
+      if (img) clampPan(img);
+      apply(img);
     });
     mo.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
     root.dataset.zoomReady = '1';
@@ -3153,13 +3163,22 @@ UI_JS = """
         } else {
           try { showCurveFloat(false); } catch (_) {}
         }
-      } else if (id === 'mod_inspect' && open) {
-        const root = document.querySelector('#inspect_open');
-        const box = root && (root.querySelector('textarea') || root.querySelector('input'));
-        if (box) {
-          box.value = String(Date.now());
-          box.dispatchEvent(new Event('input', { bubbles: true }));
-          box.dispatchEvent(new Event('change', { bubbles: true }));
+      } else if (id === 'mod_inspect') {
+        // Mirror Crop→Frame: opening Inspect must arm scroll-zoom on the
+        // live stage. Context-menu "Inspect · zoom" already sets the tool
+        // first; accordion-only open previously left preview_tool=print so
+        // the wheel kept resizing the (hidden) dodge/burn card instead.
+        if (open) {
+          setPreviewToolValue('inspect');
+          const root = document.querySelector('#inspect_open');
+          const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+          if (box) {
+            box.value = String(Date.now());
+            box.dispatchEvent(new Event('input', { bubbles: true }));
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        } else if (readPreviewTool() === 'inspect') {
+          setPreviewToolValue('print');
         }
       }
     }, 30);
@@ -3790,13 +3809,16 @@ def read_spot(spot_pos, state):
 
 
 def refresh_inspect_tools(clip_hi, clip_lo, state):
-    """Histogram + clipping overlay for the Inspect module."""
+    """Histogram + clipping overlay for the Inspect module.
+
+    Pushes the high-res inspect surface (not the 2000px live proxy) so scroll
+    zoom has detail to work with once the module arms preview_tool=inspect.
+    """
     state = {**(state or {})}
     state["clip_hi"] = bool(clip_hi)
     state["clip_lo"] = bool(clip_lo)
     refl, _ = _print_maps(state)
     hist = render_print_histogram(refl)
-    live = _display_live_rgb(state)
     if hist is None:
         hist = gr.update()
     tip = (
@@ -3804,7 +3826,7 @@ def refresh_inspect_tools(clip_hi, clip_lo, state):
         "Clipping paints blown paper-white (red) and crushed Dmax (blue). "
         "**Fit to paper** auto-sets the timer (and softens grade if needed)._"
     )
-    return hist, tip, _viewer_frame(state, live=live), state
+    return hist, tip, _inspect_frame(state), state
 
 
 def auto_fit_print_tones(print_exposure, print_grade, state):
@@ -5550,25 +5572,42 @@ def _viewer_frame(state, live=None, original=None, latent=None, neg=None):
 
 
 def _inspect_frame(state, live=None):
-    """High-res inspect panel image for zooming the active sequence stage."""
+    """High-res stage image for Inspect · zoom on the active sequence stage.
+
+    Prefer ``*_inspect`` buffers (up to INSPECT_MAX_SIDE). Clipping overlays
+    apply on the live print stage so Fit / Blown / Crushed stay readable while
+    zoomed — reflectance is resized to the inspect surface when needed.
+    """
     mode = (state or {}).get("viewer_mode", "live")
+    s = state or {}
     if mode == "original":
-        img = (state or {}).get("original_inspect")
+        img = s.get("original_inspect")
         if img is None:
-            img = (state or {}).get("original_view")
+            img = s.get("original_view")
     elif mode == "latent":
-        img = (state or {}).get("latent_inspect")
+        img = s.get("latent_inspect")
         if img is None:
-            img = (state or {}).get("latent_view")
+            img = s.get("latent_view")
     elif mode == "negative":
-        img = (state or {}).get("neg_inspect")
+        img = s.get("neg_inspect")
         if img is None:
-            img = (state or {}).get("neg_view")
+            img = s.get("neg_view")
     else:
         mode = "live"
-        img = (state or {}).get("live_inspect")
-        if img is None:
-            img = live if live is not None else (state or {}).get("live_rgb")
+        if s.get("ab_showing") == "A" and s.get("ab_rgb") is not None:
+            img = s["ab_rgb"]
+        else:
+            img = s.get("live_inspect")
+            if img is None:
+                img = live if live is not None else s.get("live_rgb")
+            if img is not None and (s.get("clip_hi") or s.get("clip_lo")):
+                refl, _ = _print_maps(s)
+                img = apply_clipping_overlay(
+                    img,
+                    refl,
+                    show_highlights=bool(s.get("clip_hi")),
+                    show_shadows=bool(s.get("clip_lo")),
+                )
     if mode == "negative" and _path_label(state) == "E-6":
         label = "Inspect — Developed slide (scroll-wheel zoom, drag to pan, double-click reset)"
     elif mode == "negative" and _path_label(state) == "C-41":
@@ -5672,8 +5711,26 @@ def swap_strip_slot(index: int):
 
 
 def on_preview_tool_change(tool: str, state=None):
-    """Update the live preview label and keep Crop accordion aligned with Frame tool."""
+    """Arm stage chrome for Print / Frame / Inspect.
+
+    Inspect loads the high-res ``*_inspect`` buffer onto the large preview so
+    scroll-zoom is not limited to the LIVE_MAX_SIDE proxy. Leaving Inspect
+    restores the normal stage viewer. Crop accordion tracks Frame only.
+    """
     tool = str(tool or "print")
+    if tool == "inspect":
+        return _inspect_frame(state), gr.update(open=False)
+    if state is not None and state.get("dn") is not None:
+        mode = (state or {}).get("viewer_mode", "live")
+        if mode == "live" or mode not in _VIEWER_LABELS:
+            return (
+                gr.update(
+                    value=_display_live_rgb(state),
+                    label=_live_print_label(state, tool=tool),
+                ),
+                gr.update(open=(tool == "frame")),
+            )
+        return _viewer_frame(state), gr.update(open=(tool == "frame"))
     return (
         gr.update(label=_live_print_label(state, tool=tool)),
         gr.update(open=(tool == "frame")),
