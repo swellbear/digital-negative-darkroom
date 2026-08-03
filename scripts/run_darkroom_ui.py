@@ -6695,17 +6695,28 @@ def _run_live_develop_then_print(
 
     Large viewer shows the theoretical final print — what you'd get after
     Commit Develop + Commit Print with these controls.
+
+    High-quality path must bake grain on the full (or inspect-capped) negative
+    and Lanczos-fit the print — developing a LIVE_MAX_SIDE stride proxy made
+    Tri-X look like oatmeal in Live, then "lose grain" after Commit Develop.
     """
-    if max_side <= DRAG_MAX_SIDE:
-        proxy = state.get("proxy_drag") or _proxy_dn(state["dn"], DRAG_MAX_SIDE)
+    drag = max_side <= DRAG_MAX_SIDE
+    if drag:
+        working = state.get("proxy_drag") or _proxy_dn(state["dn"], DRAG_MAX_SIDE)
     else:
-        proxy = state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE)
-    proxy.metadata["process_seed"] = state["dn"].metadata.get("process_seed")
+        # Same working resolution Commit Develop uses (full frame), capped only
+        # so pathological 40MP frames cannot freeze the UI on every slider release.
+        src = state["dn"]
+        if max(src.image.shape[:2]) > INSPECT_MAX_SIDE:
+            working = _proxy_dn(src, INSPECT_MAX_SIDE)
+        else:
+            working = src
+    working.metadata["process_seed"] = state["dn"].metadata.get("process_seed")
     profile = load_film_profile(_profile_path(list_film_profiles(), film_id))
     # Instant knobs travel on development metadata (read by process_instant).
     ctrl = (state or {}).get("controls") or {}
     if is_instant_film_type(profile.type):
-        dev_m = proxy.metadata.setdefault("development", {})
+        dev_m = working.metadata.setdefault("development", {})
         dev_m["process_temp_c"] = float(
             ctrl.get("process_temp_c", profile.defaults.get("process_temp_c", 21.0))
         )
@@ -6715,7 +6726,7 @@ def _run_live_develop_then_print(
         dev_m["diffusion"] = float(grain)
         dev_m["card_border"] = bool(ctrl.get("instant_border", True))
     development = develop(
-        proxy,
+        working,
         profile,
         development_minutes=float(development_minutes),
         contrast_modifier=float(contrast),
@@ -6730,8 +6741,10 @@ def _run_live_develop_then_print(
     )
     if is_instant_film_type(profile.type):
         live_rgb = _to_rgb_u8(development.positive_preview)
-        quality_note = "drag" if max_side <= DRAG_MAX_SIDE else "hq"
-        temp_c = float(proxy.metadata.get("development", {}).get("process_temp_c", 21.0))
+        if not drag:
+            live_rgb = _downscale_rgb_hq(live_rgb, max_side)
+        quality_note = "drag" if drag else "hq"
+        temp_c = float(working.metadata.get("development", {}).get("process_temp_c", 21.0))
         summary = (
             f"{_stage_banner('development', _locks(state), state)}\n\n"
             f"**Live exploring — Instant card** · {live_rgb.shape[1]}×{live_rgb.shape[0]} "
@@ -6780,6 +6793,8 @@ def _run_live_develop_then_print(
         **tech,
     )
     live_rgb = _to_rgb_u8(printed.preview)
+    if not drag:
+        live_rgb = _downscale_rgb_hq(live_rgb, max_side)
     neg_full = _color_or_bw_negative_view(development)
     neg_inspect = _downscale_rgb(neg_full, INSPECT_MAX_SIDE)
     neg_view = _downscale_rgb(neg_full, LIVE_MAX_SIDE)
@@ -6787,8 +6802,8 @@ def _run_live_develop_then_print(
     speed = state["dn"].metadata.get("print", {}).get("filtration", {}).get("values", {}).get(
         "filter_speed", 1.0
     )
-    quality_note = "drag" if max_side <= DRAG_MAX_SIDE else "hq"
-    curve_src = proxy.metadata.get("development", {}).get("curve_source", "?")
+    quality_note = "drag" if drag else "hq"
+    curve_src = working.metadata.get("development", {}).get("curve_source", "?")
     process = getattr(development, "color_process", None) or "bw"
     mode_note = f" · {process.upper()}" if process != "bw" else ""
     if process in {"c41", "e6"}:
