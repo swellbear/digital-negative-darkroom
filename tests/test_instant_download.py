@@ -55,20 +55,10 @@ def test_download_labels_include_card():
     assert "card: 'Finished card'" in source or 'card: "Finished card"' in source
 
 
-def test_instant_package_uses_full_res_card_not_live_max():
-    """Commit pull packages positive_preview; LIVE_MAX_SIDE is preview-only."""
+def test_default_download_matches_onscreen_film_look():
+    """AI off → package the viewer card/print; AI on → upscale from full."""
     source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
-    # Full card for ZIP
-    assert "card_full = _to_rgb_u8(development.positive_preview)" in source
-    assert "_write_instant_card_package(card_pkg" in source
-    # Live preview still downscaled
-    assert (
-        "live_view = _downscale_rgb(\n"
-        "            _to_rgb_u8(development.positive_preview), LIVE_MAX_SIDE"
-    ) in source or (
-        "_downscale_rgb(\n"
-        "            _to_rgb_u8(development.positive_preview), LIVE_MAX_SIDE"
-    ) in source
-    # Must not package the downscaled live view
-    assert "_write_instant_card_package(live_view" not in source
-    assert "_write_instant_card_package(live_rgb" not in source
+    assert "card_pkg = card_view" in source
+    assert "package_rgb = live_rgb" in source
+    assert "download matches on-screen print" in source
+    assert "maybe_ai_upscale_rgb" in source

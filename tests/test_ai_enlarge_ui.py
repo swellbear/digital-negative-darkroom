@@ -22,7 +22,8 @@ def test_ai_enlarge_controls_in_download_strip():
     assert 'elem_id="ai_enlarge"' in source
     assert 'elem_id="ai_enlarge_scale"' in source
     assert 'elem_id="ai_enlarge_tip"' in source
-    assert "invents detail" in source
+    assert "Download matches the committed on-screen print" in source
+    assert "invented-detail" in source
     # Shared strip outside Print drawer so Instant can use it.
     print_chunk = source.split('elem_id="drawer_print"')[1].split(
         'elem_id="drawer_frame"'

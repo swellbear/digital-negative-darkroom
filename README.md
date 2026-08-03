@@ -93,7 +93,7 @@ pip install -r requirements-enhance.txt   # onnxruntime
 # Override the model path with DIGITAL_NEGATIVE_ESRGAN_ONNX=/path/to/model.onnx
 ```
 
-In the UI: check **AI enlarge for large-print download** (2× / 4×) before Commit Print or Instant Commit pull. Default off keeps package bytes identical to the process result (aside from Instant always packaging the full-res card).
+In the UI: leave **AI enlarge** off to download the same film-true print you see after Commit. Check it (2× / 4×) only when you want a larger invented-detail file for posters.
 
 ## Tests
 

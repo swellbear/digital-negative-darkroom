@@ -7496,15 +7496,19 @@ def commit_develop(
     }
     if is_instant_film_type(profile.type):
         # Finished card is the deliverable — no enlarger negative package.
-        # Package the full-res card (not the LIVE_MAX_SIDE preview). AI enlarge
-        # is export-only and never written back into live_rgb / process state.
+        # Default download matches the on-screen card (film look). AI enlarge
+        # optionally upscales from the full card for large-file export only.
         card_full = _to_rgb_u8(development.positive_preview)
+        card_view = _downscale_rgb(card_full, LIVE_MAX_SIDE)
         try:
-            card_pkg = maybe_ai_upscale_rgb(
-                card_full,
-                enabled=bool(ai_enlarge),
-                scale=_ai_enlarge_scale(ai_enlarge_scale),
-            )
+            if bool(ai_enlarge):
+                card_pkg = maybe_ai_upscale_rgb(
+                    card_full,
+                    enabled=True,
+                    scale=_ai_enlarge_scale(ai_enlarge_scale),
+                )
+            else:
+                card_pkg = card_view
         except Exception as exc:
             raise gr.Error(f"AI enlarge failed: {exc}") from exc
         card_download = _write_instant_card_package(card_pkg, dn, profile)
@@ -7744,16 +7748,20 @@ def commit_print(
         locks.append("print")
 
     print_full = _to_rgb_u8(result.preview)
-    # Stride-fit the committed print for the viewer — preserves film grain.
-    # (Lanczos "HQ" fit was cleaning Tri-X toward a finer-grain look.)
+    # Stride-fit committed print for the viewer — preserves film grain.
     live_rgb = _downscale_rgb(print_full, LIVE_MAX_SIDE)
-    # AI enlarge is export-only — packages may be larger; live preview is not.
+    # Default download = same pixels as the committed on-screen print (film-true).
+    # Full-res PNG looked "smoothed" in Photos/Drive when fitted; AI enlarge
+    # still starts from print_full when explicitly armed.
     try:
-        package_rgb = maybe_ai_upscale_rgb(
-            print_full,
-            enabled=bool(ai_enlarge),
-            scale=_ai_enlarge_scale(ai_enlarge_scale),
-        )
+        if bool(ai_enlarge):
+            package_rgb = maybe_ai_upscale_rgb(
+                print_full,
+                enabled=True,
+                scale=_ai_enlarge_scale(ai_enlarge_scale),
+            )
+        else:
+            package_rgb = live_rgb
     except Exception as exc:
         raise gr.Error(f"AI enlarge failed: {exc}") from exc
     speed = dn.metadata["print"]["filtration"]["values"].get("filter_speed", 1.0)
@@ -7761,6 +7769,8 @@ def commit_print(
     ai_note = ""
     if bool(ai_enlarge):
         ai_note = f" · AI enlarge {_ai_enlarge_scale(ai_enlarge_scale)}× (download only)"
+    else:
+        ai_note = " · download matches on-screen print"
     summary = (
         f"{_stage_banner('print', locks, state)}\n\n"
         f"**Committed print** — {paper.name} · g{float(print_grade):.1f} · "
@@ -8909,8 +8919,8 @@ def build_ui() -> gr.Blocks:
                     elem_id="ai_enlarge_scale",
                 )
                 _ai_tip = (
-                    "_Export only — invents detail for the download file. "
-                    "Develop / Print look stay the same; preview stays interactive-res._"
+                    "_Download matches the committed on-screen print (film look). "
+                    "Check AI enlarge only if you want a larger invented-detail file._"
                 )
                 if not enhance_available():
                     _ai_tip += (
