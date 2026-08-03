@@ -9,7 +9,7 @@ import numpy as np
 
 from .digital_negative import DigitalNegative
 from .papers import PaperProfile
-from .print_engine import REFERENCE_LOG_TRANSMITTANCE
+from .print_engine import REFERENCE_LOG_TRANSMITTANCE, apply_border
 from .spectral import (
     N_WAVELENGTHS,
     combine_dye_densities,
@@ -173,14 +173,9 @@ def print_color_negative(
     # lift crushed exposures so Live print reads as a print, not a cyan mask.
     preview = _balance_ra4_preview(preview)
 
-    bf = float(np.clip(border_frac, 0.0, 0.45))
-    if bf > 1e-6 and preview.ndim >= 2:
-        h, w = preview.shape[:2]
-        y0, x0 = int(h * bf), int(w * bf)
-        y1, x1 = h - y0, w - x0
-        bordered = np.zeros_like(preview)
-        bordered[y0:y1, x0:x1] = preview[y0:y1, x0:x1]
-        preview = bordered
+    # Same white easel as B&W: expand the sheet — do not paint a black inset
+    # that crops the picture in place (older RA-4 path did that).
+    preview = apply_border(preview, border_frac)
 
     filtration = {
         "cc_cyan": float(cc_cyan),
