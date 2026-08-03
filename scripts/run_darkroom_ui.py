@@ -5164,12 +5164,30 @@ def _to_rgb_u8(gray_float: np.ndarray, *, assume_linear: bool = False) -> np.nda
 
 
 def _downscale_rgb(rgb: np.ndarray, max_side: int) -> np.ndarray:
+    """Fast stride proxy for live exploration / drag. Prefer ``_downscale_rgb_hq``
+    when the on-screen frame must match a full-res download's appearance."""
     h, w = rgb.shape[:2]
     m = max(h, w)
     if m <= max_side:
         return rgb
     step = int(np.ceil(m / max_side))
     return np.ascontiguousarray(rgb[::step, ::step])
+
+
+def _downscale_rgb_hq(rgb: np.ndarray, max_side: int) -> np.ndarray:
+    """Lanczos downscale so committed preview matches the download when fitted."""
+    from PIL import Image
+
+    arr = np.asarray(rgb)
+    h, w = arr.shape[:2]
+    m = max(h, w)
+    if m <= max_side:
+        return np.ascontiguousarray(arr)
+    scale = max_side / float(m)
+    tw, th = max(1, int(round(w * scale))), max(1, int(round(h * scale)))
+    return np.ascontiguousarray(
+        np.asarray(Image.fromarray(arr).resize((tw, th), resample=Image.Resampling.LANCZOS))
+    )
 
 
 def parse_crop_rect(text) -> tuple[float, float, float, float]:
@@ -7677,7 +7695,9 @@ def commit_print(
         locks.append("print")
 
     print_full = _to_rgb_u8(result.preview)
-    live_rgb = _downscale_rgb(print_full, LIVE_MAX_SIDE)
+    # HQ downscale so the committed on-screen print matches the download's look
+    # when fitted (stride proxies alias grain and read as a different print).
+    live_rgb = _downscale_rgb_hq(print_full, LIVE_MAX_SIDE)
     # AI enlarge is export-only — packages may be larger; live preview is not.
     try:
         package_rgb = maybe_ai_upscale_rgb(
