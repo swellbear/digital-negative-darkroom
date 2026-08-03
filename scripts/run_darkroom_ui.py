@@ -4161,11 +4161,32 @@ def toggle_ab_print(state):
     )
 
 
+def _recipe_ui_mode(chemistry_mode, state) -> str:
+    """Resolve active chemistry from the radio first, then state fallbacks."""
+    for candidate in (
+        chemistry_mode,
+        (state or {}).get("chemistry_mode"),
+        ((state or {}).get("controls") or {}).get("chemistry_mode"),
+    ):
+        mode = str(candidate or "").lower()
+        if mode in {"bw", "color", "instant"}:
+            return mode
+    return "bw"
+
+
 def export_recipe_file(
     chemistry_mode, film_id, developer_id, development_minutes, contrast, grain,
     exposure_index, contrast_filter, scene_exposure, halation,
     paper_id, print_grade, print_exposure, print_contrast, recipe_name,
+    cc_cyan=0.0,
+    cc_magenta=0.0,
+    cc_yellow=0.0,
+    process_temp_c=21.0,
+    instant_chroma=1.0,
+    instant_warmth=0.0,
+    instant_border=True,
 ):
+    """Snapshot Develop/Print knobs — including Color CC and Instant process."""
     recipe = build_recipe(
         film_id=film_id,
         developer_id=developer_id,
@@ -4183,6 +4204,23 @@ def export_recipe_file(
             "contrast_filter": str(contrast_filter),
             "scene_exposure_seconds": float(scene_exposure),
             "halation": float(halation),
+            # Color RA-4 pack
+            "cc_cyan": float(cc_cyan or 0.0),
+            "cc_magenta": float(cc_magenta or 0.0),
+            "cc_yellow": float(cc_yellow or 0.0),
+            # Instant integral card
+            "process_temp_c": float(
+                21.0 if process_temp_c is None else process_temp_c
+            ),
+            "instant_chroma": float(
+                1.0 if instant_chroma is None else instant_chroma
+            ),
+            "instant_warmth": float(
+                0.0 if instant_warmth is None else instant_warmth
+            ),
+            "instant_border": bool(
+                True if instant_border is None else instant_border
+            ),
         },
     )
     out = Path(tempfile.gettempdir()) / "darkroom_downloads"
@@ -4193,7 +4231,7 @@ def export_recipe_file(
     return gr.update(value=str(path))
 
 
-def apply_recipe_file(recipe_file, state):
+def apply_recipe_file(recipe_file, chemistry_mode, state):
     """Load a recipe JSON onto the active frame only (not the whole roll)."""
     if recipe_file is None:
         raise gr.Error("Choose a recipe JSON first.")
@@ -4205,13 +4243,23 @@ def apply_recipe_file(recipe_file, state):
     recipe_mode = str(recipe.get("chemistry_mode") or "bw").lower()
     if recipe_mode not in {"bw", "color", "instant"}:
         recipe_mode = "bw"
-    current_mode = str(((state or {}).get("controls") or {}).get("chemistry_mode") or "bw")
-    if state and state.get("dn") is not None and current_mode != recipe_mode:
+    current_mode = _recipe_ui_mode(chemistry_mode, state)
+    # Always require an explicit mode match — never write chemistry_mode here,
+    # or on_chemistry_mode_change would reset film/paper and fight the recipe.
+    if current_mode != recipe_mode:
         raise gr.Error(
             f"Recipe is {recipe_mode.upper()} chemistry — switch Chemistry mode before loading."
         )
     film_id = recipe["film_id"]
-    profile = _film_profile(film_id)
+    try:
+        profile = _film_profile(film_id)
+    except Exception as exc:
+        raise gr.Error(f"Unknown film in recipe: {film_id}") from exc
+    film_mode = chemistry_mode_for_film_type(profile.type)
+    if film_mode != recipe_mode:
+        raise gr.Error(
+            f"Recipe film is {film_mode.upper()} but recipe chemistry_mode is {recipe_mode.upper()}."
+        )
     chem = get_chemistry(profile, recipe["developer_id"])
     minutes = float(recipe["development_minutes"])
     if chem is not None:
@@ -4236,6 +4284,21 @@ def apply_recipe_file(recipe_file, state):
     print_grade = float(recipe["print_grade"])
     print_exposure = float(recipe["print_exposure"])
     print_contrast = float(recipe.get("print_contrast", 0.0))
+    cc_cyan = float(extras.get("cc_cyan", 0.0))
+    cc_magenta = float(extras.get("cc_magenta", 0.0))
+    cc_yellow = float(extras.get("cc_yellow", 0.0))
+    process_temp_c = float(
+        extras.get("process_temp_c", profile.defaults.get("process_temp_c", 21.0))
+    )
+    instant_chroma = float(
+        extras.get("instant_chroma", profile.defaults.get("chroma", 1.0))
+    )
+    instant_warmth = float(
+        extras.get("instant_warmth", profile.defaults.get("warmth", 0.0))
+    )
+    instant_border = bool(
+        extras.get("instant_border", profile.defaults.get("card_border", True))
+    )
     # Persist onto the active frame so switching away / back keeps the recipe
     # here without leaking it onto other roll frames.
     if state and state.get("dn") is not None:
@@ -4258,12 +4321,20 @@ def apply_recipe_file(recipe_file, state):
                 "print_grade": print_grade,
                 "print_exposure": print_exposure,
                 "print_contrast": print_contrast,
+                "cc_cyan": cc_cyan,
+                "cc_magenta": cc_magenta,
+                "cc_yellow": cc_yellow,
+                "process_temp_c": process_temp_c,
+                "instant_chroma": instant_chroma,
+                "instant_warmth": instant_warmth,
+                "instant_border": instant_border,
             },
         )
+        state = {**state, "chemistry_mode": recipe_mode}
     film_choices = _film_choices_for_mode(recipe_mode)
     paper_choices = _paper_choices_for_mode(recipe_mode)
     return (
-        gr.update(value=recipe_mode),
+        gr.skip(),  # chemistry_mode — already matched; don't reset catalogs
         gr.update(choices=film_choices, value=film_id),
         gr.update(choices=chemistry_choices(profile), value=recipe["developer_id"]),
         minutes_update,
@@ -4277,6 +4348,13 @@ def apply_recipe_file(recipe_file, state):
         gr.update(value=print_grade),
         gr.update(value=print_exposure),
         gr.update(value=print_contrast),
+        gr.update(value=cc_cyan),
+        gr.update(value=cc_magenta),
+        gr.update(value=cc_yellow),
+        gr.update(value=process_temp_c),
+        gr.update(value=instant_chroma),
+        gr.update(value=instant_warmth),
+        gr.update(value=instant_border),
         gr.update(value=str(recipe.get("name", ""))),
         tip,
         state,
@@ -9784,7 +9862,8 @@ def build_ui() -> gr.Blocks:
                     )
                     load_recipe_btn = gr.Button("Apply recipe", size="sm")
                     recipe_tip = gr.Markdown(
-                        "_Save film / chemistry / print controls as JSON._"
+                        "_Save film / chemistry / print controls as JSON "
+                        "(Color CC + Instant temp/chroma included)._"
                     )
 
                 with gr.Accordion(
@@ -10611,6 +10690,8 @@ def build_ui() -> gr.Blocks:
             chemistry_mode, film, developer, development_minutes, contrast, grain,
             exposure_index, contrast_filter, scene_exposure, halation,
             paper, print_grade, print_exposure, print_contrast, recipe_name,
+            cc_cyan, cc_magenta, cc_yellow,
+            process_temp, instant_chroma, instant_warmth, instant_border,
         ]
         save_recipe_btn.click(
             fn=export_recipe_file,
@@ -10619,11 +10700,13 @@ def build_ui() -> gr.Blocks:
         )
         load_recipe_btn.click(
             fn=apply_recipe_file,
-            inputs=[recipe_file, state],
+            inputs=[recipe_file, chemistry_mode, state],
             outputs=[
                 chemistry_mode, film, developer, development_minutes, contrast, grain,
                 exposure_index, contrast_filter, scene_exposure, halation,
                 paper, print_grade, print_exposure, print_contrast,
+                cc_cyan, cc_magenta, cc_yellow,
+                process_temp, instant_chroma, instant_warmth, instant_border,
                 recipe_name, recipe_tip, state,
             ],
         ).then(
