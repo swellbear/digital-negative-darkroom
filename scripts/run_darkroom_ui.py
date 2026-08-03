@@ -5164,30 +5164,17 @@ def _to_rgb_u8(gray_float: np.ndarray, *, assume_linear: bool = False) -> np.nda
 
 
 def _downscale_rgb(rgb: np.ndarray, max_side: int) -> np.ndarray:
-    """Fast stride proxy for live exploration / drag. Prefer ``_downscale_rgb_hq``
-    when the on-screen frame must match a full-res download's appearance."""
+    """Stride fit for the viewer — preserves film grain energy.
+
+    Lanczos/"HQ" downscale was wiping Tri-X grain and reading as a cleaner
+    stock than the profile. Film-true preview > smooth HD proxy.
+    """
     h, w = rgb.shape[:2]
     m = max(h, w)
     if m <= max_side:
         return rgb
     step = int(np.ceil(m / max_side))
     return np.ascontiguousarray(rgb[::step, ::step])
-
-
-def _downscale_rgb_hq(rgb: np.ndarray, max_side: int) -> np.ndarray:
-    """Lanczos downscale so committed preview matches the download when fitted."""
-    from PIL import Image
-
-    arr = np.asarray(rgb)
-    h, w = arr.shape[:2]
-    m = max(h, w)
-    if m <= max_side:
-        return np.ascontiguousarray(arr)
-    scale = max_side / float(m)
-    tw, th = max(1, int(round(w * scale))), max(1, int(round(h * scale)))
-    return np.ascontiguousarray(
-        np.asarray(Image.fromarray(arr).resize((tw, th), resample=Image.Resampling.LANCZOS))
-    )
 
 
 def parse_crop_rect(text) -> tuple[float, float, float, float]:
@@ -6696,9 +6683,9 @@ def _run_live_develop_then_print(
     Large viewer shows the theoretical final print — what you'd get after
     Commit Develop + Commit Print with these controls.
 
-    High-quality path must bake grain on the full (or inspect-capped) negative
-    and Lanczos-fit the print — developing a LIVE_MAX_SIDE stride proxy made
-    Tri-X look like oatmeal in Live, then "lose grain" after Commit Develop.
+    High-quality path bakes on the full (or inspect-capped) negative — same
+    working set as Commit Develop — then stride-fits the print for the viewer
+    so film grain is not Lanczos-cleaned. Drag keeps a smaller proxy for speed.
     """
     drag = max_side <= DRAG_MAX_SIDE
     if drag:
@@ -6740,9 +6727,7 @@ def _run_live_develop_then_print(
         commit=False,
     )
     if is_instant_film_type(profile.type):
-        live_rgb = _to_rgb_u8(development.positive_preview)
-        if not drag:
-            live_rgb = _downscale_rgb_hq(live_rgb, max_side)
+        live_rgb = _downscale_rgb(_to_rgb_u8(development.positive_preview), max_side)
         quality_note = "drag" if drag else "hq"
         temp_c = float(working.metadata.get("development", {}).get("process_temp_c", 21.0))
         summary = (
@@ -6792,9 +6777,8 @@ def _run_live_develop_then_print(
         commit=False,
         **tech,
     )
-    live_rgb = _to_rgb_u8(printed.preview)
-    if not drag:
-        live_rgb = _downscale_rgb_hq(live_rgb, max_side)
+    # Stride-fit — keeps stock grain; do not Lanczos-clean the film look.
+    live_rgb = _downscale_rgb(_to_rgb_u8(printed.preview), max_side)
     neg_full = _color_or_bw_negative_view(development)
     neg_inspect = _downscale_rgb(neg_full, INSPECT_MAX_SIDE)
     neg_view = _downscale_rgb(neg_full, LIVE_MAX_SIDE)
@@ -6981,9 +6965,8 @@ def live_preview(
         if _locked(state, "development"):
             # Print-only commit preview.
             # High quality: print the full developed T (same as Commit Print), then
-            # Lanczos-fit to the viewer — striding T *before* print exaggerated
-            # grain into chunky aliasing that vanished on commit.
-            # Drag: keep the fast stride proxy.
+            # stride-fit the viewer so film grain stays with the stock.
+            # Drag: keep the fast stride proxy on T.
             paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
             tech = _technique_kwargs(
                 split_on, soft_grade, hard_grade, soft_seconds, hard_seconds,
@@ -7010,7 +6993,8 @@ def live_preview(
                     commit=False,
                     **tech,
                 )
-                live_rgb = _downscale_rgb_hq(_to_rgb_u8(result.preview), max_side)
+                # Same stride fit as Commit Print — film grain stays with the stock.
+                live_rgb = _downscale_rgb(_to_rgb_u8(result.preview), max_side)
             else:
                 if state.get("development_full") is not None:
                     t = state["development_full"].transmittance
@@ -7760,9 +7744,9 @@ def commit_print(
         locks.append("print")
 
     print_full = _to_rgb_u8(result.preview)
-    # HQ downscale so the committed on-screen print matches the download's look
-    # when fitted (stride proxies alias grain and read as a different print).
-    live_rgb = _downscale_rgb_hq(print_full, LIVE_MAX_SIDE)
+    # Stride-fit the committed print for the viewer — preserves film grain.
+    # (Lanczos "HQ" fit was cleaning Tri-X toward a finer-grain look.)
+    live_rgb = _downscale_rgb(print_full, LIVE_MAX_SIDE)
     # AI enlarge is export-only — packages may be larger; live preview is not.
     try:
         package_rgb = maybe_ai_upscale_rgb(

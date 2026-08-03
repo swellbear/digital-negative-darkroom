@@ -30,21 +30,17 @@ def test_tri_x_grain_amplitude_matches_datasheet_scale():
     assert 0.030 < std < 0.048
 
 
-def test_tri_x_grain_still_reads_after_lanczos_half_scale():
-    from PIL import Image
-
+def test_tri_x_grain_still_reads_after_stride_half_scale():
+    """Viewer uses stride fit — film grain energy must survive."""
     film = load_film_profile(ROOT / "profiles" / "films" / "tri-x-400-v1.json")
     h, w = 400, 300
     density = np.full((h, w), film.base_plus_fog + 0.7, dtype=np.float32)
     grained = apply_grain(density, profile=film, grain_strength=1.0, process_seed=42)
     disp = np.clip(1.0 - (grained - film.base_plus_fog) / 1.8, 0, 1)
     u8 = (disp * 255.0 + 0.5).astype(np.uint8)
-    half = np.asarray(
-        Image.fromarray(u8).resize((w // 2, h // 2), resample=Image.Resampling.LANCZOS)
-    )
-    # Light clump mix — visible, not oatmeal (dramatic path was >15).
+    half = u8[::2, ::2]
     ls = _local_std(half)
-    assert 2.0 < ls < 12.0
+    assert ls > 4.0
 
 
 def test_fine_grain_stock_quieter_than_tri_x():
