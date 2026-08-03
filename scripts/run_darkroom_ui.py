@@ -584,6 +584,31 @@ footer, .gradio-container footer {
   flex: 1 1 0 !important;
   min-width: 0 !important;
 }
+/* Print CC / split / strips — full-width stacks in the narrow drawer. */
+#cc_row,
+#split_grade_row,
+#split_seconds_row,
+#test_strips_row {
+  gap: 2px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+#cc_row .block,
+#split_grade_row .block,
+#split_seconds_row .block,
+#test_strips_row .block {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+}
+#print_instant_note {
+  margin: 4px 0 8px !important;
+  font-size: var(--dr-fs-note) !important;
+  line-height: 1.3 !important;
+  color: var(--dr-text-dim) !important;
+}
+#print_instant_note p { margin: 0 !important; }
 #drawer_host,
 #drawer_host .drawer-panel,
 #drawer_host .gr-accordion,
@@ -5239,7 +5264,8 @@ def on_chemistry_mode_change(mode: str, split_on=False, state=None):
         gr.update(visible=not is_instant, interactive=not is_instant),  # scene_exposure
         gr.update(visible=not is_instant, interactive=not is_instant),  # halation
         gr.update(visible=not is_instant, interactive=not is_instant),  # print_exposure
-        gr.update(visible=not is_instant),  # print drawer host
+        gr.update(visible=not is_instant),  # print_enlarger stack
+        gr.update(visible=is_instant),  # print_instant_note
         gr.update(
             value="Commit pull" if is_instant else "Commit Develop",
             interactive=True,
@@ -8871,8 +8897,8 @@ def _base_math_md(base_seconds) -> str:
     seconds = float(base_seconds)
     stops = base_seconds_to_stops(seconds)
     return (
-        f"**Base timer** — **{seconds:g}s** enlarger clock "
-        f"(≈ **{stops:+.2f} stops** vs calibrated {REFERENCE_BASE_SECONDS:g}s)."
+        f"**Base** — **{seconds:g}s** ≈ **{stops:+.2f}** stops "
+        f"(cal {REFERENCE_BASE_SECONDS:g}s)."
     )
 
 
@@ -9834,91 +9860,102 @@ def build_ui() -> gr.Blocks:
                         unlock_develop_btn = gr.Button("Unlock", interactive=False, size="sm")
 
                 with gr.Group(elem_id="drawer_print", elem_classes=["drawer-panel"]) as print_drawer:
-                    with gr.Accordion("Print", open=True, elem_id="acc_print") as print_acc:
-                        paper = gr.Dropdown(
-                            choices=PAPER_CHOICES_BW,
-                            value=PAPER_CHOICES_BW[0][1] if PAPER_CHOICES_BW else None,
-                            label="Paper",
-                            allow_custom_value=True,
-                        )
-                        print_exposure = gr.Slider(
-                            2.0, 64.0, value=8.0, step=0.5, label="Base exposure (s)"
-                        )
-                        base_math_md = gr.Markdown(_base_math_md(8.0), elem_id="base_math")
-                        print_grade = gr.Slider(
-                            0.0, 5.0, value=2.5, step=0.5, label="MG grade", visible=True
-                        )
-                        print_contrast = gr.Slider(
-                            -1.0, 1.0, value=0.0, step=0.05, label="Filter", visible=True
-                        )
-                        with gr.Row(elem_id="cc_row"):
-                            cc_cyan = gr.Slider(
-                                0, 100, value=0, step=1, label="CC Cyan", visible=False
+                    # Instant has no enlarger — keep the drawer mounted so the Print
+                    # rail never lands on an empty host; swap stack ↔ note by mode.
+                    print_instant_note = gr.Markdown(
+                        "_**Instant** has no enlarger Print stage. "
+                        "Finish on **Develop** with **Commit pull**._",
+                        visible=False,
+                        elem_id="print_instant_note",
+                    )
+                    with gr.Group(elem_id="print_enlarger") as print_enlarger:
+                        with gr.Accordion("Print", open=True, elem_id="acc_print") as print_acc:
+                            paper = gr.Dropdown(
+                                choices=PAPER_CHOICES_BW,
+                                value=PAPER_CHOICES_BW[0][1] if PAPER_CHOICES_BW else None,
+                                label="Paper",
+                                allow_custom_value=True,
                             )
-                            cc_magenta = gr.Slider(
-                                0, 100, value=0, step=1, label="CC Magenta", visible=False
+                            print_exposure = gr.Slider(
+                                2.0, 64.0, value=8.0, step=0.5, label="Base (s)"
                             )
-                            cc_yellow = gr.Slider(
-                                0, 100, value=0, step=1, label="CC Yellow", visible=False
+                            base_math_md = gr.Markdown(_base_math_md(8.0), elem_id="base_math")
+                            print_grade = gr.Slider(
+                                0.0, 5.0, value=2.5, step=0.5, label="MG grade", visible=True
                             )
-                        gr.Markdown(
-                            "_Default: paper → exposure → filtration → **Commit Print**. "
-                            "Split-grade / test strips under **More**._",
-                            elem_id="db_hint",
-                        )
-                        with gr.Accordion(
-                            "More",
-                            open=False,
-                            elem_id="acc_print_more",
-                            elem_classes=["drawer-more"],
-                        ):
-                            split_grade = gr.Checkbox(
-                                label="Split-grade", value=False, visible=True
+                            print_contrast = gr.Slider(
+                                -1.0, 1.0, value=0.0, step=0.05, label="Filter", visible=True
                             )
-                            with gr.Row(elem_id="split_grade_row"):
-                                soft_grade = gr.Slider(
-                                    0.0, 5.0, value=0.0, step=0.5,
-                                    label="Soft grade", visible=False,
+                            # Stack CC / split / strips — side-by-side Rows crushed
+                            # each slider to ~76px in the 230px drawer.
+                            with gr.Column(elem_id="cc_row"):
+                                cc_cyan = gr.Slider(
+                                    0, 100, value=0, step=1, label="CC Cyan", visible=False
                                 )
-                                hard_grade = gr.Slider(
-                                    0.0, 5.0, value=5.0, step=0.5,
-                                    label="Hard grade", visible=False,
+                                cc_magenta = gr.Slider(
+                                    0, 100, value=0, step=1, label="CC Magenta", visible=False
                                 )
-                            with gr.Row(elem_id="split_seconds_row"):
-                                soft_seconds = gr.Slider(
-                                    1.0, 64.0, value=4.5, step=0.5,
-                                    label="Soft (s)", visible=False,
+                                cc_yellow = gr.Slider(
+                                    0, 100, value=0, step=1, label="CC Yellow", visible=False
                                 )
-                                hard_seconds = gr.Slider(
-                                    1.0, 64.0, value=3.5, step=0.5,
-                                    label="Hard (s)", visible=False,
-                                )
-                            test_strips = gr.Checkbox(label="Test strips", value=False)
-                            with gr.Row(elem_id="test_strips_row"):
-                                test_bands = gr.Slider(
-                                    3, 9, value=5, step=1, label="Bands", visible=False
-                                )
-                                test_stops = gr.Slider(
-                                    0.25, 1.0, value=0.5, step=0.25,
-                                    label="Band stops", visible=False,
-                                )
-                            flash_stops = gr.Slider(
-                                0.0, 2.0, value=0.0, step=0.05, label="Flash (stops)"
+                            gr.Markdown(
+                                "_Default: paper → exposure → filtration → **Commit Print**. "
+                                "Extras under **More**._",
+                                elem_id="db_hint",
                             )
-                            dry_down = gr.Slider(
-                                0.0, 20.0, value=0.0, step=0.5, label="Dry-down %"
+                            with gr.Accordion(
+                                "More",
+                                open=False,
+                                elem_id="acc_print_more",
+                                elem_classes=["drawer-more"],
+                            ):
+                                split_grade = gr.Checkbox(
+                                    label="Split-grade", value=False, visible=True
+                                )
+                                with gr.Column(elem_id="split_grade_row"):
+                                    soft_grade = gr.Slider(
+                                        0.0, 5.0, value=0.0, step=0.5,
+                                        label="Soft grade", visible=False,
+                                    )
+                                    hard_grade = gr.Slider(
+                                        0.0, 5.0, value=5.0, step=0.5,
+                                        label="Hard grade", visible=False,
+                                    )
+                                with gr.Column(elem_id="split_seconds_row"):
+                                    soft_seconds = gr.Slider(
+                                        1.0, 64.0, value=4.5, step=0.5,
+                                        label="Soft (s)", visible=False,
+                                    )
+                                    hard_seconds = gr.Slider(
+                                        1.0, 64.0, value=3.5, step=0.5,
+                                        label="Hard (s)", visible=False,
+                                    )
+                                test_strips = gr.Checkbox(label="Test strips", value=False)
+                                with gr.Column(elem_id="test_strips_row"):
+                                    test_bands = gr.Slider(
+                                        3, 9, value=5, step=1, label="Bands", visible=False
+                                    )
+                                    test_stops = gr.Slider(
+                                        0.25, 1.0, value=0.5, step=0.25,
+                                        label="Band stops", visible=False,
+                                    )
+                                flash_stops = gr.Slider(
+                                    0.0, 2.0, value=0.0, step=0.05, label="Flash (stops)"
+                                )
+                                dry_down = gr.Slider(
+                                    0.0, 20.0, value=0.0, step=0.5, label="Dry-down %"
+                                )
+                                tone = gr.Dropdown(
+                                    choices=TONE_LABELS, value="none", label="Tone", visible=True
+                                )
+                                border_frac = gr.Slider(
+                                    0.0, 0.12, value=0.0, step=0.005, label="Border"
+                                )
+                        with gr.Row(elem_id="print_commit_row"):
+                            print_btn = gr.Button(
+                                "Commit Print", interactive=False, variant="primary", size="sm"
                             )
-                            tone = gr.Dropdown(
-                                choices=TONE_LABELS, value="none", label="Tone", visible=True
-                            )
-                            border_frac = gr.Slider(
-                                0.0, 0.12, value=0.0, step=0.005, label="Border"
-                            )
-                    with gr.Row(elem_id="print_commit_row"):
-                        print_btn = gr.Button(
-                            "Commit Print", interactive=False, variant="primary", size="sm"
-                        )
-                        unlock_print_btn = gr.Button("Unlock", interactive=False, size="sm")
+                            unlock_print_btn = gr.Button("Unlock", interactive=False, size="sm")
 
                 with gr.Group(elem_id="drawer_frame", elem_classes=["drawer-panel"]):
                     with gr.Accordion("Frame", open=True, elem_id="acc_frame") as frame_acc:
@@ -10572,7 +10609,8 @@ def build_ui() -> gr.Blocks:
                 scene_exposure,
                 halation,
                 print_exposure,
-                print_drawer,
+                print_enlarger,
+                print_instant_note,
                 develop_btn,
                 unlock_develop_btn,
                 print_btn,
