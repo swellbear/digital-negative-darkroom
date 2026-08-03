@@ -20,6 +20,7 @@ _FILM_DEV_STOPS_PER_DY = 2.4          # density-up → longer development
 _FILM_N_PER_DY = 1.8                  # steeper film → +contrast
 _PRINT_STOPS_PER_DY = 2.2             # brighter print mid → shorter exposure
 _PRINT_GRADE_PER_DY = 4.0             # steeper print → higher grade
+_PRINT_CONTRAST_PER_DY = 1.6          # RA-4 paper contrast steepen
 
 
 def _norm_xy(
@@ -56,6 +57,7 @@ def curve_overlay_payload(
     contrast: float,
     print_grade: float,
     print_exposure: float,
+    print_contrast: float = 0.0,
 ) -> dict[str, Any]:
     """JSON-ready film + print polylines and parametric drag handles."""
     log_e = np.asarray(report.log_e, dtype=np.float64)
@@ -112,13 +114,16 @@ def curve_overlay_payload(
                 "tip": "Drag up/down — base exposure (brighter print = less time)",
             },
         ]
-        # MG grade handle is B&W multigrade only — RA-4 / color papers use CC
-        # filtration in the Print drawer, not a grade slider.
         paper_type = str(report.stats.get("paper_type") or "").lower()
         if not paper_type:
-            # Older reports may omit paper_type; treat missing as MG-capable.
             paper_type = "bw_multigrade"
-        if paper_type.startswith("bw") or paper_type in {"bw_multigrade", "multigrade"}:
+        is_ra4 = paper_type in {"color_ra4", "color"} or str(
+            report.stats.get("print_process") or ""
+        ) == "ra4"
+        is_bw_mg = (not is_ra4) and (
+            paper_type.startswith("bw") or paper_type in {"bw_multigrade", "multigrade"}
+        )
+        if is_bw_mg:
             print_handles.append(
                 {
                     "id": "print_grade",
@@ -127,6 +132,33 @@ def curve_overlay_payload(
                     "label": "Grade",
                     "tip": "Drag up/down — MG grade / contrast filtration",
                 }
+            )
+            print_title = (
+                f"{report.stats.get('paper', 'Paper')} · "
+                f"grade {float(print_grade):.1f} · {float(print_exposure):g}s"
+            )
+        elif is_ra4:
+            p_contrast = float(
+                print_contrast
+                if print_contrast is not None
+                else report.stats.get("print_contrast", 0.0)
+            )
+            print_handles.append(
+                {
+                    "id": "print_contrast",
+                    "x": float(np.clip((hi_x - x0) / max(x1 - x0, 1e-9), 0.05, 0.95)),
+                    "y": float(np.clip((hi_lr - pr0) / max(pr1 - pr0, 1e-9), 0.05, 0.95)),
+                    "label": "Ctr",
+                    "tip": "Drag up/down — RA-4 paper contrast",
+                }
+            )
+            print_title = (
+                f"{report.stats.get('paper', 'Paper')} · RA-4 · "
+                f"ctr {p_contrast:+.2f} · {float(print_exposure):g}s"
+            )
+        else:
+            print_title = (
+                f"{report.stats.get('paper', 'Paper')} · {float(print_exposure):g}s"
             )
         zone_guides = []
         for z in range(0, 11, 2):
@@ -145,10 +177,7 @@ def curve_overlay_payload(
             "polyline": print_poly,
             "handles": print_handles,
             "zone_guides": zone_guides,
-            "title": (
-                f"{report.stats.get('paper', 'Paper')} · "
-                f"grade {float(print_grade):.1f} · {float(print_exposure):g}s"
-            ),
+            "title": print_title,
         }
 
     ci = float(report.stats.get("contrast_index") or _contrast_index(
@@ -171,12 +200,14 @@ def curve_overlay_payload(
             "contrast": float(contrast),
             "print_grade": float(print_grade),
             "print_exposure": float(print_exposure),
+            "print_contrast": float(print_contrast),
         },
         "stats": {
             "contrast_index": ci,
             "curve_source": report.stats.get("curve_source"),
             "shadow_zone": report.stats.get("shadow_zone"),
             "highlight_zone": report.stats.get("highlight_zone"),
+            "print_process": report.stats.get("print_process"),
         },
     }
 
@@ -189,6 +220,7 @@ def apply_curve_handle_edit(
     contrast: float,
     print_grade: float,
     print_exposure: float,
+    print_contrast: float = 0.0,
     minutes_min: float = 1.5,
     minutes_max: float = 24.0,
     contrast_min: float = -1.0,
@@ -197,6 +229,8 @@ def apply_curve_handle_edit(
     grade_max: float = 5.0,
     exposure_min: float = 2.0,
     exposure_max: float = 64.0,
+    print_contrast_min: float = -1.0,
+    print_contrast_max: float = 1.0,
 ) -> dict[str, Any]:
     """Map a normalized handle drag (+dy = toward top of plot) onto UI settings."""
     hid = str(handle_id or "").strip().lower()
@@ -205,6 +239,7 @@ def apply_curve_handle_edit(
     n_mod = float(contrast)
     grade = float(print_grade)
     seconds = float(print_exposure)
+    p_contrast = float(print_contrast)
     note = ""
 
     if hid == "film_dev":
@@ -228,6 +263,16 @@ def apply_curve_handle_edit(
         grade = float(np.clip(grade + dy * _PRINT_GRADE_PER_DY, grade_min, grade_max))
         grade = float(round(grade * 2.0) / 2.0)  # 0.5 steps
         note = f"MG grade → {grade:.1f}"
+    elif hid == "print_contrast":
+        p_contrast = float(
+            np.clip(
+                p_contrast + dy * _PRINT_CONTRAST_PER_DY,
+                print_contrast_min,
+                print_contrast_max,
+            )
+        )
+        p_contrast = float(round(p_contrast * 20.0) / 20.0)
+        note = f"RA-4 contrast → {p_contrast:+.2f}"
     else:
         return {
             "ok": False,
@@ -235,6 +280,7 @@ def apply_curve_handle_edit(
             "contrast": n_mod,
             "print_grade": grade,
             "print_exposure": seconds,
+            "print_contrast": p_contrast,
             "message": f"Unknown handle `{handle_id}`.",
         }
 
@@ -244,6 +290,7 @@ def apply_curve_handle_edit(
         "contrast": n_mod,
         "print_grade": grade,
         "print_exposure": seconds,
+        "print_contrast": p_contrast,
         "message": note,
         "handle": hid,
         "dy": dy,
