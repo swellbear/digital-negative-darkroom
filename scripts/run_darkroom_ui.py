@@ -1096,15 +1096,43 @@ body.drawer-collapsed #drawer_host,
 #ingest_upload td.filename {
   flex: 1 1 auto !important;
   min-width: 0 !important;
+  /* Gradio's .filename is a column flex (stem above .ext) — flatten to one line. */
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 0 !important;
 }
-#ingest_upload td.filename span {
+#ingest_upload td.filename span,
+#ingest_upload td.filename .stem,
+#ingest_upload td.filename .ext {
   display: inline !important;
   white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 100% !important;
+}
+#ingest_upload td.filename .stem {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+#ingest_upload td.filename .ext {
+  flex: 0 0 auto !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
 }
 #ingest_upload td.download,
 #ingest_upload td.size,
 #ingest_upload tr.file > td:not(.filename) {
   flex: 0 0 auto !important;
+}
+#ingest_upload tr.file .label-clear-button {
+  min-height: 18px !important;
+  height: 18px !important;
+  width: 18px !important;
+  padding: 0 !important;
+  line-height: 1 !important;
 }
 #ingest_upload .wrap {
   height: auto !important;
