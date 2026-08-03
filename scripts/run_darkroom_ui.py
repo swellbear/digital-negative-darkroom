@@ -224,7 +224,10 @@ _INIT_DEV_ID = "standard"
 _INIT_TMIN, _INIT_TMAX, _INIT_TNORM = 4.0, 16.0, 8.0
 
 SAMPLE_DIR = ROOT / "samples" / "raws"
-SAMPLE_CHOICES = [("Synthetic test scene (no file)", "")]
+# Non-empty sentinel — Gradio/Python treat "" as missing, which broke Add to roll
+# when Synthetic was selected (the default when no local raws are present).
+SYNTHETIC_SAMPLE = "synthetic"
+SAMPLE_CHOICES = [("Synthetic test scene (no file)", SYNTHETIC_SAMPLE)]
 if SAMPLE_DIR.exists():
     for path in sorted(SAMPLE_DIR.iterdir()):
         if path.suffix.lower() in {".nef", ".cr2", ".cr3", ".arw", ".dng", ".raf", ".orf", ".rw2"}:
@@ -818,9 +821,14 @@ footer, .gradio-container footer {
   height: 0 !important;
   display: none !important;
 }
-body.drawer-collapsed #drawer_host {
+/* Collapse must beat Gradio-scoped `#drawer_host { flex: 0 0 260px }` rules.
+   Prefer a class on the host itself (same specificity tier after scoping). */
+body.drawer-collapsed #drawer_host,
+#drawer_host.is-collapsed {
+  flex: 0 0 0 !important;
   flex-basis: 0 !important;
   width: 0 !important;
+  min-width: 0 !important;
   max-width: 0 !important;
   padding: 0 !important;
   opacity: 0 !important;
@@ -993,14 +1001,21 @@ body.drawer-collapsed #drawer_host {
 #drawer_host .icon-button-wrapper,
 #drawer_host .reset-button { transform: scale(0.8) !important; }
 /* Keep the dropzone strictly inside its own box — with overflow visible it
-   spilled past its bounds and swallowed clicks meant for Commit Ingest.
-   The upload-in-progress state (spinner + file name + progress bar) needs
-   more room than the idle dropzone, so allow it to grow to fit. */
+   spilled past its bounds and swallowed clicks meant for Add to roll.
+   Idle stays compact; multi-file preview may grow and scroll. */
 #ingest_upload {
   overflow: hidden !important;
   min-height: 74px !important;
   max-height: 120px !important;
   contain: layout paint !important;
+}
+#ingest_upload:has(.file-preview),
+#ingest_upload:has(table.file-preview),
+#ingest_upload:has(.file-preview-holder) {
+  max-height: 200px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  contain: none !important;
 }
 #ingest_upload .wrap,
 #ingest_upload .upload-container,
@@ -1009,6 +1024,21 @@ body.drawer-collapsed #drawer_host {
   overflow: hidden !important;
   min-height: 0 !important;
   max-height: 118px !important;
+}
+#ingest_upload:has(.file-preview) .wrap,
+#ingest_upload:has(table.file-preview) .wrap,
+#ingest_upload:has(.file-preview-holder) .wrap,
+#ingest_upload:has(.file-preview) .upload-container,
+#ingest_upload:has(table.file-preview) .upload-container,
+#ingest_upload:has(.file-preview-holder) .upload-container,
+#ingest_upload:has(.file-preview) .center,
+#ingest_upload:has(table.file-preview) .center,
+#ingest_upload:has(.file-preview-holder) .center,
+#ingest_upload:has(.file-preview) [data-testid="file"],
+#ingest_upload:has(table.file-preview) [data-testid="file"],
+#ingest_upload:has(.file-preview-holder) [data-testid="file"] {
+  max-height: none !important;
+  overflow: visible !important;
 }
 /* Uploading state: keep the file name on one line and let the progress bar
    and byte counter sit inside the box instead of being sliced. */
@@ -1024,29 +1054,58 @@ body.drawer-collapsed #drawer_host {
   max-width: 100% !important;
   min-width: 0 !important;
 }
+/* display:block on <tr> stacked filename / .ext / size on separate lines —
+   use a flex row so names ellipsize on one line in the narrow drawer. */
+#ingest_upload table.file-preview,
+#ingest_upload .file-preview table {
+  display: block !important;
+  width: 100% !important;
+  table-layout: fixed !important;
+  padding: 1px 2px !important;
+  margin: 0 !important;
+}
+#ingest_upload table.file-preview tbody,
+#ingest_upload .file-preview tbody {
+  display: block !important;
+  width: 100% !important;
+}
+#ingest_upload table.file-preview tr.file,
+#ingest_upload .file-preview tr.file,
+#ingest_upload tr.file {
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  gap: 2px !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+}
 #ingest_upload .file-name,
 #ingest_upload .filename,
+#ingest_upload td.filename,
 #ingest_upload td {
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
 }
-#ingest_upload table, #ingest_upload tbody, #ingest_upload tr {
-  width: 100% !important;
-  table-layout: fixed !important;
-  display: block !important;
-}
-/* The uploaded-file preview ships 10px of padding on the table, the row and
-   every cell — ~105px of box for two short lines, which overflowed. */
 #ingest_upload .file-preview-holder {
-  max-height: 100% !important;
-  overflow: hidden !important;
+  max-height: none !important;
+  overflow: visible !important;
 }
-#ingest_upload table.file-preview { padding: 1px 2px !important; margin: 0 !important; }
-#ingest_upload tr.file { padding: 0 !important; }
 #ingest_upload td.filename,
 #ingest_upload td.download { padding: 0 3px !important; }
-#ingest_upload td.filename span { display: inline !important; }
+#ingest_upload td.filename {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+#ingest_upload td.filename span {
+  display: inline !important;
+  white-space: nowrap !important;
+}
+#ingest_upload td.download,
+#ingest_upload td.size,
+#ingest_upload tr.file > td:not(.filename) {
+  flex: 0 0 auto !important;
+}
 #ingest_upload .wrap {
   height: auto !important;
 }
@@ -3349,17 +3408,21 @@ UI_JS = """
   };
 
   window.__drawerCollapsed = false;
+  const setDrawerCollapsed = (collapsed) => {
+    document.body.classList.toggle('drawer-collapsed', !!collapsed);
+    const host = document.getElementById('drawer_host');
+    if (host) host.classList.toggle('is-collapsed', !!collapsed);
+    window.__drawerCollapsed = !!collapsed;
+  };
   const applyDrawer = (name, { fromServer = false } = {}) => {
     const n = (name || 'ingest').toLowerCase();
     const prev = (document.body.dataset.drawer || '').toLowerCase();
     if (!fromServer && document.body.dataset.drawer === n && !document.body.classList.contains('drawer-collapsed')) {
-      document.body.classList.add('drawer-collapsed');
-      window.__drawerCollapsed = true;
+      setDrawerCollapsed(true);
       document.querySelectorAll('#icon_rail .rail-btn').forEach((b) => b.classList.remove('rail-active'));
       return;
     }
-    document.body.classList.remove('drawer-collapsed');
-    window.__drawerCollapsed = false;
+    setDrawerCollapsed(false);
     document.body.dataset.drawer = n;
     document.querySelectorAll('.drawer-panel').forEach((el) => {
       el.classList.toggle('is-open', el.id === 'drawer_' + n);
@@ -5170,9 +5233,20 @@ def _resolve_input(file_obj, sample_path: str | None) -> str | None:
     return paths[0] if paths else None
 
 
-def _collect_input_paths(file_obj, sample_path: str | None) -> list[str]:
-    """Collect one or more upload paths; fall back to the sample when empty."""
-    paths: list[str] = []
+def _is_synthetic_sample(sample_path) -> bool:
+    """True for the built-in synthetic scene (dropdown sentinel or legacy "")."""
+    if sample_path is None:
+        return False
+    return str(sample_path).strip() in ("", SYNTHETIC_SAMPLE)
+
+
+def _collect_input_paths(file_obj, sample_path: str | None) -> list[str | None]:
+    """Collect one or more upload paths; fall back to the sample when empty.
+
+    Synthetic sample yields ``[None]`` so ``ingest_path(None)`` builds the
+    test scene. An empty string must not be treated as "no sample".
+    """
+    paths: list[str | None] = []
     if file_obj is not None:
         items = file_obj if isinstance(file_obj, (list, tuple)) else [file_obj]
         for item in items:
@@ -5184,7 +5258,11 @@ def _collect_input_paths(file_obj, sample_path: str | None) -> list[str]:
                 path = getattr(item, "name", None) or str(item)
             if path:
                 paths.append(path)
-    if not paths and sample_path:
+    if not paths:
+        if sample_path is None:
+            return []
+        if _is_synthetic_sample(sample_path):
+            return [None]
         paths.append(str(sample_path))
     return paths
 
@@ -9519,7 +9597,9 @@ def reset_session():
 
 
 def build_ui() -> gr.Blocks:
-    default_sample = SAMPLE_CHOICES[1][1] if len(SAMPLE_CHOICES) > 1 else ""
+    default_sample = (
+        SAMPLE_CHOICES[1][1] if len(SAMPLE_CHOICES) > 1 else SYNTHETIC_SAMPLE
+    )
     with gr.Blocks(title="Digital Negative Darkroom") as demo:
         state = gr.State(None)
         active_drawer = gr.Textbox(value="ingest", elem_id="active_drawer", show_label=False)
@@ -9574,7 +9654,8 @@ def build_ui() -> gr.Blocks:
                         )
                         ingest_btn = gr.Button("Add to roll", variant="primary", size="sm")
                         gr.Markdown(
-                            "_Adds to the **Roll**, then opens **Develop** for the active frame._",
+                            "_Photos add on drop/choose. For **Sample**, click "
+                            "**Add to roll** — then opens **Develop**._",
                             elem_id="ingest_hint",
                         )
                         gr.Markdown(
