@@ -1646,6 +1646,38 @@ body.module-collapsed #module_panel {
   padding: 1px 5px !important;
   border-radius: 5px !important;
 }
+/* Recipes: never use a File dropzone here — module_panel's 20px button rule
+   crushed Gradio's dropzone <button> so "Load recipe" overlapped "Drop File
+   Here" and spawned broken preview chrome. UploadButton + DownloadButton only. */
+#mod_recipes {
+  overflow: hidden !important;
+}
+#mod_recipes #recipe_download,
+#mod_recipes #recipe_upload,
+#mod_recipes #recipe_apply {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+#mod_recipes #recipe_download button,
+#mod_recipes #recipe_upload button,
+#mod_recipes #recipe_apply {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+#mod_recipes #recipe_load_row {
+  gap: 4px !important;
+  margin: 2px 0 !important;
+}
+#mod_recipes #recipe_load_row > * {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+}
+#mod_recipes .file-preview,
+#mod_recipes .file-preview-holder,
+#mod_recipes table.file-preview {
+  display: none !important;
+}
 #module_panel .prose,
 #module_panel .prose p,
 #module_panel .md {
@@ -4228,16 +4260,39 @@ def export_recipe_file(
     stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in (recipe_name or "recipe"))[:48]
     path = out / f"{stem or 'recipe'}.json"
     save_recipe(path, recipe)
-    return gr.update(value=str(path))
+    # Return the path directly so DownloadButton starts the download on the
+    # same click (gr.update(value=...) only armed it for a second click).
+    return str(path)
+
+
+def _recipe_upload_path(recipe_file) -> str | None:
+    """Normalize Gradio File / UploadButton payloads to a filesystem path."""
+    if recipe_file is None:
+        return None
+    if isinstance(recipe_file, (list, tuple)):
+        if not recipe_file:
+            return None
+        recipe_file = recipe_file[0]
+    if isinstance(recipe_file, (str, Path)):
+        return str(recipe_file)
+    for attr in ("name", "path", "abspath"):
+        val = getattr(recipe_file, attr, None)
+        if val:
+            return str(val)
+    if isinstance(recipe_file, dict):
+        for key in ("path", "name", "abspath"):
+            if recipe_file.get(key):
+                return str(recipe_file[key])
+    return None
 
 
 def apply_recipe_file(recipe_file, chemistry_mode, state):
     """Load a recipe JSON onto the active frame only (not the whole roll)."""
-    if recipe_file is None:
-        raise gr.Error("Choose a recipe JSON first.")
-    path = recipe_file if isinstance(recipe_file, (str, Path)) else getattr(recipe_file, "name", None)
+    path = _recipe_upload_path(recipe_file)
     if not path:
         raise gr.Error("Choose a recipe JSON first.")
+    if not str(path).lower().endswith(".json"):
+        raise gr.Error("Recipe must be a .json file.")
     recipe = load_recipe(path)
     tip = f"**Recipe loaded** — {recipe.get('name', 'untitled')} · this frame only."
     recipe_mode = str(recipe.get("chemistry_mode") or "bw").lower()
@@ -9849,21 +9904,60 @@ def build_ui() -> gr.Blocks:
                     recipe_name = gr.Textbox(
                         value="session", label="Name", elem_id="recipe_name_box"
                     )
-                    with gr.Row():
-                        save_recipe_btn = gr.Button("Save recipe", size="sm")
-                        recipe_download = gr.DownloadButton(
-                            "recipe.json", size="sm", elem_id="recipe_download"
-                        )
-                    recipe_file = gr.File(
-                        label="Load recipe",
-                        file_types=[".json"],
-                        height=80,
-                        elem_id="recipe_upload",
+                    # DownloadButton with value=callable → one-click save+download.
+                    # (A separate .click that outputs into DownloadButton needs two
+                    # clicks in Gradio 6.) Avoid gr.File here: module_panel's
+                    # 20px button height crushes the File dropzone.
+                    recipe_download = gr.DownloadButton(
+                        "Save recipe",
+                        value=export_recipe_file,
+                        inputs=[
+                            chemistry_mode,
+                            film,
+                            developer,
+                            development_minutes,
+                            contrast,
+                            grain,
+                            exposure_index,
+                            contrast_filter,
+                            scene_exposure,
+                            halation,
+                            paper,
+                            print_grade,
+                            print_exposure,
+                            print_contrast,
+                            recipe_name,
+                            cc_cyan,
+                            cc_magenta,
+                            cc_yellow,
+                            process_temp,
+                            instant_chroma,
+                            instant_warmth,
+                            instant_border,
+                        ],
+                        size="sm",
+                        elem_id="recipe_download",
                     )
-                    load_recipe_btn = gr.Button("Apply recipe", size="sm")
+                    with gr.Row(elem_id="recipe_load_row"):
+                        recipe_file = gr.UploadButton(
+                            "Choose JSON",
+                            file_types=[".json"],
+                            size="sm",
+                            elem_id="recipe_upload",
+                            scale=1,
+                            min_width=60,
+                        )
+                        load_recipe_btn = gr.Button(
+                            "Apply",
+                            size="sm",
+                            elem_id="recipe_apply",
+                            scale=1,
+                            min_width=60,
+                        )
                     recipe_tip = gr.Markdown(
-                        "_Save film / chemistry / print controls as JSON "
-                        "(Color CC + Instant temp/chroma included)._"
+                        "_Save / load film · chemistry · print JSON "
+                        "(Color CC + Instant temp/chroma)._",
+                        elem_id="recipe_tip",
                     )
 
                 with gr.Accordion(
@@ -10686,18 +10780,6 @@ def build_ui() -> gr.Blocks:
             outputs=[live_out, inspect_tip, toggle_ab_btn, state],
         )
 
-        recipe_controls = [
-            chemistry_mode, film, developer, development_minutes, contrast, grain,
-            exposure_index, contrast_filter, scene_exposure, halation,
-            paper, print_grade, print_exposure, print_contrast, recipe_name,
-            cc_cyan, cc_magenta, cc_yellow,
-            process_temp, instant_chroma, instant_warmth, instant_border,
-        ]
-        save_recipe_btn.click(
-            fn=export_recipe_file,
-            inputs=recipe_controls,
-            outputs=[recipe_download],
-        )
         load_recipe_btn.click(
             fn=apply_recipe_file,
             inputs=[recipe_file, chemistry_mode, state],
