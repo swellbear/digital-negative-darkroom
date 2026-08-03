@@ -2,8 +2,9 @@
 
 Dragging a handle does not invent an arbitrary tone curve. It nudges the same
 darkroom controls the drawers already expose (dev time, N±, MG grade, base
-exposure), then the engine re-samples the real film/paper response. That keeps
-the preview honest: every shape you see is one the process can actually make.
+exposure / RA-4 contrast), then the engine re-samples the real film/paper
+response. That keeps the preview honest: every shape you see is one the
+process can actually make.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from .analysis import CurveReport, _contrast_index, reflectance_to_zone, zone_reflectance
+from .analysis import CurveReport, _contrast_index, zone_reflectance
 
 
 # Screen-normalized drag sensitivities (dy > 0 = dragged toward top of plot).
@@ -20,6 +21,7 @@ _FILM_DEV_STOPS_PER_DY = 2.4          # density-up → longer development
 _FILM_N_PER_DY = 1.8                  # steeper film → +contrast
 _PRINT_STOPS_PER_DY = 2.2             # brighter print mid → shorter exposure
 _PRINT_GRADE_PER_DY = 4.0             # steeper print → higher grade
+_PRINT_CONTRAST_PER_DY = 1.6          # RA-4 paper contrast knob
 
 
 def _norm_xy(
@@ -56,8 +58,18 @@ def curve_overlay_payload(
     contrast: float,
     print_grade: float,
     print_exposure: float,
+    print_contrast: float = 0.0,
+    chemistry_mode: str = "bw",
 ) -> dict[str, Any]:
-    """JSON-ready film + print polylines and parametric drag handles."""
+    """JSON-ready film + print polylines and parametric drag handles.
+
+    ``chemistry_mode`` gates handles so Color/Instant cannot drag MG grade or
+    an enlarger paper curve the live process ignores.
+    """
+    mode = str(chemistry_mode or report.stats.get("chemistry_mode") or "bw").lower()
+    if mode not in {"bw", "color", "instant"}:
+        mode = "bw"
+
     log_e = np.asarray(report.log_e, dtype=np.float64)
     active = np.asarray(report.active_density, dtype=np.float64)
     base = np.asarray(report.base_density, dtype=np.float64)
@@ -74,25 +86,39 @@ def curve_overlay_payload(
     film_poly = _downsample_polyline(_norm_xy(log_e, active, x0=x0, x1=x1, y0=y0, y1=y1))
     base_poly = _downsample_polyline(_norm_xy(log_e, base, x0=x0, x1=x1, y0=y0, y1=y1))
 
+    if mode == "instant":
+        film_dev_tip = "Drag up/down — pod process time"
+        film_n_tip = "Drag up/down — Instant contrast (N+ / N−)"
+        film_title_prefix = f"{report.stats.get('film', 'Instant')} · pod"
+    elif mode == "color":
+        film_dev_tip = "Drag up/down — C-41 / E-6 development time"
+        film_n_tip = "Drag up/down — contrast (N+ / N−)"
+        film_title_prefix = f"{report.stats.get('film', 'Film')}"
+    else:
+        film_dev_tip = "Drag up/down — development time (push / pull)"
+        film_n_tip = "Drag up/down — contrast (N+ / N−)"
+        film_title_prefix = f"{report.stats.get('film', 'Film')}"
+
     film_handles = [
         {
             "id": "film_dev",
             "x": float(np.clip((mid_x - x0) / max(x1 - x0, 1e-9), 0.05, 0.95)),
             "y": float(np.clip((mid_d - y0) / max(y1 - y0, 1e-9), 0.05, 0.95)),
             "label": "Dev",
-            "tip": "Drag up/down — development time (push / pull)",
+            "tip": film_dev_tip,
         },
         {
             "id": "film_n",
             "x": float(np.clip((hi_x - x0) / max(x1 - x0, 1e-9), 0.05, 0.95)),
             "y": float(np.clip((hi_d - y0) / max(y1 - y0, 1e-9), 0.05, 0.95)),
             "label": "N±",
-            "tip": "Drag up/down — contrast (N+ / N−)",
+            "tip": film_n_tip,
         },
     ]
 
     print_block: dict[str, Any] | None = None
-    if report.print_reflectance is not None:
+    # Instant has no enlarger — never show a paper panel.
+    if mode != "instant" and report.print_reflectance is not None:
         refl = np.maximum(np.asarray(report.print_reflectance, dtype=np.float64), 1e-4)
         # Log reflectance so zone bands are even — matches the static plot.
         log_r = np.log10(refl)
@@ -103,7 +129,7 @@ def curve_overlay_payload(
         )
         mid_lr = float(np.interp(mid_x, log_e, log_r))
         hi_lr = float(np.interp(hi_x, log_e, log_r))
-        print_handles = [
+        print_handles: list[dict[str, Any]] = [
             {
                 "id": "print_exp",
                 "x": float(np.clip((mid_x - x0) / max(x1 - x0, 1e-9), 0.05, 0.95)),
@@ -111,14 +137,36 @@ def curve_overlay_payload(
                 "label": "Exp",
                 "tip": "Drag up/down — base exposure (brighter print = less time)",
             },
-            {
-                "id": "print_grade",
-                "x": float(np.clip((hi_x - x0) / max(x1 - x0, 1e-9), 0.05, 0.95)),
-                "y": float(np.clip((hi_lr - pr0) / max(pr1 - pr0, 1e-9), 0.05, 0.95)),
-                "label": "Grade",
-                "tip": "Drag up/down — MG grade / contrast filtration",
-            },
         ]
+        if mode == "color":
+            # RA-4 has no MG grade — paper contrast is the real knob.
+            print_handles.append(
+                {
+                    "id": "print_contrast",
+                    "x": float(np.clip((hi_x - x0) / max(x1 - x0, 1e-9), 0.05, 0.95)),
+                    "y": float(np.clip((hi_lr - pr0) / max(pr1 - pr0, 1e-9), 0.05, 0.95)),
+                    "label": "Ctr",
+                    "tip": "Drag up/down — RA-4 paper contrast",
+                }
+            )
+            print_title = (
+                f"{report.stats.get('paper', 'RA-4')} · "
+                f"ctr {float(print_contrast):+.2f} · {float(print_exposure):g}s"
+            )
+        else:
+            print_handles.append(
+                {
+                    "id": "print_grade",
+                    "x": float(np.clip((hi_x - x0) / max(x1 - x0, 1e-9), 0.05, 0.95)),
+                    "y": float(np.clip((hi_lr - pr0) / max(pr1 - pr0, 1e-9), 0.05, 0.95)),
+                    "label": "Grade",
+                    "tip": "Drag up/down — MG grade / contrast filtration",
+                }
+            )
+            print_title = (
+                f"{report.stats.get('paper', 'Paper')} · "
+                f"grade {float(print_grade):.1f} · {float(print_exposure):g}s"
+            )
         zone_guides = []
         for z in range(0, 11, 2):
             zr = zone_reflectance(z)
@@ -136,23 +184,31 @@ def curve_overlay_payload(
             "polyline": print_poly,
             "handles": print_handles,
             "zone_guides": zone_guides,
-            "title": (
-                f"{report.stats.get('paper', 'Paper')} · "
-                f"grade {float(print_grade):.1f} · {float(print_exposure):g}s"
-            ),
+            "title": print_title,
         }
 
     ci = float(report.stats.get("contrast_index") or _contrast_index(
         log_e, active, float(report.stats.get("base_plus_fog", active[0]))
     ))
+    if mode == "instant":
+        foot = "Drag handles — updates pod process time and N± (no enlarger paper)."
+    elif mode == "color":
+        foot = "Drag handles — updates Dev time, N±, base exposure, and RA-4 contrast."
+    else:
+        foot = (
+            "Drag handles — updates Dev time, N±, base exposure, and MG grade "
+            "so the curve stays possible."
+        )
     return {
         "ok": True,
+        "chemistry_mode": mode,
+        "foot": foot,
         "film": {
             "polyline": film_poly,
             "base": base_poly,
             "handles": film_handles,
             "title": (
-                f"{report.stats.get('film', 'Film')} · CI {ci:.2f} · "
+                f"{film_title_prefix} · CI {ci:.2f} · "
                 f"{float(development_minutes):g} min · N± {float(contrast):+.2f}"
             ),
         },
@@ -162,6 +218,7 @@ def curve_overlay_payload(
             "contrast": float(contrast),
             "print_grade": float(print_grade),
             "print_exposure": float(print_exposure),
+            "print_contrast": float(print_contrast),
         },
         "stats": {
             "contrast_index": ci,
@@ -180,6 +237,8 @@ def apply_curve_handle_edit(
     contrast: float,
     print_grade: float,
     print_exposure: float,
+    print_contrast: float = 0.0,
+    chemistry_mode: str = "bw",
     minutes_min: float = 1.5,
     minutes_max: float = 24.0,
     contrast_min: float = -1.0,
@@ -188,18 +247,57 @@ def apply_curve_handle_edit(
     grade_max: float = 5.0,
     exposure_min: float = 2.0,
     exposure_max: float = 64.0,
+    print_contrast_min: float = -1.0,
+    print_contrast_max: float = 1.0,
 ) -> dict[str, Any]:
     """Map a normalized handle drag (+dy = toward top of plot) onto UI settings."""
+    mode = str(chemistry_mode or "bw").lower()
     hid = str(handle_id or "").strip().lower()
     dy = float(np.clip(dy, -0.85, 0.85))
     minutes = float(development_minutes)
     n_mod = float(contrast)
     grade = float(print_grade)
     seconds = float(print_exposure)
+    p_contrast = float(print_contrast)
     note = ""
 
+    # Chemistry gates — refuse handles the live process ignores.
+    if mode == "instant" and hid in {"print_exp", "print_grade", "print_contrast"}:
+        return {
+            "ok": False,
+            "development_minutes": minutes,
+            "contrast": n_mod,
+            "print_grade": grade,
+            "print_exposure": seconds,
+            "print_contrast": p_contrast,
+            "message": "Instant has no enlarger paper curve.",
+            "handle": hid,
+        }
+    if mode == "color" and hid == "print_grade":
+        return {
+            "ok": False,
+            "development_minutes": minutes,
+            "contrast": n_mod,
+            "print_grade": grade,
+            "print_exposure": seconds,
+            "print_contrast": p_contrast,
+            "message": "RA-4 has no MG grade — use Contrast (Ctr).",
+            "handle": hid,
+        }
+    if mode == "bw" and hid == "print_contrast":
+        return {
+            "ok": False,
+            "development_minutes": minutes,
+            "contrast": n_mod,
+            "print_grade": grade,
+            "print_exposure": seconds,
+            "print_contrast": p_contrast,
+            "message": "B&W uses MG grade, not RA-4 contrast.",
+            "handle": hid,
+        }
+
     if hid == "film_dev":
-        # Up on the film curve = denser negative = more development.
+        # Up on the film curve = denser negative / longer process.
         stops = dy * _FILM_DEV_STOPS_PER_DY
         minutes = float(np.clip(minutes * (2.0 ** stops), minutes_min, minutes_max))
         minutes = float(round(minutes * 4.0) / 4.0)  # 0.25 min steps
@@ -219,6 +317,12 @@ def apply_curve_handle_edit(
         grade = float(np.clip(grade + dy * _PRINT_GRADE_PER_DY, grade_min, grade_max))
         grade = float(round(grade * 2.0) / 2.0)  # 0.5 steps
         note = f"MG grade → {grade:.1f}"
+    elif hid == "print_contrast":
+        p_contrast = float(
+            np.clip(p_contrast + dy * _PRINT_CONTRAST_PER_DY, print_contrast_min, print_contrast_max)
+        )
+        p_contrast = float(round(p_contrast * 20.0) / 20.0)
+        note = f"RA-4 contrast → {p_contrast:+.2f}"
     else:
         return {
             "ok": False,
@@ -226,6 +330,7 @@ def apply_curve_handle_edit(
             "contrast": n_mod,
             "print_grade": grade,
             "print_exposure": seconds,
+            "print_contrast": p_contrast,
             "message": f"Unknown handle `{handle_id}`.",
         }
 
@@ -235,7 +340,7 @@ def apply_curve_handle_edit(
         "contrast": n_mod,
         "print_grade": grade,
         "print_exposure": seconds,
+        "print_contrast": p_contrast,
         "message": note,
         "handle": hid,
-        "dy": dy,
     }

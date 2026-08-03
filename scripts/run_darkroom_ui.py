@@ -40,7 +40,7 @@ from digital_negative.analysis import (
     suggest_tone_fit,
 )
 from digital_negative.curve_edit import apply_curve_handle_edit, curve_overlay_payload
-from digital_negative.spectral import is_instant_film_type
+from digital_negative.spectral import chemistry_mode_for_film_type, is_instant_film_type
 from digital_negative.recipes import build_recipe, load_recipe, save_recipe
 from digital_negative.chemistry import (
     chemistry_choices,
@@ -3331,7 +3331,7 @@ UI_JS = """
         <div class="curve-float-panel" id="curve_panel_film"></div>
         <div class="curve-float-panel" id="curve_panel_print"></div>
       </div>
-      <div class="curve-float-foot">Drag handles — updates Dev time, N±, base exposure, and MG grade so the curve stays possible.</div>
+      <div class="curve-float-foot">Drag handles — updates real process controls for the active chemistry.</div>
     `;
     col.appendChild(el);
     el.querySelector('[data-act="close"]').addEventListener('click', () => showCurveFloat(false));
@@ -3375,8 +3375,13 @@ UI_JS = """
       renderCurveSvg(printHost, payload.print, { showBase: false });
     } else {
       printHost.style.display = 'none';
-      printHost.innerHTML = '<h4>Print curve — set paper / wait for Live print</h4>';
+      const mode = (payload.chemistry_mode || '').toLowerCase();
+      printHost.innerHTML = mode === 'instant'
+        ? '<h4>No enlarger paper — Instant is the finished card</h4>'
+        : '<h4>Print curve — set paper / wait for Live print</h4>';
     }
+    const foot = el.querySelector('.curve-float-foot');
+    if (foot && payload.foot) foot.textContent = payload.foot;
     // Bind handle drags (re-bound each paint). Commit only on release —
     // mid-drag server round-trips were freezing the preview every ~100ms.
     el.querySelectorAll('[data-handle]').forEach((g) => {
@@ -4128,14 +4133,32 @@ def apply_recipe_file(recipe_file, state):
     )
 
 
+def _curve_chemistry_mode(state, film_id=None) -> str:
+    """Resolve B&W / Color / Instant for curve editor honesty."""
+    mode = str(
+        ((state or {}).get("controls") or {}).get("chemistry_mode")
+        or (state or {}).get("chemistry_mode")
+        or ""
+    ).lower()
+    if mode in {"bw", "color", "instant"}:
+        return mode
+    if film_id:
+        try:
+            return chemistry_mode_for_film_type(_film_profile(film_id).type)
+        except Exception:
+            pass
+    return "bw"
+
+
 def _curve_report_for_ui(
     film_id, developer_id, development_minutes, contrast, paper_id, print_grade,
-    print_exposure, state,
+    print_exposure, state, *, print_contrast=0.0, chemistry_mode=None,
 ):
     """Build the in-play film/paper CurveReport for the floating editor."""
     if not state or state.get("dn") is None:
         return None, None, None
     profile = _film_profile(film_id)
+    mode = str(chemistry_mode or _curve_chemistry_mode(state, film_id)).lower()
     chem = get_chemistry(profile, developer_id)
     minutes = float(development_minutes) if chem is not None else None
     rel, minutes_resolved, _style = resolve_relative_time(
@@ -4144,12 +4167,15 @@ def _curve_report_for_ui(
         development_minutes=minutes,
         relative_time=None if minutes is not None else 1.0,
     )
-    # Always include paper when we can — Live already shows a theoretical print.
+    # Instant has no enlarger paper. Color/B&W include paper when available.
     paper = None
-    try:
-        paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
-    except Exception:
-        paper = None
+    if mode != "instant":
+        try:
+            paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
+        except Exception:
+            paper = None
+    ctrl = (state or {}).get("controls") or {}
+    temp_c = float(ctrl.get("process_temp_c", 21.0))
     report = build_curve_report(
         state["dn"],
         profile,
@@ -4160,13 +4186,16 @@ def _curve_report_for_ui(
         paper=paper,
         grade=float(print_grade),
         base_exposure_seconds=float(print_exposure),
+        print_contrast=float(print_contrast),
+        process_temp_c=temp_c,
     )
     return report, minutes_resolved, profile
 
 
 def refresh_curves(
+    chemistry_mode,
     film_id, developer_id, development_minutes, contrast, paper_id, print_grade,
-    print_exposure, state,
+    print_exposure, print_contrast, state,
 ):
     """Sample curves for the floating editor (summary + interactive JSON)."""
     if not state or state.get("dn") is None:
@@ -4175,9 +4204,12 @@ def refresh_curves(
             "_Commit Ingest first — the scene is what makes these curves useful._",
             empty,
         )
+    mode = str(chemistry_mode or _curve_chemistry_mode(state, film_id)).lower()
     report, minutes_resolved, _profile = _curve_report_for_ui(
         film_id, developer_id, development_minutes, contrast, paper_id,
         print_grade, print_exposure, state,
+        print_contrast=print_contrast,
+        chemistry_mode=mode,
     )
     mins = float(minutes_resolved if minutes_resolved is not None else development_minutes)
     payload = curve_overlay_payload(
@@ -4186,12 +4218,15 @@ def refresh_curves(
         contrast=float(contrast),
         print_grade=float(print_grade),
         print_exposure=float(print_exposure),
+        print_contrast=float(print_contrast or 0.0),
+        chemistry_mode=mode,
     )
     return curve_summary_markdown(report), json.dumps(payload)
 
 
 def apply_curve_edit_cmd(
     cmd_raw,
+    chemistry_mode,
     film_id,
     developer_id,
     development_minutes,
@@ -4199,42 +4234,24 @@ def apply_curve_edit_cmd(
     paper_id,
     print_grade,
     print_exposure,
+    print_contrast,
     state,
 ):
-    """JS handle drag → update Dev / N± / Grade / Exp, then refresh the float."""
+    """JS handle drag → update Dev / N± / Grade|Ctr / Exp, then refresh the float."""
     raw = str(cmd_raw or "").strip()
+    skip7 = (gr.skip(),) * 7
     if not raw:
-        return (
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-        )
+        return skip7
     try:
         cmd = json.loads(raw)
     except json.JSONDecodeError:
-        return (
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-        )
+        return skip7
     handle = str(cmd.get("id") or cmd.get("handle") or "")
     dy = float(cmd.get("dy") or 0.0)
     if abs(dy) < 1e-4 or not handle:
-        return (
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-        )
+        return skip7
 
+    mode = str(chemistry_mode or _curve_chemistry_mode(state, film_id)).lower()
     edit = apply_curve_handle_edit(
         handle,
         dy=dy,
@@ -4242,28 +4259,26 @@ def apply_curve_edit_cmd(
         contrast=float(contrast),
         print_grade=float(print_grade),
         print_exposure=float(print_exposure),
+        print_contrast=float(print_contrast or 0.0),
+        chemistry_mode=mode,
         minutes_min=_DEV_TIME_SLIDER_MIN,
         minutes_max=_DEV_TIME_SLIDER_MAX,
     )
     if not edit.get("ok"):
-        return (
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-        )
+        return skip7
 
     minutes = float(edit["development_minutes"])
     n_mod = float(edit["contrast"])
     grade = float(edit["print_grade"])
     exposure = float(edit["print_exposure"])
+    p_contrast = float(edit.get("print_contrast", print_contrast or 0.0))
     summary = gr.skip()
     overlay = gr.skip()
     if state and state.get("dn") is not None:
         report, minutes_resolved, _p = _curve_report_for_ui(
             film_id, developer_id, minutes, n_mod, paper_id, grade, exposure, state,
+            print_contrast=p_contrast,
+            chemistry_mode=mode,
         )
         if report is not None:
             mins = float(minutes_resolved if minutes_resolved is not None else minutes)
@@ -4273,6 +4288,8 @@ def apply_curve_edit_cmd(
                 contrast=n_mod,
                 print_grade=grade,
                 print_exposure=exposure,
+                print_contrast=p_contrast,
+                chemistry_mode=mode,
             )
             tip = edit.get("message") or ""
             summary = curve_summary_markdown(report) + (f"\n\n_{tip}_" if tip else "")
@@ -4283,6 +4300,7 @@ def apply_curve_edit_cmd(
         gr.update(value=n_mod),
         gr.update(value=grade),
         gr.update(value=exposure),
+        gr.update(value=p_contrast),
         summary,
         overlay,
     )
@@ -10321,8 +10339,8 @@ def build_ui() -> gr.Blocks:
         )
 
         curve_inputs = [
-            film, developer, development_minutes, contrast,
-            paper, print_grade, print_exposure, state,
+            chemistry_mode, film, developer, development_minutes, contrast,
+            paper, print_grade, print_exposure, print_contrast, state,
         ]
         curve_outputs = [curve_summary, curve_overlay_json]
         curve_refresh_btn.click(
@@ -10340,23 +10358,26 @@ def build_ui() -> gr.Blocks:
         curve_edit_cmd.change(
             fn=apply_curve_edit_cmd,
             inputs=[
-                curve_edit_cmd, film, developer, development_minutes, contrast,
-                paper, print_grade, print_exposure, state,
+                curve_edit_cmd, chemistry_mode, film, developer,
+                development_minutes, contrast, paper, print_grade, print_exposure,
+                print_contrast, state,
             ],
             outputs=[
                 development_minutes, contrast, print_grade, print_exposure,
-                curve_summary, curve_overlay_json,
+                print_contrast, curve_summary, curve_overlay_json,
             ],
         ).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
         )
         # Re-snap float handles after drawer edits settle (release), not on every
         # drag tick — avoids fighting the curve editor mid-gesture.
-        for _curve_ctrl in (development_minutes, contrast, print_grade, print_exposure):
+        for _curve_ctrl in (
+            development_minutes, contrast, print_grade, print_exposure, print_contrast,
+        ):
             _curve_ctrl.release(
                 fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
             )
-        for _curve_ctrl in (paper, film, developer):
+        for _curve_ctrl in (paper, film, developer, chemistry_mode):
             _curve_ctrl.change(
                 fn=refresh_curves, inputs=curve_inputs, outputs=curve_outputs
             )

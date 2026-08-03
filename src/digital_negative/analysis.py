@@ -18,6 +18,7 @@ from .development import linear_to_relative_log_exposure
 from .digital_negative import DigitalNegative
 from .papers import PaperProfile
 from .print_engine import REFERENCE_LOG_TRANSMITTANCE, _filter_speed, paper_response
+from .spectral import is_color_paper_type, is_instant_film_type
 
 # Zone system anchors: Zone V is the mid grey the meter aims for, and each
 # zone is one stop. Print reflectance is what the eye judges, so zones are
@@ -97,6 +98,113 @@ def _contrast_index(log_e: np.ndarray, density: np.ndarray, fog: float) -> float
     return float(slope)
 
 
+def _ra4_system_reflectance(
+    neg_density: np.ndarray,
+    paper: PaperProfile,
+    *,
+    base_exposure_seconds: float,
+    print_contrast: float = 0.0,
+) -> np.ndarray:
+    """1D RA-4 stand-in: neg D → T → logistic paper reflectance (matches live Exp)."""
+    from .color_print import REFERENCE_RA4_LOG_EXPOSURE
+
+    spectral = paper.raw.get("spectral") or {}
+    toe = float(spectral.get("toe", 0.35))
+    shoulder = float(spectral.get("shoulder", 0.35))
+    dmin = float(paper.dmin)
+    dmax = float(paper.dmax)
+    t = np.power(10.0, -np.asarray(neg_density, dtype=np.float64))
+    seconds = max(float(base_exposure_seconds), 0.05)
+    # Timer scale identical to print_color_negative (8s → 1.0).
+    log_paper = np.log10(np.maximum(t * (seconds / 8.0), 1e-8))
+    center = float(REFERENCE_RA4_LOG_EXPOSURE)
+    x = (log_paper - center) * (1.0 + 0.45 * float(print_contrast))
+    resp = 1.0 / (1.0 + np.exp(-x / max(toe, 0.05)))
+    resp = np.clip(resp, 0.0, 1.0)
+    resp = resp / (1.0 + shoulder * resp)
+    dens = dmin + (dmax - dmin) * resp
+    return np.power(10.0, -dens).astype(np.float64)
+
+
+def _instant_layer_density(
+    profile: FilmProfile,
+    log_e: np.ndarray,
+    *,
+    development_minutes: float | None,
+    contrast_modifier: float,
+    process_temp_c: float = 21.0,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Sample Instant positive reflection density (mean RGB) vs log-E."""
+    from .instant_process import (
+        _default_layer_points,
+        _interp_density,
+        _temp_morph_scales,
+        auto_process_minutes,
+    )
+
+    instant = dict(profile.raw.get("instant") or {})
+    layers_block = instant.get("layers") or {}
+    temp_c = float(process_temp_c)
+    contrast_scale, dmax_scale, _time_scale = _temp_morph_scales(instant, temp_c)
+    minutes = (
+        float(development_minutes)
+        if development_minutes is not None
+        else auto_process_minutes(profile, temp_c)
+    )
+    normal_auto = auto_process_minutes(profile, temp_c)
+    time_ratio = float(np.clip(minutes / max(normal_auto, 1e-6), 0.45, 2.2))
+    contrast_scale *= 0.92 + 0.08 * time_ratio
+    dmax_scale *= 0.90 + 0.10 * time_ratio
+    n_mod = float(np.clip(contrast_modifier, -1.5, 1.5))
+    pivot = 2.2
+    log_adj = pivot + (np.asarray(log_e, dtype=np.float64) - pivot) * (
+        1.0 + 0.35 * n_mod
+    ) * contrast_scale
+
+    dens_ch = []
+    ceilings = []
+    for name in ("red", "green", "blue"):
+        pts = layers_block.get(name) or _default_layer_points(name)
+        d = _interp_density(pts, log_adj.astype(np.float32)).astype(np.float64)
+        dmin_curve = float(min(p[1] for p in pts))
+        dmax_curve = float(max(p[1] for p in pts))
+        dens_ch.append(dmin_curve + (d - dmin_curve) * dmax_scale)
+        ceilings.append(dmin_curve + (dmax_curve - dmin_curve) * dmax_scale)
+    density_neg = np.stack(dens_ch, axis=-1)
+    ceiling = np.asarray(ceilings, dtype=np.float64).reshape(1, 3)
+    density_rgb = np.clip(ceiling - density_neg, 0.0, None)
+    active = (
+        0.2126 * density_rgb[..., 0]
+        + 0.7152 * density_rgb[..., 1]
+        + 0.0722 * density_rgb[..., 2]
+    )
+    # Base = authored layers at N / normal time (no user morph).
+    base_ch = []
+    base_ceil = []
+    for name in ("red", "green", "blue"):
+        pts = layers_block.get(name) or _default_layer_points(name)
+        d = _interp_density(pts, np.asarray(log_e, dtype=np.float32)).astype(np.float64)
+        dmin_curve = float(min(p[1] for p in pts))
+        dmax_curve = float(max(p[1] for p in pts))
+        base_ch.append(d)
+        base_ceil.append(dmax_curve)
+    base_neg = np.stack(base_ch, axis=-1)
+    base_ceiling = np.asarray(base_ceil, dtype=np.float64).reshape(1, 3)
+    base_rgb = np.clip(base_ceiling - base_neg, 0.0, None)
+    base = (
+        0.2126 * base_rgb[..., 0]
+        + 0.7152 * base_rgb[..., 1]
+        + 0.0722 * base_rgb[..., 2]
+    )
+    meta = {
+        "curve_source": "instant_layers",
+        "process_minutes": minutes,
+        "process_temp_c": temp_c,
+        "base_plus_fog": float(np.min(base)),
+    }
+    return active.astype(np.float64), base.astype(np.float64), meta
+
+
 def build_curve_report(
     dn: DigitalNegative | None,
     profile: FilmProfile,
@@ -108,24 +216,59 @@ def build_curve_report(
     paper: PaperProfile | None = None,
     grade: float | None = None,
     base_exposure_seconds: float | None = None,
+    print_contrast: float = 0.0,
+    process_temp_c: float = 21.0,
     mid_log_e: float = 2.2,
     samples: int = 320,
 ) -> CurveReport:
-    """Sample the film curve in play, plus the film→paper system curve."""
-    active = modify_curve(
-        profile,
-        relative_time=relative_time,
-        contrast_modifier=contrast_modifier,
-        developer_id=developer_id,
-        development_minutes=development_minutes,
-    )
+    """Sample the film curve in play, plus the film→paper system curve.
 
-    lo = float(min(profile.log_exposure[0], active.log_exposure[0]))
-    hi = float(max(profile.log_exposure[-1], active.log_exposure[-1]))
-    grid = np.linspace(lo, hi, int(samples))
+    Chemistry-aware:
+    - B&W: master H&D + MG ``paper_response``
+    - Color: master morph proxy + RA-4 logistic system curve (grade unused)
+    - Instant: integral layer H&D (no enlarger paper panel)
+    """
+    instant = is_instant_film_type(profile.type)
 
-    base_d = profile.density_from_log_exposure(grid).astype(np.float64)
-    active_d = active.density_from_log_exposure(grid).astype(np.float64)
+    if instant:
+        # Instant packs author RGB print layers — not the master B&W morph.
+        lo = 0.5
+        hi = 4.5
+        instant_block = profile.raw.get("instant") or {}
+        for name in ("red", "green", "blue"):
+            pts = (instant_block.get("layers") or {}).get(name) or []
+            if pts:
+                lo = min(lo, float(pts[0][0]))
+                hi = max(hi, float(pts[-1][0]))
+        grid = np.linspace(lo, hi, int(samples))
+        active_d, base_d, inst_meta = _instant_layer_density(
+            profile,
+            grid,
+            development_minutes=development_minutes,
+            contrast_modifier=contrast_modifier,
+            process_temp_c=process_temp_c,
+        )
+        fog = float(inst_meta.get("base_plus_fog", np.min(base_d)))
+        curve_source = "instant_layers"
+        active_profile_fog = fog
+    else:
+        active = modify_curve(
+            profile,
+            relative_time=relative_time,
+            contrast_modifier=contrast_modifier,
+            developer_id=developer_id,
+            development_minutes=development_minutes,
+        )
+        lo = float(min(profile.log_exposure[0], active.log_exposure[0]))
+        hi = float(max(profile.log_exposure[-1], active.log_exposure[-1]))
+        grid = np.linspace(lo, hi, int(samples))
+        base_d = profile.density_from_log_exposure(grid).astype(np.float64)
+        active_d = active.density_from_log_exposure(grid).astype(np.float64)
+        fog = float(active.base_plus_fog)
+        active_profile_fog = fog
+        curve_source = (active.raw.get("_last_curve_meta") or {}).get(
+            "curve_source", "morph"
+        )
 
     scene: np.ndarray = np.asarray([], dtype=np.float64)
     pct: dict[str, float] = {}
@@ -137,40 +280,54 @@ def build_curve_report(
 
     stats: dict[str, Any] = {
         "film": profile.name,
-        "base_plus_fog": float(active.base_plus_fog),
+        "base_plus_fog": float(active_profile_fog),
         "d_min": float(np.min(active_d)),
         "d_max": float(np.max(active_d)),
-        "contrast_index": _contrast_index(grid, active_d, float(active.base_plus_fog)),
-        "curve_source": (active.raw.get("_last_curve_meta") or {}).get("curve_source", "morph"),
+        "contrast_index": _contrast_index(grid, active_d, float(active_profile_fog)),
+        "curve_source": curve_source,
+        "chemistry_mode": "instant" if instant else (
+            "color" if (paper is not None and is_color_paper_type(paper.type)) else "bw"
+        ),
     }
     if pct:
         stats["scene_stops"] = (pct["p99"] - pct["p1"]) / 0.30103
-        stats["shadow_density"] = float(
-            active.density_from_log_exposure(np.asarray([pct["p5"]]))[0]
-        )
-        stats["highlight_density"] = float(
-            active.density_from_log_exposure(np.asarray([pct["p95"]]))[0]
-        )
+        stats["shadow_density"] = float(np.interp(pct["p5"], grid, active_d))
+        stats["highlight_density"] = float(np.interp(pct["p95"], grid, active_d))
 
     print_d = None
     print_r = None
-    if paper is not None:
-        eff_grade = float(paper.default_grade if grade is None else grade)
-        stops = 0.0
-        if base_exposure_seconds is not None:
-            stops = float(np.log2(max(float(base_exposure_seconds), 1e-6) / 8.0))
-        # Negative density -> transmittance -> enlarger light -> paper.
+    if paper is not None and not instant:
         transmittance = np.power(10.0, -active_d)
-        light = transmittance * (2.0**stops) * _filter_speed(eff_grade)
-        # Same fixed enlarger anchor as print_negative — preserves stock density.
-        centre = float(REFERENCE_LOG_TRANSMITTANCE)
-        print_d = paper_response(
-            light, paper=paper, grade=eff_grade, log_center=centre
-        ).astype(np.float64)
-        print_r = np.power(10.0, -print_d)
-        stats["paper"] = paper.name
-        stats["grade"] = eff_grade
-        if scene.size:
+        if is_color_paper_type(paper.type):
+            seconds = float(
+                8.0 if base_exposure_seconds is None else base_exposure_seconds
+            )
+            print_r = _ra4_system_reflectance(
+                active_d,
+                paper,
+                base_exposure_seconds=seconds,
+                print_contrast=float(print_contrast),
+            )
+            print_d = (-np.log10(np.maximum(print_r, 1e-6))).astype(np.float64)
+            stats["paper"] = paper.name
+            stats["print_process"] = "ra4"
+            stats["print_contrast"] = float(print_contrast)
+            stats["base_exposure_seconds"] = seconds
+        else:
+            eff_grade = float(paper.default_grade if grade is None else grade)
+            stops = 0.0
+            if base_exposure_seconds is not None:
+                stops = float(np.log2(max(float(base_exposure_seconds), 1e-6) / 8.0))
+            light = transmittance * (2.0**stops) * _filter_speed(eff_grade)
+            centre = float(REFERENCE_LOG_TRANSMITTANCE)
+            print_d = paper_response(
+                light, paper=paper, grade=eff_grade, log_center=centre
+            ).astype(np.float64)
+            print_r = np.power(10.0, -print_d)
+            stats["paper"] = paper.name
+            stats["grade"] = eff_grade
+            stats["print_process"] = "bw_mg"
+        if scene.size and print_r is not None:
             sh = np.interp(pct["p5"], grid, print_r)
             hl = np.interp(pct["p95"], grid, print_r)
             stats["shadow_zone"] = float(reflectance_to_zone(sh))
@@ -355,7 +512,12 @@ def curve_summary_markdown(report: CurveReport) -> str:
     s = report.stats
     lines: list[str] = []
 
-    src = "digitized curve family" if s.get("curve_source") == "family" else "morphed base curve"
+    if s.get("curve_source") == "family":
+        src = "digitized curve family"
+    elif s.get("curve_source") == "instant_layers":
+        src = "integral pod layers"
+    else:
+        src = "morphed base curve"
     lines.append(f"**{s.get('film', 'Film')}** — {src}")
     lines.append(
         f"CI `{s.get('contrast_index', 0):.2f}` · fog `{s.get('base_plus_fog', 0):.2f}`"
@@ -372,11 +534,22 @@ def curve_summary_markdown(report: CurveReport) -> str:
 
     if "shadow_zone" in s:
         lines.append("")
-        lines.append(
-            f"**On {s.get('paper', 'paper')} g{s.get('grade', 0):.1f}** —"
-            f" shadows print Zone `{_roman(round(s['shadow_zone']))}`,"
-            f" highlights Zone `{_roman(round(s['highlight_zone']))}`"
-        )
+        if s.get("print_process") == "ra4":
+            lines.append(
+                f"**On {s.get('paper', 'RA-4')} · "
+                f"{float(s.get('base_exposure_seconds', 8.0)):g}s** —"
+                f" shadows print Zone `{_roman(round(s['shadow_zone']))}`,"
+                f" highlights Zone `{_roman(round(s['highlight_zone']))}`"
+            )
+        else:
+            lines.append(
+                f"**On {s.get('paper', 'paper')} g{s.get('grade', 0):.1f}** —"
+                f" shadows print Zone `{_roman(round(s['shadow_zone']))}`,"
+                f" highlights Zone `{_roman(round(s['highlight_zone']))}`"
+            )
+    elif s.get("chemistry_mode") == "instant":
+        lines.append("")
+        lines.append("_Integral card — no enlarger paper curve._")
 
     return "  \n".join(lines)
 
