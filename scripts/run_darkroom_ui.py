@@ -7,6 +7,7 @@ import base64
 import copy
 import html as html_lib
 import io
+import itertools
 import json
 import sys
 import tempfile
@@ -90,6 +91,28 @@ DRAG_MAX_SIDE = 1280  # high enough for critical judgment while dragging
 INSPECT_MAX_SIDE = 3600  # high-res for zoom / inspect panel
 REF_MAX_SIDE = 420
 CROP_STAGE_MAX_SIDE = 1400
+
+# Film/developer swaps update minutes + EI + developer together. Each of those
+# widgets also has its own live_preview_edit handler, so one stock change used
+# to enqueue several concurrent bakes. Gradio can apply their outputs out of
+# order (Acros status + Delta washout pixels). Batch flag skips the cascade;
+# epoch drops any bake that finished after a newer one started.
+_PREVIEW_EPOCH = itertools.count(1)
+_PREVIEW_LATEST = {"token": 0}
+_CHEM_UI_BATCH = {"active": False}
+_PREVIEW_OUTPUT_COUNT = 9  # live, orig, latent, neg, status, hist, inspect, spot, state
+
+
+def _begin_chem_ui_batch() -> None:
+    _CHEM_UI_BATCH["active"] = True
+
+
+def _end_chem_ui_batch() -> None:
+    _CHEM_UI_BATCH["active"] = False
+
+
+def _preview_output_skips():
+    return tuple(gr.skip() for _ in range(_PREVIEW_OUTPUT_COUNT))
 
 CROP_RATIO_CHOICES = [
     ("Free", "free"),
@@ -4309,10 +4332,14 @@ def on_film_change(film_id: str, chemistry_mode: str = "bw"):
     When Chemistry flips B&W ↔ Color, Gradio often re-fires this with the
     *previous* catalog's film id against the new choices. Ignore that stale
     event — ``on_chemistry_mode_change`` already wrote the correct film + chem.
+
+    Starts a chem UI batch so cascading minutes/EI/developer ``.change``
+    handlers do not each enqueue their own live preview.
     """
     mode = str(chemistry_mode or "bw").lower()
     if film_id not in _film_choice_ids(mode):
         return gr.skip(), gr.skip(), gr.skip()
+    _begin_chem_ui_batch()
     profile = _film_profile(film_id)
     chem_id = default_chemistry_id(profile)
     choices = chemistry_choices(profile)
@@ -4327,6 +4354,9 @@ def on_developer_change(film_id: str, developer_id: str, chemistry_mode: str = "
     mode = str(chemistry_mode or "bw").lower()
     if film_id not in _film_choice_ids(mode):
         return gr.skip()
+    # Film swaps also rewrite the developer widget; keep the batch open so the
+    # minutes slider update does not fire a second overlapping preview.
+    _begin_chem_ui_batch()
     return _chem_time_update(film_id, developer_id, reset_to_normal=True)
 
 
@@ -6700,12 +6730,18 @@ def _run_live_develop_then_print(
     """
     drag = max_side <= DRAG_MAX_SIDE
     if drag:
-        working = state.get("proxy_drag") or _proxy_dn(state["dn"], DRAG_MAX_SIDE)
+        base_proxy = state.get("proxy_drag") or _proxy_dn(state["dn"], DRAG_MAX_SIDE)
     else:
         # Cap interactive develops at LIVE_MAX_SIDE. Using the full / inspect
         # frame here made each film switch take multiple seconds (and film
         # change also retriggers developer.change → a second full bake).
-        working = state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE)
+        base_proxy = state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE)
+    # develop(commit=False) writes film/chem into DN metadata — never mutate the
+    # cached roll proxy in place or the next stock inherits the previous tank.
+    working = DigitalNegative(
+        image=base_proxy.image,
+        metadata=copy.deepcopy(base_proxy.metadata),
+    )
     working.metadata["process_seed"] = state["dn"].metadata.get("process_seed")
     profile = load_film_profile(_profile_path(list_film_profiles(), film_id))
     # Instant knobs travel on development metadata (read by process_instant).
@@ -6851,6 +6887,90 @@ def _run_live_develop_then_print(
 
 
 def live_preview(
+    chemistry_mode,
+    film_id,
+    developer_id,
+    development_minutes,
+    contrast,
+    grain,
+    exposure_index,
+    contrast_filter,
+    scene_exposure,
+    halation,
+    paper_id,
+    print_exposure,
+    print_grade,
+    print_contrast,
+    split_on,
+    soft_grade,
+    hard_grade,
+    soft_seconds,
+    hard_seconds,
+    test_strips_on,
+    test_bands,
+    test_stops,
+    flash_stops,
+    dry_down,
+    tone,
+    border_frac,
+    cc_cyan,
+    cc_magenta,
+    cc_yellow,
+    process_temp_c,
+    instant_chroma,
+    instant_warmth,
+    instant_border,
+    state,
+    quality: str = "high",
+    mark_dirty: bool = False,
+):
+    """Unified live viewer with stale-bake suppression for overlapping Gradio events."""
+    token = next(_PREVIEW_EPOCH)
+    _PREVIEW_LATEST["token"] = token
+    packed = _live_preview_body(
+        chemistry_mode,
+        film_id,
+        developer_id,
+        development_minutes,
+        contrast,
+        grain,
+        exposure_index,
+        contrast_filter,
+        scene_exposure,
+        halation,
+        paper_id,
+        print_exposure,
+        print_grade,
+        print_contrast,
+        split_on,
+        soft_grade,
+        hard_grade,
+        soft_seconds,
+        hard_seconds,
+        test_strips_on,
+        test_bands,
+        test_stops,
+        flash_stops,
+        dry_down,
+        tone,
+        border_frac,
+        cc_cyan,
+        cc_magenta,
+        cc_yellow,
+        process_temp_c,
+        instant_chroma,
+        instant_warmth,
+        instant_border,
+        state,
+        quality=quality,
+        mark_dirty=mark_dirty,
+    )
+    if token != _PREVIEW_LATEST["token"]:
+        return _preview_output_skips()
+    return packed
+
+
+def _live_preview_body(
     chemistry_mode,
     film_id,
     developer_id,
@@ -7339,6 +7459,10 @@ def live_preview_edit(
     instant_border,
     state,
 ):
+    # Cascaded minutes/EI/developer changes during a film swap — skip; the
+    # chem-transition `.then` preview owns the single bake.
+    if _CHEM_UI_BATCH["active"]:
+        return _preview_output_skips()
     return live_preview(
         chemistry_mode,
         film_id,
@@ -7377,6 +7501,12 @@ def live_preview_edit(
         quality="high",
         mark_dirty=True,
     )
+
+
+def live_preview_after_chem(*args):
+    """End chem UI batch, then bake once with the settled film/developer/time."""
+    _end_chem_ui_batch()
+    return live_preview_edit(*args)
 
 
 
@@ -9588,16 +9718,17 @@ def build_ui() -> gr.Blocks:
             outputs=[db_editor, state, db_flag],
         )
 
-        # Film / developer swap chemistry list + datasheet-normal minutes, then refresh.
-        # Film change updates developer → would also fire developer.change; cancel
-        # overlapping preview jobs so a stock swap is one bake, not two queued hangs.
+        # Film / developer swap chemistry list + datasheet-normal minutes, then
+        # ONE settled preview. on_film_change / on_developer_change open a chem
+        # UI batch so cascaded minutes/EI .change handlers skip; cancel the
+        # film.then bake when developer.change also fires (stock swap).
         film_change_evt = film.change(
             fn=on_film_change,
             inputs=[film, chemistry_mode],
             outputs=[developer, development_minutes, exposure_index],
         )
         film_preview_evt = film_change_evt.then(
-            fn=live_preview_edit,
+            fn=live_preview_after_chem,
             inputs=preview_inputs,
             outputs=preview_outputs,
             show_progress="minimal",
@@ -9608,7 +9739,7 @@ def build_ui() -> gr.Blocks:
             outputs=[development_minutes],
         )
         dev_change_evt.then(
-            fn=live_preview_edit,
+            fn=live_preview_after_chem,
             inputs=preview_inputs,
             outputs=preview_outputs,
             show_progress="minimal",
