@@ -7679,8 +7679,32 @@ def _technique_kwargs(
 
 
 def _technique_from_state(state) -> dict:
+    """Print-technique kwargs for Commit — prefer last live draft, else controls.
+
+    Falling back to ``{}`` made Commit Print use engine defaults (no tone /
+    border / split-grade) even when the Live exploring print had those knobs
+    baked into ``state['controls']``, so the committed print lost the look.
+    """
     tech = (state or {}).get("print_technique")
-    return dict(tech) if isinstance(tech, dict) else {}
+    if isinstance(tech, dict) and tech:
+        return dict(tech)
+    ctrl = (state or {}).get("controls") or {}
+    if not ctrl:
+        return {}
+    return _technique_kwargs(
+        ctrl.get("split_grade", False),
+        ctrl.get("soft_grade", 0.0),
+        ctrl.get("hard_grade", 5.0),
+        ctrl.get("soft_seconds", 4.0),
+        ctrl.get("hard_seconds", 4.0),
+        ctrl.get("test_strips", False),
+        ctrl.get("test_strip_bands", 5),
+        ctrl.get("test_strip_stops", 0.5),
+        ctrl.get("flash_stops", 0.0),
+        ctrl.get("dry_down_percent", 0.0),
+        ctrl.get("tone", "none"),
+        ctrl.get("border_frac", 0.0),
+    )
 
 
 def commit_print(
