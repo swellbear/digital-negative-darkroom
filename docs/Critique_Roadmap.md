@@ -32,6 +32,7 @@ Make the core Upload → Develop → Print loop readable and trustworthy.
 1. Keep Advanced dodge/burn subordinate; simplify further only if the core loop is excellent.
 2. Reduce simultaneous competing panels when possible.
 3. Make the first-print / default path more guided and forgiving.
+   - **Started 2026-08-03:** single-frame Upload lands on **Develop** (not Roll); next-step copy points at Commit Develop; Live viewer no longer says “easel”.
 
 ---
 
