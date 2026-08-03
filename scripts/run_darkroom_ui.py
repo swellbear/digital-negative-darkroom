@@ -4009,12 +4009,14 @@ def _curve_report_for_ui(
         development_minutes=minutes,
         relative_time=None if minutes is not None else 1.0,
     )
-    # Always include paper when we can — Live already shows a theoretical print.
+    # Instant has no enlarger paper stage — omit the print curve so the float
+    # does not offer MG Exp/Grade handles that cannot drive the card.
     paper = None
-    try:
-        paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
-    except Exception:
-        paper = None
+    if not is_instant_film_type(profile.type):
+        try:
+            paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
+        except Exception:
+            paper = None
     report = build_curve_report(
         state["dn"],
         profile,

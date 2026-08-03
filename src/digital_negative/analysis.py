@@ -175,6 +175,7 @@ def build_curve_report(
         ).astype(np.float64)
         print_r = np.power(10.0, -print_d)
         stats["paper"] = paper.name
+        stats["paper_type"] = paper.type
         stats["grade"] = eff_grade
         if scene.size:
             sh = np.interp(pct["p5"], grid, print_r)

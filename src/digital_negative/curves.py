@@ -102,7 +102,11 @@ def interpolate_curve_family(
         raise ValueError("empty curve family")
     members = sorted(family, key=lambda m: float(m["minutes"]))
     times = np.asarray([float(m["minutes"]) for m in members], dtype=np.float64)
-    minutes = float(np.clip(minutes, float(times[0]), float(times[-1])))
+    # Keep the requested time for clamp metadata — clipping first made
+    # clamp_low / clamp_high unreachable (always reported as "exact").
+    minutes_req = float(minutes)
+    t_lo = float(times[0])
+    t_hi = float(times[-1])
 
     # Common log-E grid = sorted union of all member abscissae
     all_logs: list[float] = []
@@ -122,32 +126,37 @@ def interpolate_curve_family(
     dens_mat = np.vstack(dens_rows)  # (n_times, n_log)
     fog_arr = np.asarray(fog_vals, dtype=np.float64)
 
-    if float(minutes) in set(float(t) for t in times) or any(np.isclose(times, minutes)):
-        idx = int(np.where(np.isclose(times, minutes))[0][0])
-        dens_out = dens_mat[idx]
-        fog_out = float(fog_arr[idx])
-        mode = "exact"
-    elif minutes < float(times[0]):
+    if minutes_req < t_lo:
         dens_out = dens_mat[0]
         fog_out = float(fog_arr[0])
         mode = "clamp_low"
-    elif minutes > float(times[-1]):
+        minutes_used = t_lo
+    elif minutes_req > t_hi:
         dens_out = dens_mat[-1]
         fog_out = float(fog_arr[-1])
         mode = "clamp_high"
+        minutes_used = t_hi
+    elif any(np.isclose(times, minutes_req)):
+        idx = int(np.where(np.isclose(times, minutes_req))[0][0])
+        dens_out = dens_mat[idx]
+        fog_out = float(fog_arr[idx])
+        mode = "exact"
+        minutes_used = float(times[idx])
     else:
         # PCHIP across time at each log-E sample
         dens_out = np.empty(grid.shape[0], dtype=np.float64)
         for j in range(grid.shape[0]):
-            dens_out[j] = float(PchipInterpolator(times, dens_mat[:, j])(minutes))
-        fog_out = float(PchipInterpolator(times, fog_arr)(minutes))
+            dens_out[j] = float(PchipInterpolator(times, dens_mat[:, j])(minutes_req))
+        fog_out = float(PchipInterpolator(times, fog_arr)(minutes_req))
         mode = "interpolated"
+        minutes_used = minutes_req
 
     meta = {
         "curve_source": "family",
         "family_mode": mode,
         "family_times": [float(t) for t in times],
-        "family_minutes": float(minutes),
+        "family_minutes": float(minutes_used),
+        "family_minutes_requested": minutes_req,
     }
     return grid, dens_out, fog_out, meta
 

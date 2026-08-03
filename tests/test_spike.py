@@ -120,6 +120,18 @@ def test_tri_x_d76_curve_family_interpolates_between_published_times():
     assert meta6["family_mode"] == "exact"
     assert meta8["family_mode"] == "exact"
     assert meta7["family_mode"] == "interpolated"
+    # Out-of-range requests clamp to the published endpoints (not silent "exact").
+    _, dens12, _, meta12 = interpolate_curve_family(chem["curve_family"], 12.0)
+    _, dens_lo, _, meta_lo = interpolate_curve_family(chem["curve_family"], 1.0)
+    _, dens_hi, _, meta_hi = interpolate_curve_family(chem["curve_family"], 30.0)
+    assert meta12["family_mode"] == "exact"
+    assert meta_lo["family_mode"] == "clamp_low"
+    assert meta_hi["family_mode"] == "clamp_high"
+    assert meta_lo["family_minutes"] == pytest.approx(6.0)
+    assert meta_hi["family_minutes"] == pytest.approx(12.0)
+    assert meta_lo["family_minutes_requested"] == pytest.approx(1.0)
+    assert np.allclose(dens_lo, dens6)
+    assert np.allclose(dens_hi, dens12)
     # Mid/high tones should rise with time
     mid = int(0.65 * (len(dens6) - 1))
     assert dens8[mid] > dens6[mid]

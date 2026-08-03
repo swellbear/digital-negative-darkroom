@@ -111,14 +111,23 @@ def curve_overlay_payload(
                 "label": "Exp",
                 "tip": "Drag up/down — base exposure (brighter print = less time)",
             },
-            {
-                "id": "print_grade",
-                "x": float(np.clip((hi_x - x0) / max(x1 - x0, 1e-9), 0.05, 0.95)),
-                "y": float(np.clip((hi_lr - pr0) / max(pr1 - pr0, 1e-9), 0.05, 0.95)),
-                "label": "Grade",
-                "tip": "Drag up/down — MG grade / contrast filtration",
-            },
         ]
+        # MG grade handle is B&W multigrade only — RA-4 / color papers use CC
+        # filtration in the Print drawer, not a grade slider.
+        paper_type = str(report.stats.get("paper_type") or "").lower()
+        if not paper_type:
+            # Older reports may omit paper_type; treat missing as MG-capable.
+            paper_type = "bw_multigrade"
+        if paper_type.startswith("bw") or paper_type in {"bw_multigrade", "multigrade"}:
+            print_handles.append(
+                {
+                    "id": "print_grade",
+                    "x": float(np.clip((hi_x - x0) / max(x1 - x0, 1e-9), 0.05, 0.95)),
+                    "y": float(np.clip((hi_lr - pr0) / max(pr1 - pr0, 1e-9), 0.05, 0.95)),
+                    "label": "Grade",
+                    "tip": "Drag up/down — MG grade / contrast filtration",
+                }
+            )
         zone_guides = []
         for z in range(0, 11, 2):
             zr = zone_reflectance(z)

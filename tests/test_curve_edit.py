@@ -111,3 +111,31 @@ def test_unknown_handle_rejected():
         print_exposure=8.0,
     )
     assert out["ok"] is False
+
+
+def test_ra4_overlay_omits_mg_grade_handle():
+    film = load_film_profile(ROOT / "profiles" / "films" / "portra-400-spectral-v1.json")
+    paper = load_paper_profile(ROOT / "profiles" / "papers" / "ra4-glossy-v1.json")
+    img = np.clip(np.linspace(0.05, 1.2, 80 * 100, dtype=np.float32).reshape(80, 100), 0, None)
+    dn = DigitalNegative(image=img, metadata=default_metadata())
+    report = build_curve_report(
+        dn,
+        film,
+        relative_time=1.0,
+        contrast_modifier=0.0,
+        developer_id="c41_standard",
+        development_minutes=3.25,
+        paper=paper,
+        grade=2.5,
+        base_exposure_seconds=8.0,
+    )
+    payload = curve_overlay_payload(
+        report,
+        development_minutes=3.25,
+        contrast=0.0,
+        print_grade=2.5,
+        print_exposure=8.0,
+    )
+    assert payload["print"] is not None
+    assert {h["id"] for h in payload["print"]["handles"]} == {"print_exp"}
+    assert report.stats.get("paper_type") == "color_ra4"
