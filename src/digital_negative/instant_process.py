@@ -37,6 +37,8 @@ class InstantResult:
     # Meter maps matching ``preview`` / ``card_rgb`` (incl. white border when on).
     card_reflectance: np.ndarray | None = None
     card_density: np.ndarray | None = None
+    # Picture well only (no integral frame) — Frame crop/straighten use this.
+    well_preview: np.ndarray | None = None
 
 
 def _sigmoid_curve(
@@ -371,6 +373,7 @@ def process_instant(
         meta=meta,
         card_reflectance=card_reflectance,
         card_density=card_density,
+        well_preview=disp.astype(np.float32),
     )
 
 
@@ -383,6 +386,8 @@ def develop_instant_as_result(
     inst = process_instant(dn, profile, **kwargs)
     # positive_preview is the finished card (0..1 float), matching color path usage.
     # card_* maps feed the UI spot meter / histogram (no enlarger PrintResult).
+    # well_preview is the picture only — Frame crop/straighten must not include
+    # the integral white border in their coordinate system.
     return DevelopmentResult(
         density=inst.density,
         transmittance=inst.transmittance,
@@ -394,4 +399,5 @@ def develop_instant_as_result(
         dye_concentrations=None,
         card_reflectance=inst.card_reflectance,
         card_density=inst.card_density,
+        well_preview=inst.well_preview,
     )

@@ -5493,19 +5493,91 @@ def _straighten_preview_rgb(src, straighten_deg: float = 0.0) -> np.ndarray | No
     return img
 
 
+def _inner_size_after_easel_border(outer: int, border_frac: float) -> int:
+    """Invert :func:`print_engine.apply_border` padding for one axis."""
+    f = float(np.clip(border_frac, 0.0, 0.25))
+    if f <= 1e-6 or outer <= 2:
+        return int(outer)
+    for inner in range(int(outer), max(1, int(outer) // 2) - 1, -1):
+        pad = max(1, int(round(inner * f)))
+        if inner + 2 * pad == int(outer):
+            return int(inner)
+    return max(1, int(round(float(outer) / (1.0 + 2.0 * f))))
+
+
+def _strip_easel_border_rgb(rgb: np.ndarray, border_frac: float) -> np.ndarray:
+    """Remove white easel padding so Frame coords match the picture / DN."""
+    f = float(np.clip(border_frac or 0.0, 0.0, 0.25))
+    img = np.asarray(rgb)
+    if f <= 1e-6:
+        return img
+    h, w = img.shape[:2]
+    ih = _inner_size_after_easel_border(h, f)
+    iw = _inner_size_after_easel_border(w, f)
+    bh = max(0, (h - ih) // 2)
+    bw = max(0, (w - iw) // 2)
+    if bh <= 0 and bw <= 0:
+        return img
+    return np.ascontiguousarray(img[bh : bh + ih, bw : bw + iw, ...])
+
+
+def _framing_picture_rgb(state):
+    """Picture-only RGB for Frame — excludes Instant card / print easel borders.
+
+    Apply framing bakes into ``geometry_base`` / the DN (no decorative border).
+    Crop overlays and straighten must use the same picture well, otherwise
+    Instant white frames and easel borders become part of the crop math.
+    """
+    if not state:
+        return None
+    dev = state.get("development_full") or state.get("development")
+    if (
+        dev is not None
+        and getattr(dev, "color_process", None) == "instant_integral"
+        and getattr(dev, "well_preview", None) is not None
+    ):
+        well = _to_rgb_u8(np.asarray(dev.well_preview, dtype=np.float32))
+        return _downscale_rgb(well, LIVE_MAX_SIDE)
+
+    live = _display_live_rgb(state)
+    if live is None:
+        return None
+    ctrl = state.get("controls") or {}
+    bf = float(ctrl.get("border_frac", 0.0) or 0.0)
+    # Instant with border but missing well_preview — never feed the card into Frame.
+    if getattr(dev, "color_process", None) == "instant_integral" and bf <= 1e-6:
+        meta = {}
+        if state.get("dn") is not None:
+            meta = (state["dn"].metadata.get("instant") or {})
+        if bool(ctrl.get("instant_border", meta.get("card_border", True))):
+            # Last resort: original / geometry are picture-shaped.
+            orig = state.get("original_base")
+            if orig is not None:
+                return _downscale_rgb(np.asarray(orig), LIVE_MAX_SIDE)
+            base = state.get("geometry_base")
+            if base is not None:
+                return _downscale_rgb(
+                    _to_rgb_u8(np.asarray(base), assume_linear=True), LIVE_MAX_SIDE
+                )
+    if bf > 1e-6:
+        return _strip_easel_border_rgb(np.asarray(live), bf)
+    return np.asarray(live)
+
+
 def _framing_stage_preview(state, straighten_deg: float = 0.0):
-    """RGB preview for Frame tools — straighten the live print in place.
+    """RGB preview for Frame tools — straighten the picture well in place.
 
     Frame / Crop / Auto straighten sit on the theoretical print (not a separate
-    crop stage). Prefer ``live_rgb`` so Auto does not appear to "revert" to the
-    original photo; fall back to original / geometry bases only when needed.
+    crop stage), but decorative Instant card / easel borders are excluded so
+    crop fractions match Apply → DN. Prefer the film look over the original
+    photo; fall back to original / geometry bases only when needed.
     """
     if not state:
         return None
     deg = float(straighten_deg or 0.0)
-    live = _display_live_rgb(state)
-    if live is not None:
-        out = _straighten_preview_rgb(live, deg)
+    picture = _framing_picture_rgb(state)
+    if picture is not None:
+        out = _straighten_preview_rgb(picture, deg)
         return None if out is None else np.ascontiguousarray(out)
     orig = state.get("original_base")
     if orig is not None:
@@ -6019,6 +6091,9 @@ def on_preview_tool_change(tool: str, state=None):
     Inspect loads the high-res ``*_inspect`` buffer onto the large preview so
     scroll-zoom is not limited to the LIVE_MAX_SIDE proxy. Leaving Inspect
     restores the normal stage viewer. Crop accordion tracks Frame only.
+
+    Frame shows the picture well only (no Instant card / easel border) so the
+    crop overlay shares coordinates with Apply → DN.
     """
     tool = str(tool or "print")
     if tool == "inspect":
@@ -6026,9 +6101,14 @@ def on_preview_tool_change(tool: str, state=None):
     if state is not None and state.get("dn") is not None:
         mode = (state or {}).get("viewer_mode", "live")
         if mode == "live" or mode not in _VIEWER_LABELS:
+            if tool == "frame":
+                picture = _framing_stage_preview(state, 0.0)
+                value = picture if picture is not None else _display_live_rgb(state)
+            else:
+                value = _display_live_rgb(state)
             return (
                 gr.update(
-                    value=_display_live_rgb(state),
+                    value=value,
                     label=_live_print_label(state, tool=tool),
                 ),
                 gr.update(open=(tool == "frame")),
@@ -6476,9 +6556,9 @@ def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
 
 def _stage_shape_for_straighten_crop(state) -> tuple[int, int]:
     """HxW used for the on-stage crop overlay while straightening."""
-    live = _display_live_rgb(state)
-    if live is not None:
-        h, w = np.asarray(live).shape[:2]
+    picture = _framing_picture_rgb(state)
+    if picture is not None:
+        h, w = np.asarray(picture).shape[:2]
         return int(h), int(w)
     for key in ("original_base", "geometry_base"):
         src = (state or {}).get(key)
@@ -6517,8 +6597,8 @@ def suggest_auto_straighten(state, crop_ratio="free"):
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
     state = _ensure_geometry_bases(state)
-    # Analyze the same picture Frame shows (live print), then geometry/original.
-    src = _display_live_rgb(state)
+    # Analyze the same picture Frame shows (picture well, not card/easel border).
+    src = _framing_picture_rgb(state)
     if src is None:
         src = state.get("original_base")
     if src is None:
