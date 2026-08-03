@@ -58,6 +58,7 @@ from digital_negative.display import (
     original_photo_preview,
     rotate_image,
     straighten_image,
+    straighten_safe_crop_box,
     to_u8_gray,
 )
 from digital_negative.dodge_burn import (
@@ -3031,6 +3032,21 @@ UI_JS = """
   const bootCrop = () => { try { setupCropTool(); syncPreviewToolClasses(); } catch (_) {} };
   bootCrop();
   setInterval(bootCrop, 1500);
+  // Server-driven crop_rect (Auto straighten / Auto crop) must move the orange
+  // box promptly — do not wait for the next live-image mutation.
+  let __lastCropRectVal = '';
+  setInterval(() => {
+    try {
+      if (readPreviewTool() !== 'frame' && !isModuleOpen('mod_crop')) return;
+      const root = document.querySelector('#crop_rect');
+      const box = root && (root.querySelector('textarea') || root.querySelector('input'));
+      const val = box ? String(box.value || '') : '';
+      if (!val || val === __lastCropRectVal) return;
+      __lastCropRectVal = val;
+      readBoxFromInput();
+      syncOverlay();
+    } catch (_) {}
+  }, 200);
 
   // ——— Fixed icon-rail workspace + right-click floating tools ———
   const setPreviewToolValue = (tool) => {
@@ -6146,6 +6162,19 @@ def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
     aspect = parse_aspect_ratio(crop_ratio, image_aspect)
     rule = str(auto_rule or "auto")
     result = suggest_crop_box(img, rule=rule, aspect_ratio=aspect)
+    # Keep composition inside the straighten-safe rect so black wedges stay out.
+    if abs(deg) >= 0.05:
+        ratio = str(crop_ratio or "free").lower()
+        forced = None if ratio in {"free", "original", ""} else aspect
+        safe = straighten_safe_crop_box(w, h, deg, aspect_ratio=forced)
+        x0 = max(float(result["x"]), float(safe["x"]))
+        y0 = max(float(result["y"]), float(safe["y"]))
+        x1 = min(float(result["x"] + result["w"]), float(safe["x"] + safe["w"]))
+        y1 = min(float(result["y"] + result["h"]), float(safe["y"] + safe["h"]))
+        if x1 - x0 >= 0.08 and y1 - y0 >= 0.08:
+            result = {**result, "x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0}
+        else:
+            result = {**result, **safe}
     rect = format_crop_rect(result)
     used = AUTO_CROP_RULE_LABELS.get(result.get("rule"), result.get("rule"))
     asked = AUTO_CROP_RULE_LABELS.get(rule, rule)
@@ -6158,18 +6187,46 @@ def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
     return rect, hint
 
 
-def preview_straighten_adjust(straighten_deg, state):
-    """Live Frame preview — rotate the stage as the straighten slider moves."""
+def _stage_shape_for_straighten_crop(state) -> tuple[int, int]:
+    """HxW used for the on-stage crop overlay while straightening."""
+    live = _display_live_rgb(state)
+    if live is not None:
+        h, w = np.asarray(live).shape[:2]
+        return int(h), int(w)
+    for key in ("original_base", "geometry_base"):
+        src = (state or {}).get(key)
+        if src is not None:
+            h, w = np.asarray(src).shape[:2]
+            return int(h), int(w)
+    return 1, 1
+
+
+def _straighten_fill_crop_rect(straighten_deg, crop_ratio, state) -> str:
+    """Crop box that excludes black wedges from the current straighten angle."""
+    deg = float(straighten_deg or 0.0)
+    h, w = _stage_shape_for_straighten_crop(state)
+    image_aspect = w / max(h, 1)
+    aspect = parse_aspect_ratio(crop_ratio, image_aspect)
+    # Free / original → no forced aspect inside the safe rect.
+    ratio = str(crop_ratio or "free").lower()
+    forced = None if ratio in {"free", "original", ""} else aspect
+    box = straighten_safe_crop_box(w, h, deg, aspect_ratio=forced)
+    return format_crop_rect(box)
+
+
+def preview_straighten_adjust(straighten_deg, crop_ratio, state):
+    """Live Frame preview — rotate the stage and keep the crop inside content."""
     if not state or state.get("dn") is None:
-        return gr.update()
+        return gr.update(), gr.update()
     img = _framing_stage_preview(state, straighten_deg)
+    rect = _straighten_fill_crop_rect(straighten_deg, crop_ratio, state)
     if img is None:
-        return gr.update()
-    return gr.update(value=img)
+        return gr.update(), rect
+    return gr.update(value=img), rect
 
 
-def suggest_auto_straighten(state):
-    """Set the straighten slider from detected axis-aligned structure."""
+def suggest_auto_straighten(state, crop_ratio="free"):
+    """Set straighten + a crop box that excludes rotation fill wedges."""
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
     state = _ensure_geometry_bases(state)
@@ -6182,6 +6239,7 @@ def suggest_auto_straighten(state):
     if src is None:
         raise gr.Error("No framing base to analyze.")
     deg = estimate_straighten_degrees(np.asarray(src))
+    rect = _straighten_fill_crop_rect(deg, crop_ratio, state)
     if abs(deg) < 0.15:
         hint = (
             "_Auto straighten — no clear tilt found (0.0°). "
@@ -6190,11 +6248,12 @@ def suggest_auto_straighten(state):
     else:
         hint = (
             f"_Auto straighten — **{deg:+.2f}°** (levels horizontals & verticals). "
-            f"Tweak if needed, then **Apply framing** (or Auto crop next)._"
+            f"Crop box trimmed to drop the black corners — tweak if needed, "
+            f"then **Apply framing** (or Auto crop to refine)._"
         )
     preview = _framing_stage_preview(state, deg)
     live_u = gr.update(value=preview) if preview is not None else gr.update()
-    return float(deg), hint, live_u
+    return float(deg), hint, live_u, rect
 
 
 def rotate_cw(state):
@@ -9567,18 +9626,18 @@ def build_ui() -> gr.Blocks:
         )
         auto_straighten_btn.click(
             fn=suggest_auto_straighten,
-            inputs=[state],
-            outputs=[straighten_deg, crop_hint, live_out],
+            inputs=[state, crop_ratio],
+            outputs=[straighten_deg, crop_hint, live_out, crop_rect],
         )
         straighten_deg.input(
             fn=preview_straighten_adjust,
-            inputs=[straighten_deg, state],
-            outputs=[live_out],
+            inputs=[straighten_deg, crop_ratio, state],
+            outputs=[live_out, crop_rect],
         )
         straighten_deg.change(
             fn=preview_straighten_adjust,
-            inputs=[straighten_deg, state],
-            outputs=[live_out],
+            inputs=[straighten_deg, crop_ratio, state],
+            outputs=[live_out, crop_rect],
         )
         auto_crop_btn.click(
             fn=suggest_auto_crop,

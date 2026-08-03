@@ -84,9 +84,11 @@ def test_framing_preview_uses_live_not_original():
 def test_auto_straighten_rotates_live_and_sets_nonzero_angle():
     mod = _load_ui()
     state = _state_with_distinct_live_and_original(mod)
-    deg, hint, live_u = mod.suggest_auto_straighten(state)
+    deg, hint, live_u, rect = mod.suggest_auto_straighten(state, "free")
     assert abs(float(deg) - 2.5) <= 0.75
     assert "Auto straighten" in str(hint)
+    parts = [float(p) for p in str(rect).split(",")]
+    assert len(parts) == 4 and parts[2] * parts[3] < 0.999
     payload = _update_dict(live_u)
     preview = payload.get("value")
     assert preview is not None

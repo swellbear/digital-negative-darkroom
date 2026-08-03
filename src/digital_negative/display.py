@@ -60,6 +60,85 @@ def straighten_image(
     )
 
 
+def largest_rect_after_rotation(
+    width: int,
+    height: int,
+    degrees_cw: float,
+) -> tuple[float, float]:
+    """Pixel size of the largest axis-aligned rect inside a rotated WxH frame.
+
+    Matches the classic "crop black borders after rotate-without-resize"
+    geometry (same result for ±angle). Used so straighten does not leave
+    fill wedges inside the crop box.
+    """
+    import math
+
+    w = float(max(int(width), 1))
+    h = float(max(int(height), 1))
+    angle = math.radians(float(degrees_cw))
+    width_is_longer = w >= h
+    side_long, side_short = (w, h) if width_is_longer else (h, w)
+    sin_a = abs(math.sin(angle))
+    cos_a = abs(math.cos(angle))
+    if side_short <= 2.0 * sin_a * cos_a * side_long or abs(sin_a * cos_a) < 1e-10:
+        x = 0.5 * side_short
+        if abs(sin_a) < 1e-10 or abs(cos_a) < 1e-10:
+            return w, h
+        wr, hr = (x / sin_a, x / cos_a) if width_is_longer else (x / cos_a, x / sin_a)
+    else:
+        cos_2a = cos_a * cos_a - sin_a * sin_a
+        if abs(cos_2a) < 1e-10:
+            return w, h
+        wr = (w * cos_a - h * sin_a) / cos_2a
+        hr = (h * cos_a - w * sin_a) / cos_2a
+    return float(min(abs(wr), w)), float(min(abs(hr), h))
+
+
+def straighten_safe_crop_box(
+    width: int,
+    height: int,
+    degrees_cw: float,
+    *,
+    aspect_ratio: float | None = None,
+    pad: float = 0.02,
+) -> dict[str, float]:
+    """Normalized ``{x,y,w,h}`` crop that excludes straighten fill wedges.
+
+    Centered in the frame. ``pad`` shrinks the geometric max slightly so
+    interpolated edge pixels from ``straighten_image`` do not peek in.
+    When ``aspect_ratio`` (w/h) is set, fit the largest such box inside the
+    safe rectangle.
+    """
+    w = int(max(width, 1))
+    h = int(max(height, 1))
+    deg = float(degrees_cw or 0.0)
+    if abs(deg) < 0.05:
+        return {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0}
+
+    rw, rh = largest_rect_after_rotation(w, h, deg)
+    pad = float(np.clip(pad, 0.0, 0.2))
+    rw *= 1.0 - pad
+    rh *= 1.0 - pad
+    rw = float(np.clip(rw, 2.0, w))
+    rh = float(np.clip(rh, 2.0, h))
+
+    if aspect_ratio is not None and float(aspect_ratio) > 1e-6:
+        ar = float(aspect_ratio)
+        # Largest aspect-fitted rect inside the safe rw×rh window.
+        if rw / rh > ar:
+            rw = rh * ar
+        else:
+            rh = rw / ar
+        rw = float(np.clip(rw, 2.0, w))
+        rh = float(np.clip(rh, 2.0, h))
+
+    nw = float(np.clip(rw / w, 0.02, 1.0))
+    nh = float(np.clip(rh / h, 0.02, 1.0))
+    x = float(np.clip((1.0 - nw) * 0.5, 0.0, 1.0 - nw))
+    y = float(np.clip((1.0 - nh) * 0.5, 0.0, 1.0 - nh))
+    return {"x": x, "y": y, "w": nw, "h": nh}
+
+
 def crop_normalized(
     image: np.ndarray,
     left: float = 0.0,

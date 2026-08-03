@@ -81,18 +81,19 @@ def test_framing_smoke_auto_apply_reset():
     assert preview0 is not None
     assert float(np.asarray(preview0)[..., 2].mean()) > 100
 
-    # 2) Auto straighten finds tilt and rotates Live in place.
-    deg, hint, live_u = mod.suggest_auto_straighten(state)
+    # 2) Auto straighten finds tilt, rotates Live, and trims the crop box.
+    deg, hint, live_u, rect = mod.suggest_auto_straighten(state, "free")
     assert abs(float(deg) - 2.0) <= 0.75
     assert "Auto straighten" in str(hint)
     preview = _update_dict(live_u).get("value")
     assert preview is not None
     assert float(np.asarray(preview)[..., 2].mean()) > 100
     assert float(np.mean(np.abs(np.asarray(preview, dtype=np.float32) - state["live_rgb"]))) > 1.0
+    assert str(rect) != mod.DEFAULT_CROP_RECT
 
     # 3) Apply framing bakes crop, exits Frame, closes crop accordion.
     outs = mod.apply_crop_straighten(
-        float(deg), "0.20000,0.20000,0.60000,0.60000", "free", state
+        float(deg), str(rect), "free", state
     )
     assert len(outs) == 20
     assert _update_dict(outs[16]).get("value") == "print"
