@@ -44,3 +44,24 @@ def test_wide_span_softens_grade():
     assert fit["ok"] == 1
     assert fit["grade"] < 4.0
     assert "grade" in fit["message"]
+
+
+def test_fit_parks_midtones_not_paper_white_speculars():
+    """Real paper tops out ~Z7.5. A stuck p95 must not keep lengthening a dark print."""
+    # Mostly dark midtones with a thin paper-white strip (specular/sky).
+    refl = np.full((64, 64), zone_reflectance(2.4), dtype=np.float32)
+    refl[:, 60:] = float(zone_reflectance(7.4))  # ~6% at paper white
+    fit = suggest_tone_fit(refl, base_seconds=48.0, grade=2.5)
+    assert fit["ok"] == 1
+    assert fit["base_seconds"] < 48.0
+    assert "mid" in fit["message"].lower() or "balance" in fit["message"].lower()
+
+
+def test_fit_darkens_when_midtones_are_blown_to_paper_white():
+    # Whole frame piled on paper white — midtone park must add exposure.
+    # (Shoulder-aware Fit takes a modest step; a second click continues.)
+    refl = np.full((48, 48), float(0.93), dtype=np.float32)  # ~Z7.37
+    fit = suggest_tone_fit(refl, base_seconds=2.0, grade=2.5)
+    assert fit["ok"] == 1
+    assert fit["base_seconds"] > 2.0
+    assert fit["base_seconds"] >= 4.0
