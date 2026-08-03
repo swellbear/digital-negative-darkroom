@@ -15,9 +15,10 @@ def test_hq_live_develop_uses_live_proxy_for_snappy_film_swaps():
     assert 'or _proxy_dn(state["dn"], LIVE_MAX_SIDE)' in chunk
     assert "working = src" not in chunk
     assert "_downscale_rgb(_to_rgb_u8(printed.preview), max_side)" in chunk
-    assert "cancels=[film_preview_evt]" in source
-    assert "fn=live_preview_after_chem" in source
+    assert "fn=on_film_change_and_preview" in source
+    assert "fn=on_developer_change_and_preview" in source
     assert "_CHEM_UI_BATCH" in source
+    assert "cancels=[film_preview_evt]" not in source
 
 
 def test_locked_print_and_commit_use_stride_fit_not_lanczos():

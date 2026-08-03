@@ -79,22 +79,53 @@ def _arr(live):
     return a
 
 
-def test_source_wires_chem_batch_preview_and_stale_guard():
+def test_source_wires_atomic_film_preview():
     source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
-    assert "def live_preview_after_chem" in source
-    assert "fn=live_preview_after_chem" in source
-    assert "_CHEM_UI_BATCH" in source
-    assert "_PREVIEW_LATEST" in source
+    assert "def on_film_change_and_preview" in source
+    assert "fn=on_film_change_and_preview" in source
+    assert "fn=on_developer_change_and_preview" in source
+    assert "suppress_cascades" in source
     assert "copy.deepcopy(base_proxy.metadata)" in source
+    # Old racing .then chain must be gone.
+    assert "cancels=[film_preview_evt]" not in source
+    assert "fn=live_preview_after_chem" not in source
 
 
-def test_chem_batch_skips_cascaded_slider_preview():
+def test_chem_cascade_skip_and_atomic_acros_tri_x_round_trip():
+    """Acros and Tri-X share default d76 — the sharp race the user hit."""
     mod = _load_ui()
     state = _state(mod)
-    mod._begin_chem_ui_batch()
-    skipped = mod.live_preview_edit(*_args(mod, "acros-100-ii-v1", "d76", 10.0, 100, state))
-    assert skipped == mod._preview_output_skips()
-    mod._end_chem_ui_batch()
+    state = {**state, "spot_pos": "0.5000,0.5000"}
+
+    out_a = mod.on_film_change_and_preview(*_args(mod, "acros-100-ii-v1", "d76", 10.0, 100, state))
+    assert len(out_a) == 3 + mod._PREVIEW_OUTPUT_COUNT
+    packed_a = out_a[3:]
+    assert "Acros" in (packed_a[-1].get("summary_cache") or "")
+    assert mod._CHEM_UI_BATCH["suppress_cascades"] >= 1
+
+    # Cascaded developer.change from film rewrite must not bake again.
+    out_dev = mod.on_developer_change_and_preview(
+        *_args(mod, "acros-100-ii-v1", "d76", 10.0, 100, packed_a[-1])
+    )
+    assert out_dev[1:] == mod._preview_output_skips()
+
+    out_tx = mod.on_film_change_and_preview(
+        *_args(mod, "tri-x-400-v1", "d76", 7.75, 400, packed_a[-1])
+    )
+    packed_tx = out_tx[3:]
+    assert "Tri-X" in (packed_tx[-1].get("summary_cache") or "")
+
+    out_a2 = mod.on_film_change_and_preview(
+        *_args(mod, "acros-100-ii-v1", "d76", 7.75, 400, packed_tx[-1])
+    )
+    packed_a2 = out_a2[3:]
+    # Resolved EI/minutes must be Acros defaults even if slider inputs were Tri-X.
+    assert "Acros" in (packed_a2[-1].get("summary_cache") or "")
+    assert "10 min" in (packed_a2[-1].get("summary_cache") or "")
+    a0 = _arr(packed_a[0])
+    a2 = _arr(packed_a2[0])
+    assert float(np.mean(np.abs(a0 - a2))) < 1e-5
+    assert packed_a[-2] == packed_a2[-2]
 
 
 def test_stale_preview_token_does_not_overwrite_newer_bake():
@@ -102,37 +133,21 @@ def test_stale_preview_token_does_not_overwrite_newer_bake():
     state = _state(mod)
     state = {**state, "spot_pos": "0.5000,0.5000"}
 
-    # Manually simulate overlapping bakes: older Acros finishes after newer Delta started.
     t_old = next(mod._PREVIEW_EPOCH)
     mod._PREVIEW_LATEST["token"] = t_old
-    # Newer bake claims the latest token (as live_preview would).
     t_new = next(mod._PREVIEW_EPOCH)
     mod._PREVIEW_LATEST["token"] = t_new
+    assert t_old != mod._PREVIEW_LATEST["token"]
+    assert len(mod._preview_output_skips()) == mod._PREVIEW_OUTPUT_COUNT
 
-    packed_new = mod._live_preview_body(
-        *_args(mod, "delta-100-v1", "id11_stock", 8.5, 100, state)[:-1],
+    packed_a = mod.live_preview(
+        *_args(mod, "acros-100-ii-v1", "d76", 10.0, 100, state)[:-1],
         state,
         quality="high",
         mark_dirty=True,
     )
-    # Stale completion check (wrapper behavior).
-    assert t_old != mod._PREVIEW_LATEST["token"]
-    stale_result = mod._preview_output_skips()
-    assert len(stale_result) == mod._PREVIEW_OUTPUT_COUNT
-
-    live_new, *_, spot_new, state2 = packed_new
-    assert "Delta" in (state2.get("summary_cache") or "")
-    assert "Zone" in spot_new
-
-    # Fresh Acros after Delta must match a clean Acros bake (no washout stickiness).
-    packed_a = mod.live_preview(
-        *_args(mod, "acros-100-ii-v1", "d76", 10.0, 100, state2)[:-1],
-        state2,
-        quality="high",
-        mark_dirty=True,
-    )
     packed_b = mod.live_preview(
-        *_args(mod, "delta-100-v1", "id11_stock", 8.5, 100, packed_a[-1])[:-1],
+        *_args(mod, "tri-x-400-v1", "d76", 7.75, 400, packed_a[-1])[:-1],
         packed_a[-1],
         quality="high",
         mark_dirty=True,
@@ -143,19 +158,4 @@ def test_stale_preview_token_does_not_overwrite_newer_bake():
         quality="high",
         mark_dirty=True,
     )
-    a0 = _arr(packed_a[0])
-    a2 = _arr(packed_c[0])
-    assert float(np.mean(np.abs(a0 - a2))) < 1e-5
-    assert packed_a[-2] == packed_c[-2]
-
-
-def test_after_chem_clears_batch_and_bakes():
-    mod = _load_ui()
-    state = _state(mod)
-    mod._begin_chem_ui_batch()
-    packed = mod.live_preview_after_chem(
-        *_args(mod, "acros-100-ii-v1", "d76", 10.0, 100, state)
-    )
-    assert mod._CHEM_UI_BATCH["active"] is False
-    assert len(packed) == mod._PREVIEW_OUTPUT_COUNT
-    assert "Acros" in (packed[-1].get("summary_cache") or "")
+    assert float(np.mean(np.abs(_arr(packed_a[0]) - _arr(packed_c[0])))) < 1e-5
