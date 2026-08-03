@@ -7999,24 +7999,38 @@ def _live_preview_body(
     try:
         if _locked(state, "development"):
             # Print-only commit preview.
-            # High quality: print the full developed T (same as Commit Print), then
-            # stride-fit the viewer so film grain stays with the stock.
-            # Drag: keep the fast stride proxy on T.
+            # High quality: print the LIVE_MAX_SIDE transmittance proxy so the
+            # on-screen frame stays continuous with Live exploring (Commit
+            # Develop must not change the picture). Full-T printing is for
+            # Commit Print / download. Drag uses the same proxy, stride-fit.
             paper = load_paper_profile(_profile_path(list_paper_profiles(), paper_id))
             tech = _technique_kwargs(
                 split_on, soft_grade, hard_grade, soft_seconds, hard_seconds,
                 test_strips_on, test_bands, test_stops, flash_stops, dry_down, tone, border_frac,
             )
             dev_full = state.get("development_full") or state.get("development")
-            if quality != "drag" and dev_full is not None:
-                t_use = _print_transmittance(dev_full)
-                if getattr(dev_full, "spectral_transmittance", None) is not None:
+            if quality != "drag" and (
+                state.get("transmittance_proxy") is not None or dev_full is not None
+            ):
+                t_use = state.get("transmittance_proxy")
+                spectral = (
+                    getattr(dev_full, "spectral_transmittance", None)
+                    if dev_full is not None
+                    else None
+                )
+                if spectral is not None:
+                    # Color: stride spectral T to the viewer budget (not INSPECT
+                    # then downscale again — that was the Commit Develop jump).
+                    t_use = spectral
+                    if max(t_use.shape[:2]) > max_side:
+                        step = max(1, int(np.ceil(max(t_use.shape[:2]) / max_side)))
+                        t_use = np.ascontiguousarray(t_use[::step, ::step, ...])
                     _stash_color_filtration(state["dn"], cc_cyan, cc_magenta, cc_yellow)
-                # Cap pathological sizes so a 40MP frame can't freeze the UI.
-                cap = max(INSPECT_MAX_SIDE, max_side)
-                if max(t_use.shape[:2]) > cap:
-                    step = max(1, int(np.ceil(max(t_use.shape[:2]) / cap)))
-                    t_use = np.ascontiguousarray(t_use[::step, ::step, ...])
+                elif t_use is None and dev_full is not None:
+                    t_use = _print_transmittance(dev_full)
+                    if max(t_use.shape[:2]) > max_side:
+                        step = max(1, int(np.ceil(max(t_use.shape[:2]) / max_side)))
+                        t_use = np.ascontiguousarray(t_use[::step, ::step, ...])
                 result = print_negative(
                     t_use,
                     state["dn"],
@@ -8028,8 +8042,9 @@ def _live_preview_body(
                     commit=False,
                     **tech,
                 )
-                # Same stride fit as Commit Print — film grain stays with the stock.
-                live_rgb = _downscale_rgb(_to_rgb_u8(result.preview), max_side)
+                live_rgb = _to_rgb_u8(result.preview)
+                if max(live_rgb.shape[:2]) > max_side:
+                    live_rgb = _downscale_rgb(live_rgb, max_side)
             else:
                 if state.get("development_full") is not None:
                     t = state["development_full"].transmittance
@@ -8465,8 +8480,20 @@ def commit_develop(
     if is_instant_film_type(profile.type) and "print" not in locks:
         locks.append("print")
 
-    t_src = _print_transmittance(development)
-    if t_src.ndim >= 2:
+    # Viewer proxy must match the Live exploring bake. Striding the *full*
+    # committed T (and printing at INSPECT_MAX_SIDE then downscaling again)
+    # double-strides large frames — e.g. 1344×1008 → 1008×756 — so Commit
+    # Develop visibly changes the print. Prefer the pre-commit live development
+    # transmittance when present (same pixels the user just approved).
+    live_dev = state.get("development")
+    t_live = None
+    if live_dev is not None and live_dev is not development:
+        try:
+            t_live = _print_transmittance(live_dev)
+        except Exception:
+            t_live = None
+    t_src = t_live if t_live is not None else _print_transmittance(development)
+    if t_src.ndim >= 2 and max(t_src.shape[:2]) > LIVE_MAX_SIDE:
         step = max(1, int(np.ceil(max(t_src.shape[:2]) / LIVE_MAX_SIDE)))
         t_proxy = np.ascontiguousarray(t_src[::step, ::step, ...])
     else:
