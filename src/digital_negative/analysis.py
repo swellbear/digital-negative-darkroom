@@ -44,9 +44,27 @@ def reflectance_to_zone(reflectance: np.ndarray | float) -> np.ndarray | float:
 
 
 def _as_mono_reflectance(reflectance: np.ndarray) -> np.ndarray:
-    """Collapse HxWx3 print reflectance to luminance for Zone tools."""
+    """Collapse print reflectance to luminance for Zone tools.
+
+    - Mono HxW → as-is
+    - RGB HxWx3 → Rec.709 luma
+    - Spectral HxWxN (RA-4) → CIE Y under D65 (not the first three bands)
+    """
     r = np.asarray(reflectance, dtype=np.float64)
-    if r.ndim >= 3 and r.shape[-1] >= 3:
+    if r.ndim < 3:
+        return r
+    n = int(r.shape[-1])
+    if n >= 3:
+        from .spectral import N_WAVELENGTHS, spectral_to_xyz
+
+        if n == N_WAVELENGTHS:
+            xyz = spectral_to_xyz(r.astype(np.float32))
+            return np.asarray(xyz[..., 1], dtype=np.float64)
+        if n == 3:
+            return (
+                0.2126 * r[..., 0] + 0.7152 * r[..., 1] + 0.0722 * r[..., 2]
+            )
+        # Unexpected channel count — mean of first three is a last resort.
         return r[..., :3].mean(axis=-1)
     return r
 
@@ -669,6 +687,8 @@ def suggest_tone_fit(
     *,
     base_seconds: float,
     grade: float,
+    print_contrast: float = 0.0,
+    chemistry_mode: str = "bw",
     hi_zone: float = 7.2,
     lo_zone: float = 1.2,
     target_lo: float = 2.0,
@@ -677,18 +697,33 @@ def suggest_tone_fit(
     min_seconds: float = 2.0,
     max_seconds: float = 64.0,
 ) -> dict[str, Any]:
-    """Suggest exposure / grade so the print sits on paper instead of clipping.
+    """Suggest exposure / filtration so the print sits on paper instead of clipping.
 
     First-order darkroom intuition: +1 enlarger stop ≈ 1 Zone darker. When the
-    scene is too contrasty for one grade, soften filtration a little, then park
-    the midtone near Zone V (or bias toward the worse end if only one side is
-    clipping).
+    scene is too contrasty, soften filtration a little (MG grade for B&W, RA-4
+    paper contrast for Color), then park the midtone near Zone V.
+
+    Instant has no enlarger — returns ``ok=0``.
     """
+    mode = str(chemistry_mode or "bw").lower()
+    if mode == "instant":
+        return {
+            "ok": 0,
+            "base_seconds": float(base_seconds),
+            "grade": float(grade),
+            "print_contrast": float(print_contrast),
+            "message": (
+                "Instant is a finished card — no enlarger paper to fit. "
+                "Adjust process time / N± / temperature instead."
+            ),
+        }
+
     if reflectance is None or np.asarray(reflectance).size == 0:
         return {
             "ok": 0,
             "base_seconds": float(base_seconds),
             "grade": float(grade),
+            "print_contrast": float(print_contrast),
             "message": "No print yet — Commit Develop first.",
         }
 
@@ -700,6 +735,7 @@ def suggest_tone_fit(
             "ok": 0,
             "base_seconds": float(base_seconds),
             "grade": float(grade),
+            "print_contrast": float(print_contrast),
             "message": "Not enough print samples to fit.",
         }
 
@@ -709,14 +745,23 @@ def suggest_tone_fit(
     span = p95 - p5
 
     new_grade = float(np.clip(grade, 0.0, 5.0))
-    grade_note = ""
+    new_contrast = float(np.clip(print_contrast, -1.0, 1.0))
+    filt_note = ""
     # Too much scene contrast for this filtration — open the scale a notch.
     if span > 6.2 and (blown or crushed):
-        soften = float(np.clip(0.5 + 0.35 * (span - 6.2), 0.5, 1.5))
-        softened = max(0.0, new_grade - soften)
-        if softened < new_grade - 0.05:
-            grade_note = f" · grade {new_grade:.1f}→{softened:.1f}"
-            new_grade = softened
+        if mode == "color":
+            # RA-4 contrast is −1…+1; soften toward negative.
+            soften = float(np.clip(0.15 + 0.12 * (span - 6.2), 0.15, 0.55))
+            softened = max(-1.0, new_contrast - soften)
+            if softened < new_contrast - 0.02:
+                filt_note = f" · contrast {new_contrast:+.2f}→{softened:+.2f}"
+                new_contrast = float(round(softened * 20.0) / 20.0)
+        else:
+            soften = float(np.clip(0.5 + 0.35 * (span - 6.2), 0.5, 1.5))
+            softened = max(0.0, new_grade - soften)
+            if softened < new_grade - 0.05:
+                filt_note = f" · grade {new_grade:.1f}→{softened:.1f}"
+                new_grade = softened
 
     # d(zone)/d(exposure_stops) ≈ −1 on the print.
     if blown and not crushed:
@@ -730,11 +775,12 @@ def suggest_tone_fit(
         intent = "balance midtones" if not (blown or crushed) else "compromise both ends"
 
     # Tiny moves aren't worth a timer click.
-    if abs(delta_stops) < 0.08 and not grade_note:
+    if abs(delta_stops) < 0.08 and not filt_note:
         return {
             "ok": 1,
             "base_seconds": float(base_seconds),
             "grade": new_grade,
+            "print_contrast": new_contrast,
             "delta_stops": 0.0,
             "blown": blown,
             "crushed": crushed,
@@ -752,14 +798,17 @@ def suggest_tone_fit(
     new_seconds = float(np.clip(new_seconds, min_seconds, max_seconds))
     # Snap to the UI slider step (0.5s).
     new_seconds = float(round(new_seconds * 2.0) / 2.0)
-    changed = abs(new_seconds - float(base_seconds)) >= 0.25 or bool(grade_note)
+    changed = (
+        abs(new_seconds - float(base_seconds)) >= 0.25
+        or bool(filt_note)
+    )
 
     direction = "longer" if new_seconds > float(base_seconds) + 0.05 else (
         "shorter" if new_seconds < float(base_seconds) - 0.05 else "same"
     )
     message = (
         f"**Fit to paper** — {intent}: timer {float(base_seconds):g}s→{new_seconds:g}s"
-        f" ({direction}){grade_note}.  \n"
+        f" ({direction}){filt_note}.  \n"
         f"Was Z{_roman(round(p5))}–{_roman(round(p95))} "
         f"(mid {_roman(round(p50))}). Overlay stays on so you can judge."
     )
@@ -767,6 +816,7 @@ def suggest_tone_fit(
         "ok": 1,
         "base_seconds": new_seconds,
         "grade": new_grade,
+        "print_contrast": new_contrast,
         "delta_stops": float(delta_stops),
         "blown": blown,
         "crushed": crushed,

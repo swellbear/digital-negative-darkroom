@@ -3929,16 +3929,36 @@ def refresh_inspect_tools(clip_hi, clip_lo, state):
     hist = render_print_histogram(refl)
     if hist is None:
         hist = gr.update()
+    mode = _curve_chemistry_mode(state)
+    if mode == "instant":
+        fit_tip = (
+            "**Fit to paper** is for enlarger prints — Instant is a finished card "
+            "(use process time / N±)."
+        )
+    elif mode == "color":
+        fit_tip = (
+            "**Fit to paper** auto-sets the timer (and softens RA-4 contrast if needed)."
+        )
+    else:
+        fit_tip = (
+            "**Fit to paper** auto-sets the timer (and softens MG grade if needed)."
+        )
     tip = (
         "_Histogram of print reflectance with Zone ticks. "
         "Clipping paints blown paper-white (red) and crushed Dmax (blue). "
-        "**Fit to paper** auto-sets the timer (and softens grade if needed)._"
+        f"{fit_tip}_"
     )
     return hist, tip, _inspect_frame(state), state
 
 
-def auto_fit_print_tones(print_exposure, print_grade, state):
+def auto_fit_print_tones(chemistry_mode, print_exposure, print_grade, print_contrast, state):
     """One-click: pull blown / crushed tones back onto the paper."""
+    mode = str(chemistry_mode or _curve_chemistry_mode(state)).lower()
+    if mode == "instant":
+        raise gr.Error(
+            "Instant is a finished card — no enlarger paper to fit. "
+            "Adjust process time, N±, or temperature instead."
+        )
     if not state or state.get("print_draft") is None:
         if state and state.get("live_rgb") is not None:
             raise gr.Error("Print meter map not ready — nudge Base exposure once, then Fit again.")
@@ -3948,6 +3968,8 @@ def auto_fit_print_tones(print_exposure, print_grade, state):
         refl,
         base_seconds=float(print_exposure),
         grade=float(print_grade),
+        print_contrast=float(print_contrast or 0.0),
+        chemistry_mode=mode,
     )
     if not fit.get("ok"):
         raise gr.Error(fit.get("message") or "Could not fit tones.")
@@ -3965,11 +3987,23 @@ def auto_fit_print_tones(print_exposure, print_grade, state):
         "summary_cache": summary,
     }
     tip = fit["message"]
+    # Color: timer + RA-4 contrast. B&W: timer + MG grade. Never write the dead knob.
+    if mode == "color":
+        return (
+            gr.update(value=float(fit["base_seconds"])),
+            gr.skip(),  # print_grade unused on RA-4
+            gr.update(value=float(fit.get("print_contrast", print_contrast or 0.0))),
+            gr.update(value=True),  # clip_hi
+            gr.update(value=True),  # clip_lo
+            tip,
+            state,
+        )
     return (
         gr.update(value=float(fit["base_seconds"])),
         gr.update(value=float(fit["grade"])),
-        gr.update(value=True),  # clip_hi
-        gr.update(value=True),  # clip_lo
+        gr.skip(),  # print_contrast / Filter — leave B&W filter alone
+        gr.update(value=True),
+        gr.update(value=True),
         tip,
         state,
     )
@@ -4655,11 +4689,27 @@ def on_chemistry_mode_change(mode: str, split_on=False, state=None):
             show = False
         elif key in {"soft_grade", "hard_grade", "soft_seconds", "hard_seconds"}:
             show = _split_grade_child_visible(split_on, mode)
+        elif key == "print_contrast":
+            # Shared slider: MG Filter (B&W) / RA-4 paper contrast (Color).
+            show = mode in {"bw", "color"}
         else:
             show = _print_key_visible(mode, key)
         # Re-enable after leaving a locked Instant/Color commit — visibility
         # alone left Print sliders stuck non-interactive.
-        vis.append(gr.update(visible=bool(show), interactive=bool(show)))
+        if key == "print_contrast" and mode == "color" and show:
+            vis.append(
+                gr.update(
+                    visible=True,
+                    interactive=True,
+                    label="Paper contrast",
+                )
+            )
+        elif key == "print_contrast" and mode == "bw" and show:
+            vis.append(
+                gr.update(visible=True, interactive=True, label="Filter")
+            )
+        else:
+            vis.append(gr.update(visible=bool(show), interactive=bool(show)))
     chem = get_chemistry(profile, chem_id) or {}
     _tmin, _tmax, normal = (
         time_slider_bounds(chem)
@@ -4978,7 +5028,6 @@ _INSTANT_CONTROL_KEYS = (
 _BW_ONLY_PRINT_KEYS = frozenset(
     {
         "print_grade",
-        "print_contrast",
         "split_grade",
         "soft_grade",
         "hard_grade",
@@ -4987,6 +5036,7 @@ _BW_ONLY_PRINT_KEYS = frozenset(
         "tone",
     }
 )
+# print_contrast: B&W = MG filter nudge; Color = RA-4 paper contrast (both live).
 _COLOR_ONLY_PRINT_KEYS = frozenset({"cc_cyan", "cc_magenta", "cc_yellow"})
 
 
@@ -5605,7 +5655,7 @@ def _framing_stage_preview(state, straighten_deg: float = 0.0):
         return None if out is None else _downscale_rgb(out, CROP_STAGE_MAX_SIDE)
     base = state.get("geometry_base")
     if base is None and state.get("dn") is not None:
-        base = state["dn"].image
+        base = getattr(state["dn"], "image", None)
     if base is None:
         return None
     img = np.asarray(base)
@@ -10397,8 +10447,11 @@ def build_ui() -> gr.Blocks:
         )
         fit_tones_btn.click(
             fn=auto_fit_print_tones,
-            inputs=[print_exposure, print_grade, state],
-            outputs=[print_exposure, print_grade, clip_hi, clip_lo, inspect_tip, state],
+            inputs=[chemistry_mode, print_exposure, print_grade, print_contrast, state],
+            outputs=[
+                print_exposure, print_grade, print_contrast,
+                clip_hi, clip_lo, inspect_tip, state,
+            ],
         ).then(
             fn=live_preview_high, inputs=preview_inputs, outputs=preview_outputs
         ).then(
