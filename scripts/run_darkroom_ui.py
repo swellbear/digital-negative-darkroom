@@ -21,7 +21,6 @@ from gradio import SelectData
 import numpy as np
 
 from digital_negative.auto_crop import (
-    RULE_CHOICES as AUTO_CROP_RULE_CHOICES,
     RULE_LABELS as AUTO_CROP_RULE_LABELS,
     estimate_straighten_degrees,
     format_crop_rect,
@@ -154,6 +153,16 @@ CROP_RATIO_CHOICES = [
     ("4:5", "4:5"),
     ("16:9", "16:9"),
     ("9:16", "9:16"),
+]
+# Short labels for the 190px Modules column — long "Auto (best score)" etc.
+# truncated to "Auto (best..." when the Rule dropdown shared a row with Auto crop.
+AUTO_CROP_RULE_UI_CHOICES = [
+    ("Auto", "auto"),
+    ("Thirds", "rule_of_thirds"),
+    ("Golden", "golden_ratio"),
+    ("Center", "center"),
+    ("Horizon", "horizon_thirds"),
+    ("Lead room", "leading_room"),
 ]
 DEFAULT_CROP_RECT = "0.00000,0.00000,1.00000,1.00000"
 
@@ -1451,14 +1460,19 @@ body.drawer-collapsed #drawer_host {
   pointer-events: none !important;
 }
 #preview_tool, #active_drawer, #crop_rect, #db_pos, #curves_open, #spot_pos, #inspect_open,
-#curve_overlay_json, #curve_edit_cmd {
+#curve_overlay_json, #curve_edit_cmd,
+#mod_crop #crop_rect {
   position: absolute !important;
   left: -9999px !important;
   width: 1px !important;
   height: 1px !important;
+  max-height: 1px !important;
+  margin: 0 !important;
+  padding: 0 !important;
   opacity: 0 !important;
   overflow: hidden !important;
   pointer-events: none !important;
+  border: none !important;
 }
 #inspect_preview { display: none !important; }
 
@@ -1824,8 +1838,44 @@ body.module-collapsed #module_panel {
   padding: 2px 4px !important;
 }
 #auto_straighten_btn {
-  min-width: 52px !important;
-  flex: 0 0 auto !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  flex: 1 1 auto !important;
+  margin: 0 0 4px 0 !important;
+}
+/* Crop module: full-width stacked controls — a Row crushed the Rule
+   dropdown beside Auto crop so "Auto (best score)" became "Auto (best...". */
+#mod_crop #auto_crop_rule,
+#mod_crop #auto_crop_btn,
+#mod_crop #straighten_deg,
+#mod_crop #apply_framing_btn,
+#mod_crop #reset_framing_btn {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+#mod_crop #auto_crop_rule .wrap,
+#mod_crop #auto_crop_rule .wrap-inner,
+#mod_crop #auto_crop_rule input[role="combobox"] {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+#mod_crop #auto_crop_rule input[role="combobox"] {
+  text-overflow: ellipsis !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+}
+#mod_crop #crop_action_row {
+  gap: 4px !important;
+  margin: 2px 0 0 0 !important;
+}
+#mod_crop #crop_action_row > * {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+}
+#mod_crop #crop_action_row button {
+  width: 100% !important;
 }
 
 
@@ -9693,51 +9743,59 @@ def build_ui() -> gr.Blocks:
                     crop_ratio = gr.Radio(
                         choices=CROP_RATIO_CHOICES,
                         value="free",
-                        label="Aspect ratio",
+                        label="Aspect",
                         elem_id="crop_ratio",
                     )
-                    with gr.Row():
-                        straighten_deg = gr.Slider(
-                            -15.0, 15.0, value=0.0, step=0.1, label="Straighten °", scale=3
-                        )
-                        auto_straighten_btn = gr.Button(
-                            "Auto",
-                            interactive=False,
-                            variant="secondary",
-                            size="sm",
-                            scale=1,
-                            elem_id="auto_straighten_btn",
-                        )
-                    with gr.Row():
-                        auto_crop_rule = gr.Dropdown(
-                            choices=AUTO_CROP_RULE_CHOICES,
-                            value="auto",
-                            label="Rule",
-                            scale=3,
-                        )
-                        auto_crop_btn = gr.Button(
-                            "Auto crop",
-                            interactive=False,
-                            variant="secondary",
-                            size="sm",
-                            scale=1,
-                            elem_id="auto_crop_btn",
-                        )
+                    straighten_deg = gr.Slider(
+                        -15.0,
+                        15.0,
+                        value=0.0,
+                        step=0.1,
+                        label="Straighten °",
+                        elem_id="straighten_deg",
+                    )
+                    auto_straighten_btn = gr.Button(
+                        "Auto straighten",
+                        interactive=False,
+                        variant="secondary",
+                        size="sm",
+                        elem_id="auto_straighten_btn",
+                    )
+                    auto_crop_rule = gr.Dropdown(
+                        choices=AUTO_CROP_RULE_UI_CHOICES,
+                        value="auto",
+                        label="Auto-crop rule",
+                        elem_id="auto_crop_rule",
+                    )
+                    auto_crop_btn = gr.Button(
+                        "Auto crop",
+                        interactive=False,
+                        variant="secondary",
+                        size="sm",
+                        elem_id="auto_crop_btn",
+                    )
+                    # Must stay in the DOM (JS reads/writes #crop_rect). CSS
+                    # parks it off-screen — do not use visible=False.
                     crop_rect = gr.Textbox(
                         value=DEFAULT_CROP_RECT,
                         label="crop_rect",
                         elem_id="crop_rect",
                         show_label=False,
                     )
-                    with gr.Row():
+                    with gr.Row(elem_id="crop_action_row"):
                         apply_framing_btn = gr.Button(
-                            "Apply framing",
+                            "Apply",
                             interactive=False,
                             variant="secondary",
                             size="sm",
                             elem_id="apply_framing_btn",
                         )
-                        reset_framing_btn = gr.Button("Reset framing", interactive=False, size="sm")
+                        reset_framing_btn = gr.Button(
+                            "Reset",
+                            interactive=False,
+                            size="sm",
+                            elem_id="reset_framing_btn",
+                        )
 
                 with gr.Accordion(
                     ADVANCED_DODGE_BURN_LABEL,
