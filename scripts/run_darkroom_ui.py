@@ -83,7 +83,7 @@ from digital_negative.enhance import enhance_available, maybe_ai_upscale_rgb
 from digital_negative.ingest import ingest_path
 from digital_negative.papers import load_paper_profile
 from digital_negative.pipeline import list_film_profiles, list_paper_profiles
-from digital_negative.print_engine import TONE_LABELS, print_negative
+from digital_negative.print_engine import PrintResult, TONE_LABELS, print_negative
 
 # Match commit look as closely as practical while staying interactive.
 LIVE_MAX_SIDE = 2000
@@ -3835,6 +3835,35 @@ def _print_maps(state):
     return getattr(draft, "reflectance", None), getattr(draft, "print_density", None)
 
 
+def _instant_print_draft(development) -> PrintResult | None:
+    """Build a PrintResult from an Instant DevelopmentResult for spot / hist."""
+    if development is None:
+        return None
+    if getattr(development, "color_process", None) != "instant_integral":
+        return None
+    refl = getattr(development, "card_reflectance", None)
+    dens = getattr(development, "card_density", None)
+    if refl is None:
+        return None
+    refl_a = np.asarray(refl, dtype=np.float32)
+    if dens is None:
+        dens_a = (-np.log10(np.maximum(refl_a, 1e-6))).astype(np.float32)
+        if dens_a.ndim == 3:
+            dens_a = (
+                0.2126 * dens_a[..., 0]
+                + 0.7152 * dens_a[..., 1]
+                + 0.0722 * dens_a[..., 2]
+            ).astype(np.float32)
+    else:
+        dens_a = np.asarray(dens, dtype=np.float32)
+    preview = np.asarray(development.positive_preview, dtype=np.float32)
+    return PrintResult(
+        preview=preview,
+        reflectance=refl_a,
+        print_density=dens_a,
+    )
+
+
 def _display_live_rgb(state, live=None):
     """Live RGB with optional A/B swap and clipping overlay."""
     s = state or {}
@@ -6996,6 +7025,8 @@ def _run_live_develop_then_print(
             f"_No enlarger paper — Commit pull locks the finished card._\n\n"
             f"{_history_md(state['dn'])}"
         )
+        # Spot / histogram need reflectance maps — Instant has no enlarger print,
+        # so attach the finished-card meter maps as print_draft (same as B&W/Color).
         state = {
             **state,
             "proxy": state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE),
@@ -7005,7 +7036,7 @@ def _run_live_develop_then_print(
             "chemistry_mode": "instant",
             "live_rgb": live_rgb,
             "live_inspect": live_rgb,
-            "print_draft": None,
+            "print_draft": _instant_print_draft(development),
             "neg_ref": None,
             "neg_view": None,
             "neg_inspect": None,
@@ -7845,6 +7876,8 @@ def commit_develop(
         "db_strokes": [],
     }
     if is_instant_film_type(profile.type):
+        # Keep Zone meter / histogram alive after Commit pull (print is locked).
+        state["print_draft"] = _instant_print_draft(development)
         # Finished card is the deliverable — no enlarger negative package.
         # Default download matches the on-screen card (film look). AI enlarge
         # optionally upscales from the full card for large-file export only.
