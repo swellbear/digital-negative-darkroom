@@ -1979,7 +1979,7 @@ body.db-exposing #live_preview *,
 # tool silhouette follows the pointer on the live print (preview + expose).
 # Gradio injects launch(js=...) as a <script> text node — it must be an IIFE
 # (or bare statements), not a bare () => {} which never runs.
-UI_JS = """
+UI_JS = r"""
 (() => {
   // ——— Minimal lucide-style line icons for the rail (no icon font needed) ———
   const RAIL_ICONS = {
@@ -4662,6 +4662,20 @@ def _chemistry_help_md(mode: str) -> str:
     )
 
 
+# Shared Print knobs Instant hides — must be explicitly re-shown on B&W/Color
+# roll restore (Gradio keeps the last visible=False if we leave them None).
+_SHARED_PRINT_KEYS = frozenset(
+    {
+        "paper_id",
+        "print_exposure",
+        "test_strips",
+        "flash_stops",
+        "dry_down",
+        "border_frac",
+    }
+)
+
+
 def _print_key_visible(mode: str, key: str) -> bool | None:
     """Return visibility for a print control key, or None to leave unchanged."""
     m = str(mode or "bw").lower()
@@ -4672,6 +4686,8 @@ def _print_key_visible(mode: str, key: str) -> bool | None:
         return not is_color
     if key in _COLOR_ONLY_PRINT_KEYS:
         return is_color
+    if key in _SHARED_PRINT_KEYS:
+        return True
     return None
 
 
@@ -4807,33 +4823,58 @@ def _control_updates(state):
         chem_ids = {cid for _label, cid in choices}
         if developer_id not in chem_ids and choices:
             developer_id = choices[0][1]
+        is_instant = mode == "instant"
         head = (
             gr.update(value=mode, interactive=dev_on),
             gr.update(choices=film_choices, value=film_id, interactive=dev_on),
-            gr.update(choices=choices, value=developer_id, interactive=dev_on),
+            gr.update(
+                choices=choices,
+                value=developer_id,
+                label="Reagent" if is_instant else "Developer",
+                interactive=dev_on,
+            ),
             minutes_u,
         )
     except Exception:
+        is_instant = mode == "instant"
         head = (
             gr.update(value=mode, interactive=dev_on),
             gr.update(choices=film_choices, value=film_id, interactive=dev_on),
-            gr.update(value=developer_id, interactive=dev_on),
+            gr.update(
+                value=developer_id,
+                label="Reagent" if is_instant else "Developer",
+                interactive=dev_on,
+            ),
             gr.update(value=minutes, interactive=dev_on),
         )
 
-    rest_dev = tuple(
-        gr.update(value=c[k], interactive=dev_on) for k in _DEV_CONTROL_KEYS[4:]
-    )
+    is_instant = mode == "instant"
+    # contrast, grain, EI, contrast_filter, scene_exposure, halation
+    rest_dev = []
+    for key in _DEV_CONTROL_KEYS[4:]:
+        kwargs = {"value": c[key], "interactive": dev_on}
+        if key == "grain":
+            kwargs["label"] = "Diffusion" if is_instant else "Grain"
+            kwargs["minimum"] = 0.0
+            kwargs["maximum"] = 1.0 if is_instant else 2.5
+            kwargs["step"] = 0.05
+        elif key in {"contrast_filter", "scene_exposure", "halation"}:
+            # Tank-only; Instant chemistry change hides these — roll restore
+            # must re-show them when leaving Instant (Gradio visibility sticks).
+            kwargs["visible"] = not is_instant
+            if is_instant:
+                kwargs["interactive"] = False
+        rest_dev.append(gr.update(**kwargs))
     print_u = []
     for key in _PRINT_CONTROL_KEYS:
         if key in {"soft_grade", "hard_grade", "soft_seconds", "hard_seconds"}:
             vis = _split_grade_child_visible(c.get("split_grade"), mode)
         elif key in {"test_bands", "test_stops"}:
-            vis = bool(c.get("test_strips"))
+            vis = bool(c.get("test_strips")) and not is_instant
         else:
             vis = _print_key_visible(mode, key)
         if key == "paper_id":
-            if mode == "instant" or not paper_choices:
+            if is_instant or not paper_choices:
                 print_u.append(gr.update(visible=False, interactive=False))
                 continue
             pid = c.get("paper_id")
@@ -4844,25 +4885,25 @@ def _control_updates(state):
                 "choices": paper_choices,
                 "value": pid,
                 "interactive": print_on,
+                "visible": True if vis is None else bool(vis),
             }
-            if vis is not None:
-                kwargs["visible"] = vis
             print_u.append(gr.update(**kwargs))
         else:
             kwargs = {"value": c[key], "interactive": print_on}
             if vis is not None:
                 kwargs["visible"] = vis
+                if not vis:
+                    kwargs["interactive"] = False
             print_u.append(gr.update(**kwargs))
     instant_u = []
     for key in _INSTANT_CONTROL_KEYS:
-        kwargs = {"value": c[key], "interactive": dev_on}
-        # Instant-only widgets; B&W/Color hide them via chemistry visibility.
-        if mode != "instant":
-            kwargs["visible"] = False
-        else:
-            kwargs["visible"] = True
+        kwargs = {
+            "value": c[key],
+            "interactive": dev_on if is_instant else False,
+            "visible": is_instant,
+        }
         instant_u.append(gr.update(**kwargs))
-    return head + rest_dev + tuple(print_u) + tuple(instant_u)
+    return head + tuple(rest_dev) + tuple(print_u) + tuple(instant_u)
 
 
 def _chemistry_help_update(state):
@@ -4871,6 +4912,17 @@ def _chemistry_help_update(state):
     if mode not in {"bw", "color", "instant"}:
         mode = "bw"
     return gr.update(value=_chemistry_help_md(mode))
+
+
+def _print_drawer_update(state):
+    """Show the Print rail drawer host only for B&W / Color frames."""
+    mode = str(_merged_frame_controls(state).get("chemistry_mode") or "bw").lower()
+    return gr.update(visible=(mode != "instant"))
+
+
+def _develop_commit_label(state) -> str:
+    mode = str(_merged_frame_controls(state).get("chemistry_mode") or "bw").lower()
+    return "Commit pull" if mode == "instant" else "Commit Develop"
 
 
 def _reset_state_for_chemistry_switch(
@@ -4933,6 +4985,7 @@ def _session_with_controls(state, *, drawer: str | None = "roll"):
     return (
         *_roll_session_outputs(state, drawer=drawer),
         *_control_updates(state),
+        _print_drawer_update(state),
         _chemistry_help_update(state),
     )
 
@@ -6147,16 +6200,65 @@ def _stage_control_updates(state):
     # Clear the file widget so a later "Add to roll" (sample) does not
     # re-ingest the previous upload batch.
     sample_u, file_u, ingest_u = on, gr.update(interactive=True, value=None), on
+    commit_label = _develop_commit_label(state) if state else "Commit Develop"
+    mode = str(_merged_frame_controls(state).get("chemistry_mode") or "bw").lower()
+    is_instant = mode == "instant"
     if not state or state.get("dn") is None:
-        return sample_u, file_u, ingest_u, off, off, off, off, off
+        return (
+            sample_u,
+            file_u,
+            ingest_u,
+            gr.update(interactive=False, value="Commit Develop"),
+            off,
+            off,
+            off,
+            off,
+        )
     locks = set(_locks(state))
+    # Instant has no enlarger stage — keep Commit Print inert even if locks lag.
     if "print" in locks:
-        return sample_u, file_u, ingest_u, off, on, off, on, on
+        return (
+            sample_u,
+            file_u,
+            ingest_u,
+            gr.update(interactive=False, value=commit_label),
+            on,
+            off,
+            on,
+            on,
+        )
     if "development" in locks:
-        return sample_u, file_u, ingest_u, off, on, on, off, on
+        return (
+            sample_u,
+            file_u,
+            ingest_u,
+            gr.update(interactive=False, value=commit_label),
+            on,
+            gr.update(interactive=not is_instant),
+            off,
+            on,
+        )
     if "ingest" in locks:
-        return sample_u, file_u, ingest_u, on, off, off, off, on
-    return sample_u, file_u, ingest_u, off, off, off, off, on
+        return (
+            sample_u,
+            file_u,
+            ingest_u,
+            gr.update(interactive=True, value=commit_label),
+            off,
+            off,
+            off,
+            on,
+        )
+    return (
+        sample_u,
+        file_u,
+        ingest_u,
+        gr.update(interactive=False, value=commit_label),
+        off,
+        off,
+        off,
+        on,
+    )
 
 def _roll_session_outputs(state, *, drawer: str | None = "roll"):
     """UI tuple shared by add / select / remove on the camera roll."""
@@ -6312,17 +6414,21 @@ def _roll_switch_bundle(state, *, drawer="roll", modal_visible=False, pending=-1
     base = _roll_session_outputs(state, drawer=drawer)
     if restore_controls:
         ctrls = _control_updates(state)
+        drawer_u = _print_drawer_update(state)
         help_u = _chemistry_help_update(state)
     elif state and state.get("dn") is not None:
         # Stay on this frame's widget values (dirty prompt); only sync lock flags.
         ctrls = _control_interactivity_updates(state)
+        drawer_u = gr.skip()
         help_u = gr.skip()
     else:
         ctrls = tuple(gr.skip() for _ in range(_CONTROL_COUNT))
+        drawer_u = gr.skip()
         help_u = gr.skip()
     return (
         *base,
         *ctrls,
+        drawer_u,
         help_u,
         gr.update(visible=bool(modal_visible)),
         int(pending),
@@ -6782,12 +6888,11 @@ def live_preview(
         cc_cyan,
         cc_magenta,
         cc_yellow,
+        process_temp_c,
+        instant_chroma,
+        instant_warmth,
+        instant_border,
     )
-    # Instant extras — also stored in the per-frame roll control snapshot.
-    controls["process_temp_c"] = float(process_temp_c if process_temp_c is not None else 21.0)
-    controls["instant_chroma"] = float(instant_chroma if instant_chroma is not None else 1.0)
-    controls["instant_warmth"] = float(instant_warmth if instant_warmth is not None else 0.0)
-    controls["instant_border"] = bool(True if instant_border is None else instant_border)
 
     if not state or state.get("dn") is None:
         return _pack_preview(None, None, None, None, "*Commit Ingest first.*", state)
@@ -9038,8 +9143,12 @@ def build_ui() -> gr.Blocks:
         ]
         # Ingest/remove also restore Develop/Print interactivity — otherwise a
         # prior Commit Develop leaves film controls disabled on the new frame.
-        # chemistry_help is restore-only (not part of the per-frame control snapshot).
-        session_control_outputs = ingest_outputs + control_outputs + [chemistry_help]
+        # print_drawer + chemistry_help are restore-only chrome (not in the
+        # per-frame control snapshot arity used as live_preview inputs).
+        session_control_outputs = ingest_outputs + control_outputs + [
+            print_drawer,
+            chemistry_help,
+        ]
         roll_switch_outputs = session_control_outputs + [
             roll_save_modal,
             roll_pending_index,
