@@ -137,8 +137,8 @@ ADVANCED_DODGE_BURN_LABEL = "Advanced · Dodge & burn"
 DRAWER_WIDTH_PX = 260
 HOW_DARKROOM_WORKS_MD = (
     "**How this darkroom works**\n\n"
-    "- **Live preview** is exploratory until you Commit a stage.\n"
-    "- **Commit** locks that stage into the Digital Negative; **Unlock** revises it.\n"
+    "- Default path: **Upload → Develop → Print** (Commit locks each stage).\n"
+    "- **Live preview** is exploratory until you Commit; **Unlock** revises it.\n"
     "- **B&W / Color:** paper → exposure → filtration → **Commit Print**.\n"
     "- **Instant / Polaroid:** expose → pod diffusion → **Commit pull** "
     "(no enlarger paper stage)."
@@ -5071,7 +5071,8 @@ def _build_ingest_frame(path: str | None) -> dict:
     summary = (
         f"{_stage_banner('development', ['ingest'], None)}\n\n"
         f"**Upload locked** — `{dn.metadata['source']['original_filename']}`  \n"
-        f"_Live exploring — not committed. Use **Frame** to crop, **Inspect** to zoom._\n\n"
+        f"_Next: tune **Develop** (film / time / N±), then **Commit Develop**.  \n"
+        f"Optional: **Frame** to crop first · **Inspect** to zoom._\n\n"
         f"{_history_md(dn)}"
     )
     return {
@@ -5358,8 +5359,9 @@ def _live_print_label(state=None, tool: str | None = None) -> str:
     else:
         base = LIVE_PRINT_LABEL
     tool = str(tool or "print")
+    # Keep default Live print quiet — "easel" sounded like dodge/burn was required.
     suffix = {
-        "print": " · easel",
+        "print": "",
         "frame": " · frame",
         "inspect": " · inspect",
     }.get(tool, "")
@@ -6293,18 +6295,21 @@ def commit_ingest(sample_path, file_obj, state):
     n = len(roll)
     added = len(paths)
     summary = state["summary_cache"]
+    # First-print path: land on Develop. Only open Roll when the user bulk-added
+    # several new frames in one drop (so they can see what arrived).
+    next_drawer = "roll" if added > 1 else "develop"
     if n > 1 or added > 1:
         summary = (
             f"{_stage_banner('development', ['ingest'], state)}\n\n"
             f"**Added {added} to Roll** — frame {new_index + 1}/{n} active  \n"
             f"`{state['dn'].metadata['source']['original_filename']}`  \n"
-            f"_Open the **Roll** tab to switch or remove frames._\n\n"
+            f"_Active frame → **Develop** next. **Roll** switches or removes frames._\n\n"
             f"{_history_md(state['dn'])}"
         )
         state["summary_cache"] = summary
         roll[new_index] = _frame_payload(state)
         state["roll"] = roll
-    return _session_with_controls(state, drawer="roll")
+    return _session_with_controls(state, drawer=next_drawer)
 
 
 def _roll_switch_bundle(state, *, drawer="roll", modal_visible=False, pending=-1, restore_controls=True):
@@ -8396,7 +8401,7 @@ def build_ui() -> gr.Blocks:
                         )
                         ingest_btn = gr.Button("Add to roll", variant="primary", size="sm")
                         gr.Markdown(
-                            "_Photos land in the **Roll** tab._",
+                            "_Adds to the **Roll**, then opens **Develop** for the active frame._",
                             elem_id="ingest_hint",
                         )
                         gr.Markdown(
@@ -8700,7 +8705,7 @@ def build_ui() -> gr.Blocks:
                     show_label=False,
                 )
                 live_out = gr.Image(
-                    label="Live theoretical print — not committed · easel",
+                    label="Live theoretical print — not committed",
                     type="numpy",
                     elem_id="live_preview",
                     height=720,

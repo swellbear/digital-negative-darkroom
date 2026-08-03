@@ -37,6 +37,38 @@ def test_collect_input_paths_multi_and_sample():
     assert mod._resolve_input(["/a.jpg", "/b.jpg"], "/sample.nef") == "/a.jpg"
 
 
+def _active_drawer_from(outs):
+    """active_drawer is the ritual string among session outputs."""
+    names = {"ingest", "roll", "develop", "print", "frame", "log"}
+    for item in outs:
+        if isinstance(item, str) and item in names:
+            return item
+    return None
+
+
+def test_single_ingest_opens_develop_not_roll():
+    """First-print path: one photo should land on Develop, not the Roll gallery."""
+    mod = _load_ui()
+    path = str(FIXTURE)
+    outs = mod.commit_ingest(None, path, None)
+    state = _state_from(outs)
+    assert state["roll_index"] == 0
+    assert _active_drawer_from(outs) == "develop"
+    summary = state.get("summary_cache") or ""
+    assert "Commit Develop" in summary
+    assert "Next:" in summary or "Develop" in summary
+
+
+def test_bulk_ingest_opens_roll_but_points_at_develop():
+    mod = _load_ui()
+    path = str(FIXTURE)
+    outs = mod.commit_ingest(None, [path, path], None)
+    state = _state_from(outs)
+    assert len(state["roll"]) == 2
+    assert _active_drawer_from(outs) == "roll"
+    assert "Develop" in (state.get("summary_cache") or "")
+
+
 def test_camera_roll_add_switch_remove():
     mod = _load_ui()
     path = str(FIXTURE)
@@ -50,6 +82,8 @@ def test_camera_roll_add_switch_remove():
     state = _state_from(outs)
     assert len(state["roll"]) == 3
     assert state["roll_index"] == 2
+    # Adding one more frame continues the Develop ritual (not Roll parking).
+    assert _active_drawer_from(outs) == "develop"
 
     outs = mod.select_roll_frame(state, type("E", (), {"index": 0})())
     state = _state_from(outs)

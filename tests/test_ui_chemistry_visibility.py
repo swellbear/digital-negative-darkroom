@@ -129,7 +129,9 @@ def test_live_vs_committed_viewer_and_banner():
     assert "Committed" in mod._stage_banner("print", ["ingest", "development", "print"], committed)
     assert mod._lock_status_label(exploring) == "Live exploring"
     assert mod._lock_status_label(committed) == "Committed"
-    assert "easel" in mod._live_print_label(exploring, tool="print")
+    # Default Live print stays quiet — "easel" implied dodge/burn was required.
+    assert "easel" not in mod._live_print_label(exploring, tool="print").lower()
+    assert "frame" in mod._live_print_label(exploring, tool="frame").lower()
     # on_preview_tool_change returns (live label update, crop accordion open).
     label_u, crop_u = mod.on_preview_tool_change("frame", committed)
     assert _upd(label_u).get("label", "").startswith("Committed print")
@@ -158,6 +160,7 @@ def test_drawer_width_and_progressive_disclosure():
     assert 'elem_id="how_darkroom_works"' in source
     assert "How this darkroom works" in mod.HOW_DARKROOM_WORKS_MD
     assert "Live preview" in mod.HOW_DARKROOM_WORKS_MD
+    assert "Upload → Develop → Print" in mod.HOW_DARKROOM_WORKS_MD
 
 
 def test_split_grade_children_hidden_until_enabled():
