@@ -4286,6 +4286,30 @@ def _recipe_upload_path(recipe_file) -> str | None:
     return None
 
 
+def arm_recipe_selection(recipe_file):
+    """After Choose JSON: show the file as selected; Apply still loads it.
+
+    Only updates the tip — writing back into the UploadButton can clear the
+    chosen path in Gradio 6 and break Apply.
+    """
+    path = _recipe_upload_path(recipe_file)
+    if not path:
+        return "_Choose a recipe JSON, then **Apply** to this frame._"
+    name = Path(path).name
+    if not name.lower().endswith(".json"):
+        return f"**Not a recipe** — `{name}` (need `.json`)."
+    try:
+        recipe = load_recipe(path)
+    except Exception as exc:
+        return f"**Invalid recipe** — `{name}`: {exc}"
+    rname = str(recipe.get("name") or "untitled")
+    mode = str(recipe.get("chemistry_mode") or "bw").upper()
+    return (
+        f"**Selected** — `{name}` · {rname} · {mode}. "
+        f"Click **Apply** to load onto this frame."
+    )
+
+
 def apply_recipe_file(recipe_file, chemistry_mode, state):
     """Load a recipe JSON onto the active frame only (not the whole roll)."""
     path = _recipe_upload_path(recipe_file)
@@ -4294,7 +4318,10 @@ def apply_recipe_file(recipe_file, chemistry_mode, state):
     if not str(path).lower().endswith(".json"):
         raise gr.Error("Recipe must be a .json file.")
     recipe = load_recipe(path)
-    tip = f"**Recipe loaded** — {recipe.get('name', 'untitled')} · this frame only."
+    tip = (
+        f"**Applied** — {recipe.get('name', 'untitled')} · this frame only. "
+        f"(`{Path(path).name}`)"
+    )
     recipe_mode = str(recipe.get("chemistry_mode") or "bw").lower()
     if recipe_mode not in {"bw", "color", "instant"}:
         recipe_mode = "bw"
@@ -9955,8 +9982,8 @@ def build_ui() -> gr.Blocks:
                             min_width=60,
                         )
                     recipe_tip = gr.Markdown(
-                        "_Save / load film · chemistry · print JSON "
-                        "(Color CC + Instant temp/chroma)._",
+                        "_Choose a recipe JSON, then **Apply** to this frame. "
+                        "Save writes Color CC + Instant temp/chroma too._",
                         elem_id="recipe_tip",
                     )
 
@@ -10780,6 +10807,12 @@ def build_ui() -> gr.Blocks:
             outputs=[live_out, inspect_tip, toggle_ab_btn, state],
         )
 
+        # Choose JSON → arm/select (show filename). Apply → load onto the photo.
+        recipe_file.upload(
+            fn=arm_recipe_selection,
+            inputs=[recipe_file],
+            outputs=[recipe_tip],
+        )
         load_recipe_btn.click(
             fn=apply_recipe_file,
             inputs=[recipe_file, chemistry_mode, state],

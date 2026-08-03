@@ -304,6 +304,31 @@ def test_recipe_upload_path_accepts_uploadbutton_payloads():
     assert mod._recipe_upload_path(_F()) == "/tmp/d.json"
 
 
+def test_arm_recipe_selection_shows_ready_without_applying():
+    mod = _load_ui()
+    recipe_path = Path(tempfile.mkdtemp()) / "my-cal.json"
+    save_recipe(
+        recipe_path,
+        build_recipe(
+            film_id="tri-x-400-v1",
+            developer_id="d76_stock",
+            development_minutes=7.5,
+            contrast=0.0,
+            grain=1.0,
+            paper_id="ilford-mgiv-rc-v1",
+            print_grade=2.5,
+            print_exposure=8.0,
+            chemistry_mode="bw",
+            name="my-cal",
+        ),
+    )
+    tip = mod.arm_recipe_selection(str(recipe_path))
+    assert "Selected" in tip
+    assert "my-cal.json" in tip
+    assert "Apply" in tip
+    assert "Applied" not in tip
+
+
 def test_apply_mode_mismatch_uses_ui_chemistry_radio():
     mod = _load_ui()
     outs = mod.commit_ingest(
