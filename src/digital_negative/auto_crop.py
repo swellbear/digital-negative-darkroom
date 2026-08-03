@@ -311,80 +311,197 @@ def format_crop_rect(box: dict[str, Any]) -> str:
     return ",".join(f"{float(box[k]):.5f}" for k in ("x", "y", "w", "h"))
 
 
-def _axis_alignment_score(gray: np.ndarray) -> float:
-    """Higher when strong edges are axis-aligned (horizontals + verticals).
+def _horizon_flatness_score(gray: np.ndarray) -> tuple[float, float]:
+    """Classical horizon level: dominant tone-break stays on one row across x.
 
-    Architectural scenes (window mullions, door frames) are dominated by
-    verticals; horizons and shelves by horizontals. Scoring only row-projection
-    variance made building tilts look "already level."
+    Returns ``(score, confidence)``. Soft sky/ground splits and hard shelf
+    lines both peak when that break is level; tilted horizons raise the
+    weighted row variance and lower the score. Border bands are ignored so
+    rotate-fill edges cannot impersonate a horizon.
     """
-    # Edge magnitude — prefer structure over smooth tone ramps.
-    gy, gx = np.gradient(gray.astype(np.float32))
-    # Horizontal-edge energy projected per row; vertical-edge energy per column.
-    row_proj = np.mean(np.abs(gy), axis=1)
-    col_proj = np.mean(np.abs(gx), axis=0)
-    # Peakiness of those projections = how consistently edges share an axis.
-    h_score = float(np.var(row_proj))
-    v_score = float(np.var(col_proj))
-    # Also reward discrete jumps in the 1-D profiles (lined-up edges).
-    h_score += 0.35 * float(np.var(np.diff(row_proj)))
-    v_score += 0.35 * float(np.var(np.diff(col_proj)))
-    return h_score + v_score
+    g = _norm01(np.asarray(gray, dtype=np.float32))
+    h, w = g.shape[:2]
+    if h < 16 or w < 16:
+        return 0.0, 0.0
+    gy = np.abs(ndimage.sobel(g, axis=0))
+    gy = ndimage.gaussian_filter(gy, sigma=(1.2, 0.6))
+    n = int(np.clip(w // 16, 8, 24))
+    rows: list[float] = []
+    strengths: list[float] = []
+    for i in range(n):
+        x0 = int(i * w / n)
+        x1 = max(x0 + 1, int((i + 1) * w / n))
+        col = np.mean(gy[:, x0:x1], axis=1)
+        yy = np.linspace(0.0, 1.0, col.size, dtype=np.float64)
+        # Prefer mid-frame / lower-third horizons; still allow high skies.
+        prior = 0.25 + 0.75 * np.exp(-0.5 * ((yy - 0.55) / 0.32) ** 2)
+        score = col * prior
+        # Never pick the rotate-fill lip at the top/bottom of the trial.
+        margin = max(2, int(0.08 * col.size))
+        score[:margin] = 0.0
+        score[-margin:] = 0.0
+        if float(np.max(score)) <= 1e-12:
+            continue
+        yi = int(np.argmax(score))
+        rows.append(float(yi))
+        strengths.append(float(score[yi] / (float(np.mean(col)) + 1e-8)))
+    if len(rows) < 4:
+        return 0.0, 0.0
+    rows_a = np.asarray(rows, dtype=np.float64)
+    sw = np.clip(np.asarray(strengths, dtype=np.float64), 0.0, None)
+    if float(sw.sum()) < 1e-8:
+        return 0.0, 0.0
+    mean = float(np.sum(rows_a * sw) / sw.sum())
+    var = float(np.sum(sw * (rows_a - mean) ** 2) / sw.sum())
+    # Normalize variance in row-fraction units so tall Instant frames
+    # are not punished more than wide landscapes.
+    var_norm = var / max(h * h * 0.0025, 1.0)
+    flat = 1.0 / (1.0 + var_norm)
+    strength = float(np.mean(strengths))
+    # Scale ~O(1..10) so horizon can compete with plumb mass.
+    score = float(flat * np.clip(strength, 0.0, 12.0))
+    conf = float(np.clip(strength * flat, 0.0, 10.0))
+    return score, conf
 
 
-def _orientation_axis_score(gray: np.ndarray) -> float:
-    """Reward edge energy whose line orientation is near 0° or 90°.
-
-    Soft horizons and faint architecture often fail pure projection variance;
-    a magnitude-weighted orientation histogram still peaks when the frame is
-    leveled, even with a single weak band.
-    """
-    g = gray.astype(np.float32)
+def _vertical_plumb_score(gray: np.ndarray) -> tuple[float, float]:
+    """Classical plumb: strong edges stand near vertical (buildings, trees)."""
+    g = _norm01(np.asarray(gray, dtype=np.float32))
+    g = ndimage.gaussian_filter(g, sigma=1.0)
     gx = ndimage.sobel(g, axis=1)
     gy = ndimage.sobel(g, axis=0)
     mag = np.hypot(gx, gy)
-    thr = float(np.percentile(mag, 70))
+    thr = float(np.percentile(mag, 80))
     mask = mag >= max(thr, 1e-6)
-    if int(np.count_nonzero(mask)) < 32:
-        return 0.0
-    # Gradient angle → line orientation in [-90, 90).
+    if int(np.count_nonzero(mask)) < 64:
+        return 0.0, 0.0
     line_deg = np.degrees(np.arctan2(gx[mask], -gy[mask]))
-    weights = mag[mask]
-    # Distance to nearest axis (0° horizontal or ±90° vertical), in [0, 45].
-    to_axis = np.minimum(np.abs(line_deg), np.abs(np.abs(line_deg) - 90.0))
-    to_axis = np.minimum(to_axis, 45.0)
-    # Cosine lobe: 1 on-axis, 0 at 45° diagonals.
-    lobe = np.cos(np.deg2rad(to_axis * 2.0))
-    lobe = np.clip(lobe, 0.0, 1.0)
-    return float(np.sum(weights * lobe) / (float(np.sum(weights)) + 1e-8))
+    line_deg = np.asarray(line_deg, dtype=np.float64)
+    # Wrap to [-90, 90).
+    line_deg = ((line_deg + 90.0) % 180.0) - 90.0
+    wts = mag[mask].astype(np.float64)
+    to_v = 90.0 - np.abs(line_deg)
+    to_h = np.abs(line_deg)
+    # Tight 15° lobe — wide 45° lobes stayed high on tilted mullions and
+    # flattened the search peak away from true plumb.
+    lobe_v = np.clip(1.0 - to_v / 15.0, 0.0, 1.0) ** 2
+    lobe_h = np.clip(1.0 - to_h / 15.0, 0.0, 1.0) ** 2
+    v_mass = float(np.sum(wts * lobe_v))
+    h_mass = float(np.sum(wts * lobe_h))
+    total = float(np.sum(wts)) + 1e-8
+    score = 10.0 * (v_mass / total)
+    conf = float(
+        np.clip((v_mass / (h_mass + v_mass + 1e-8)) * 10.0 * (v_mass / total), 0.0, 10.0)
+    )
+    return float(score), conf
 
 
-def _horizon_profile_score(gray: np.ndarray) -> float:
-    """Peakiness of the row-mean transition — high when a horizon is level.
+def _axis_structure_score(gray: np.ndarray) -> float:
+    """Hard stripe / mullion support — keeps architectural leveling sharp."""
+    g = np.asarray(gray, dtype=np.float32)
+    gy, gx = np.gradient(g)
+    row_proj = np.mean(np.abs(gy), axis=1)
+    col_proj = np.mean(np.abs(gx), axis=0)
+    h_score = float(np.var(row_proj)) + 0.35 * float(np.var(np.diff(row_proj)))
+    v_score = float(np.var(col_proj)) + 0.35 * float(np.var(np.diff(col_proj)))
+    return h_score + v_score
 
-    A soft sky/ground split spreads across many rows when tilted; leveling
-    stacks that transition into a sharper 1-D step.
+
+def _scene_level_weights(gray: np.ndarray) -> tuple[float, float]:
+    """Per-frame mix of horizon vs vertical emphasis (sums to 1).
+
+    Sky/ground tone splits and a confident horizon band push weight to the
+    horizon term; mullion-like vertical mass pushes to plumb. Local diagonal
+    subject texture (dress stripes, leading lines) should not dominate.
     """
-    g = gray.astype(np.float32)
-    row = np.mean(g, axis=1)
-    col = np.mean(g, axis=0)
-    drow = np.abs(np.diff(row))
-    dcol = np.abs(np.diff(col))
-    if drow.size == 0 and dcol.size == 0:
-        return 0.0
-    # Prefer a single strong horizon/mullion jump over many small ones.
-    h = float(np.max(drow) ** 2 / (float(np.mean(drow)) + 1e-8)) if drow.size else 0.0
-    v = float(np.max(dcol) ** 2 / (float(np.mean(dcol)) + 1e-8)) if dcol.size else 0.0
-    return h + v
+    g = _norm01(np.asarray(gray, dtype=np.float32))
+    h = g.shape[0]
+    top = float(np.mean(g[: max(1, h // 3)]))
+    bot = float(np.mean(g[min(h - 1, (2 * h) // 3) :]))
+    tone_split = abs(top - bot)
+    _hf, h_conf = _horizon_flatness_score(g)
+    _vf, v_conf = _vertical_plumb_score(g)
+    w_h = 0.30 + 2.0 * tone_split + 0.10 * h_conf
+    w_v = 0.30 + 0.16 * v_conf
+    # Strong landscape split → trust the horizon even if noisy verticals exist.
+    if tone_split >= 0.35:
+        w_h += 0.55
+    s = w_h + w_v
+    return float(w_h / s), float(w_v / s)
 
 
-def _straighten_score(gray: np.ndarray) -> float:
-    """Combined leveling score used by the Auto straighten search."""
-    proj = _axis_alignment_score(gray)
-    orient = _orientation_axis_score(gray)
-    horizon = _horizon_profile_score(gray)
-    # Horizon/profile term carries soft scenes; projection keeps hard stripes.
-    return float(proj + 0.25 * orient * (abs(proj) + 1e-6) + 0.045 * horizon)
+def _composition_straighten_score(
+    gray: np.ndarray,
+    *,
+    w_horizon: float,
+    w_vertical: float,
+) -> float:
+    """Photographic leveling score for one trial orientation."""
+    hf, _ = _horizon_flatness_score(gray)
+    vf, _ = _vertical_plumb_score(gray)
+    struct = _axis_structure_score(gray)
+    # Structure term is light — sharpens mullion/stripe peaks without letting
+    # busy subject texture outvote the scene geometry.
+    return float(w_horizon * hf + w_vertical * vf + 0.04 * struct)
+
+
+def _direct_structural_tilt_degrees(gray: np.ndarray) -> tuple[float, float]:
+    """CW correction from near-axis structural edge orientations.
+
+    Reads the median tilt of near-horizontal and near-vertical edges directly
+    (classical "level the horizon / plumb the verticals") so a later search
+    cannot jump to a stripe-harmonic angle far from the true composition.
+    Returns ``(degrees_cw, confidence)``.
+    """
+    g = _norm01(np.asarray(gray, dtype=np.float32))
+    g = ndimage.gaussian_filter(g, sigma=1.2)
+    gx = ndimage.sobel(g, axis=1)
+    gy = ndimage.sobel(g, axis=0)
+    mag = np.hypot(gx, gy)
+    thr = float(np.percentile(mag, 78))
+    mask = mag >= max(thr, 1e-6)
+    if int(np.count_nonzero(mask)) < 80:
+        return 0.0, 0.0
+    line = np.degrees(np.arctan2(gx[mask], -gy[mask]))
+    line = ((np.asarray(line, dtype=np.float64) + 90.0) % 180.0) - 90.0
+    wts = mag[mask].astype(np.float64)
+
+    def _weighted_median(vals: np.ndarray, weights: np.ndarray) -> float | None:
+        if vals.size < 48:
+            return None
+        order = np.argsort(vals)
+        v = vals[order]
+        w = weights[order]
+        cdf = np.cumsum(w)
+        if float(cdf[-1]) <= 0:
+            return None
+        return float(v[min(int(np.searchsorted(cdf, 0.5 * cdf[-1])), len(v) - 1)])
+
+    # Near-horizontal: line angle itself is the tilt from level.
+    near_h = np.abs(line) <= 16.0
+    # Near-vertical: map to signed deviation from ±90.
+    near_v = np.abs(line) >= (90.0 - 16.0)
+    candidates: list[tuple[float, float]] = []
+    if np.count_nonzero(near_h) >= 48:
+        # Sign: a horizon at +θ in this convention needs CW −θ to level — match
+        # building/stripe fixtures via calibration against straighten_image.
+        h_med = _weighted_median(line[near_h], wts[near_h])
+        if h_med is not None:
+            # Empirical CW correction for horizontal family.
+            candidates.append((-float(h_med), float(np.sum(wts[near_h]))))
+    if np.count_nonzero(near_v) >= 48:
+        ld = line[near_v]
+        tilt = np.where(ld >= 0.0, ld - 90.0, ld + 90.0)
+        v_med = _weighted_median(tilt, wts[near_v])
+        if v_med is not None:
+            candidates.append((-float(v_med), float(np.sum(wts[near_v]))))
+    if not candidates:
+        return 0.0, 0.0
+    # Prefer the family with more edge mass.
+    candidates.sort(key=lambda t: t[1], reverse=True)
+    ang, mass = candidates[0]
+    conf = float(np.clip(mass / (float(np.sum(wts)) + 1e-8) * 12.0, 0.0, 10.0))
+    return float(ang), conf
 
 
 def estimate_straighten_degrees(
@@ -394,11 +511,18 @@ def estimate_straighten_degrees(
     max_side: int = 480,
     step: float = 0.25,
 ) -> float:
-    """Estimate a fine straighten angle (degrees CW) that levels the frame.
+    """Estimate a fine straighten angle (degrees CW) for this composition.
 
-    Searches small rotations and picks the one that maximizes axis-aligned
-    edge energy (horizontals *and* verticals) plus an orientation-histogram
-    term for soft horizons. Uses the same CW convention as
+    Classical darkroom leveling, not a generic "maximize edges" filter:
+
+    1. Read the frame — sky/ground split vs vertical structure — and weight
+       **horizon flatness** vs **plumb verticals** accordingly.
+    2. Search small rotations for the orientation that best levels those
+       cues (with a soft prior toward 0° so diagonal subjects do not invent
+       large tilts).
+    3. Accept a non-zero angle only when it clearly beats 0°.
+
+    Uses the same CW convention as
     :func:`digital_negative.display.straighten_image`.
     """
     from .display import straighten_image
@@ -413,66 +537,93 @@ def estimate_straighten_degrees(
         xx = np.linspace(0, w - 1, nw).astype(np.int32)
         gray = np.ascontiguousarray(gray[yy][:, xx])
 
-    # Blend high-pass structure with the tone field so soft horizons remain.
+    # Keep tone for soft horizons; a little high-pass helps mullions.
     blur = ndimage.gaussian_filter(gray, sigma=1.2)
-    work = _norm01(np.abs(gray - blur) + 0.55 * gray)
+    work = _norm01(0.70 * gray + 0.30 * np.abs(gray - blur))
+    # Median fill avoids black wedges creating fake "horizons" during search.
+    fill = float(np.median(work))
 
+    w_h, w_v = _scene_level_weights(work)
+    direct_deg, direct_conf = _direct_structural_tilt_degrees(work)
     limit = float(np.clip(max_degrees, 1.0, 20.0))
     step = float(max(step, 0.1))
-    # Coarse then refine around the winner for better building/horizon hits.
     coarse = float(max(step, 0.5))
-    candidates = list(np.arange(-limit, limit + 0.5 * coarse, coarse, dtype=np.float64))
+    direct_deg = float(np.clip(direct_deg, -limit, limit))
 
-    best_deg = 0.0
-    best_score = -1.0
-    score_at_zero = None
-    scores: dict[float, float] = {}
-    for deg in candidates:
-        trial = straighten_image(work, float(deg), fill=0.0)
-        # Crop the filled corners so the black wedges don't fake a score.
-        pad = int(round(0.08 * min(trial.shape[:2])))
+    def _score_at(deg: float) -> float:
+        trial = straighten_image(work, float(deg), fill=fill)
+        pad = int(round(0.12 * min(trial.shape[:2])))
         if pad > 0 and trial.shape[0] > 2 * pad + 8 and trial.shape[1] > 2 * pad + 8:
             core = trial[pad:-pad, pad:-pad]
         else:
             core = trial
-        score = _straighten_score(core)
-        scores[float(deg)] = score
-        if abs(float(deg)) < 1e-9:
-            score_at_zero = score
-        if score > best_score:
-            best_score = score
-            best_deg = float(deg)
+        base = _composition_straighten_score(core, w_horizon=w_h, w_vertical=w_v)
+        # Mild prior toward 0° — strong enough to block dress-stripe wild
+        # angles, weak enough not to flatten a real 2–3° horizon peak.
+        prior = float(np.exp(-0.5 * (float(deg) / 9.0) ** 2))
+        return float(base * (0.78 + 0.22 * prior))
 
-    # Local refine ± coarse step.
-    refine_lo = max(-limit, best_deg - coarse)
-    refine_hi = min(limit, best_deg + coarse)
-    for deg in np.arange(refine_lo, refine_hi + 0.5 * step, step, dtype=np.float64):
-        key = float(deg)
-        if key in scores:
+    scores: dict[float, float] = {}
+    # When structural lines vote confidently, only search near that angle
+    # (plus a discrete 0° alternative) — prevents clean stripe harmonics
+    # (true 2.5° → false 6°) and opposite-sign plateaus around 0°.
+    if direct_conf >= 1.8 and abs(direct_deg) >= 0.2:
+        radius = 2.25
+        lo = max(-limit, float(direct_deg) - radius)
+        hi = min(limit, float(direct_deg) + radius)
+        coarse_degs = list(np.arange(lo, hi + 0.5 * coarse, coarse, dtype=np.float64))
+        coarse_degs.append(0.0)
+        coarse_degs = sorted({float(np.round(d / step) * step) for d in coarse_degs})
+    else:
+        coarse_degs = list(
+            np.arange(-limit, limit + 0.5 * coarse, coarse, dtype=np.float64)
+        )
+
+    for deg in coarse_degs:
+        scores[float(deg)] = _score_at(float(deg))
+
+    # Refine around the top coarse peaks so a flat horizon plateau cannot
+    # trap the search at a nearby local bump (e.g. +0.5° vs true +2.25°).
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    seeds = [0.0, direct_deg] + [d for d, _ in ranked[:3]]
+    best_deg = 0.0
+    best_score = -1.0e9
+    for seed in seeds:
+        refine_lo = max(-limit, float(seed) - coarse)
+        refine_hi = min(limit, float(seed) + coarse)
+        for deg in np.arange(refine_lo, refine_hi + 0.5 * step, step, dtype=np.float64):
+            key = float(deg)
+            if key not in scores:
+                scores[key] = _score_at(key)
             score = scores[key]
-        else:
-            trial = straighten_image(work, float(deg), fill=0.0)
-            pad = int(round(0.08 * min(trial.shape[:2])))
-            if pad > 0 and trial.shape[0] > 2 * pad + 8 and trial.shape[1] > 2 * pad + 8:
-                core = trial[pad:-pad, pad:-pad]
-            else:
-                core = trial
-            score = _straighten_score(core)
-            scores[key] = score
-        if score > best_score:
-            best_score = score
-            best_deg = float(deg)
+            if score > best_score:
+                best_score = score
+                best_deg = key
 
-    # Snap near-zero noise to exactly 0 — but only when 0° is nearly as good.
+    score_at_zero = scores.get(0.0)
+    if score_at_zero is None:
+        score_at_zero = _score_at(0.0)
+        scores[0.0] = score_at_zero
+
     if abs(best_deg) < 0.15:
         return 0.0
-    if score_at_zero is not None and best_score > 0:
-        # Soft horizons often improve only a few percent over 0°; require a
-        # relative lift, or a clear absolute gap for larger angles.
+    if score_at_zero > 0:
         rel = best_score / max(score_at_zero, 1e-12)
-        abs_gain = best_score - score_at_zero
-        if rel < 1.008 and abs_gain < 1e-4 and abs(best_deg) < 0.75:
+        # Demand a real compositional lift over "already level."
+        if rel < 1.008 and abs(best_deg) < 1.0:
             return 0.0
-        if rel < 1.004 and abs(best_deg) < 0.35:
+        if rel < 1.003:
             return 0.0
+        # Large swings need stronger evidence (avoids dress-stripe traps).
+        if abs(best_deg) >= 6.0 and rel < 1.03:
+            return 0.0
+        # If structural lines disagree with the search winner, trust lines.
+        # Clean stripe frames often score a near-zero plateau slightly above the
+        # true 2–3° peak; the orientation vote is the photographic ground truth.
+        if direct_conf >= 2.0 and abs(direct_deg) >= 0.75:
+            opposite = (best_deg * direct_deg) < 0 and abs(best_deg) > 0.35
+            far_larger = abs(best_deg - direct_deg) >= 2.5 and abs(best_deg) > abs(direct_deg) + 1.5
+            collapsed = abs(best_deg - direct_deg) >= 1.25 and abs(direct_deg) >= abs(best_deg) + 0.75
+            if opposite or far_larger or collapsed:
+                best_deg = float(direct_deg)
     return float(np.clip(round(best_deg / step) * step, -limit, limit))

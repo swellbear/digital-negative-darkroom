@@ -6242,12 +6242,14 @@ def suggest_auto_straighten(state, crop_ratio="free"):
     rect = _straighten_fill_crop_rect(deg, crop_ratio, state)
     if abs(deg) < 0.15:
         hint = (
-            "_Auto straighten — no clear tilt found (0.0°). "
-            "Use the slider if the verticals still look off, then **Apply framing**._"
+            "_Auto straighten — composition looks level (0.0°). "
+            "It weighed this frame’s horizon / plumb lines; use the slider if "
+            "a vertical still looks off, then **Apply framing**._"
         )
     else:
         hint = (
-            f"_Auto straighten — **{deg:+.2f}°** (levels horizontals & verticals). "
+            f"_Auto straighten — **{deg:+.2f}°** from this frame’s horizon & "
+            f"plumb structure (not subject diagonals). "
             f"Crop box trimmed to drop the black corners — tweak if needed, "
             f"then **Apply framing** (or Auto crop to refine)._"
         )
