@@ -45,10 +45,10 @@ def test_print_key_visibility_bw_vs_color():
 def test_chemistry_mode_change_hides_mg_shows_cc():
     mod = _load_ui()
     outs = mod.on_chemistry_mode_change("color")
-    # film…help (6) + 11 print vis + Instant/Dev knobs + commit/unlock/download/state
-    assert len(outs) == 6 + 11 + 12 + 6
+    # film…help (6) + 11 print vis + Instant/Dev knobs (+ enlarger/note) + commits/download/state
+    assert len(outs) == 6 + 11 + 13 + 6
     help_u = _upd(outs[5])
-    assert "Color Chemistry" in str(help_u.get("value", ""))
+    assert "C-41" in str(help_u.get("value", "")) or "RA-4" in str(help_u.get("value", ""))
     # print_grade is first visibility slot after help
     assert _upd(outs[6]).get("visible") is False  # print_grade
     assert _upd(outs[8]).get("visible") is True  # cc_cyan
@@ -57,7 +57,7 @@ def test_chemistry_mode_change_hides_mg_shows_cc():
     outs_bw = mod.on_chemistry_mode_change("bw")
     assert _upd(outs_bw[6]).get("visible") is True
     assert _upd(outs_bw[8]).get("visible") is False
-    assert "Black & White" in str(_upd(outs_bw[5]).get("value", ""))
+    assert "multigrade" in str(_upd(outs_bw[5]).get("value", "")).lower()
 
 
 def test_chemistry_mode_change_instant_shows_process_hides_print():
@@ -65,8 +65,9 @@ def test_chemistry_mode_change_instant_shows_process_hides_print():
     if not mod.FILM_CHOICES_INSTANT:
         return
     outs = mod.on_chemistry_mode_change("instant")
-    assert len(outs) == 6 + 11 + 12 + 6
-    assert "Instant" in str(_upd(outs[5]).get("value", ""))
+    assert len(outs) == 6 + 11 + 13 + 6
+    help = str(_upd(outs[5]).get("value", ""))
+    assert "pod" in help.lower() or "enlarger" in help.lower()
     assert _upd(outs[6]).get("visible") is False  # print_grade
     assert _upd(outs[17]).get("visible") is True  # process_temp
     assert _upd(outs[20]).get("visible") is True  # Polaroid border
@@ -74,8 +75,9 @@ def test_chemistry_mode_change_instant_shows_process_hides_print():
     assert _upd(outs[23]).get("visible") is False  # contrast_filter
     assert _upd(outs[24]).get("visible") is False  # scene_exposure
     assert _upd(outs[25]).get("visible") is False  # halation
-    assert _upd(outs[27]).get("visible") is False  # print_drawer
-    assert "Commit pull" in str(_upd(outs[28]).get("value", ""))
+    assert _upd(outs[27]).get("visible") is False  # print_enlarger
+    assert _upd(outs[28]).get("visible") is True  # print_instant_note
+    assert "Commit pull" in str(_upd(outs[29]).get("value", ""))
     assert _upd(outs[4]).get("visible") is False  # paper
 
 
