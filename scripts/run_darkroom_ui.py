@@ -6683,21 +6683,19 @@ def _run_live_develop_then_print(
     Large viewer shows the theoretical final print — what you'd get after
     Commit Develop + Commit Print with these controls.
 
-    High-quality path bakes on the full (or inspect-capped) negative — same
-    working set as Commit Develop — then stride-fits the print for the viewer
-    so film grain is not Lanczos-cleaned. Drag keeps a smaller proxy for speed.
+    High-quality *interactive* path bakes on a LIVE_MAX_SIDE proxy then
+    stride-fits the print — fast enough for film/developer swaps without
+    hanging the UI. Commit Develop still uses the full Digital Negative.
+    Drag keeps an even smaller proxy for slider scrubbing.
     """
     drag = max_side <= DRAG_MAX_SIDE
     if drag:
         working = state.get("proxy_drag") or _proxy_dn(state["dn"], DRAG_MAX_SIDE)
     else:
-        # Same working resolution Commit Develop uses (full frame), capped only
-        # so pathological 40MP frames cannot freeze the UI on every slider release.
-        src = state["dn"]
-        if max(src.image.shape[:2]) > INSPECT_MAX_SIDE:
-            working = _proxy_dn(src, INSPECT_MAX_SIDE)
-        else:
-            working = src
+        # Cap interactive develops at LIVE_MAX_SIDE. Using the full / inspect
+        # frame here made each film switch take multiple seconds (and film
+        # change also retriggers developer.change → a second full bake).
+        working = state.get("proxy") or _proxy_dn(state["dn"], LIVE_MAX_SIDE)
     working.metadata["process_seed"] = state["dn"].metadata.get("process_seed")
     profile = load_film_profile(_profile_path(list_film_profiles(), film_id))
     # Instant knobs travel on development metadata (read by process_instant).
@@ -9563,23 +9561,30 @@ def build_ui() -> gr.Blocks:
         )
 
         # Film / developer swap chemistry list + datasheet-normal minutes, then refresh.
-        film.change(
+        # Film change updates developer → would also fire developer.change; cancel
+        # overlapping preview jobs so a stock swap is one bake, not two queued hangs.
+        film_change_evt = film.change(
             fn=on_film_change,
             inputs=[film, chemistry_mode],
             outputs=[developer, development_minutes, exposure_index],
-        ).then(
+        )
+        film_preview_evt = film_change_evt.then(
             fn=live_preview_edit,
             inputs=preview_inputs,
             outputs=preview_outputs,
+            show_progress="minimal",
         )
-        developer.change(
+        dev_change_evt = developer.change(
             fn=on_developer_change,
             inputs=[film, developer, chemistry_mode],
             outputs=[development_minutes],
-        ).then(
+        )
+        dev_change_evt.then(
             fn=live_preview_edit,
             inputs=preview_inputs,
             outputs=preview_outputs,
+            show_progress="minimal",
+            cancels=[film_preview_evt],
         )
 
         develop_btn.click(

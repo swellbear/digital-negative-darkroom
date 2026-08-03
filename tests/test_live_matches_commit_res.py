@@ -7,15 +7,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_hq_live_develop_uses_full_or_inspect_cap_not_live_proxy():
+def test_hq_live_develop_uses_live_proxy_for_snappy_film_swaps():
+    """Interactive hq must not bake the full/inspect frame (hangs on film change)."""
     source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
     chunk = source.split("def _run_live_develop_then_print(")[1].split("def live_preview(")[0]
-    assert "INSPECT_MAX_SIDE" in chunk
     assert "proxy_drag" in chunk
-    assert "working = src" in chunk
-    # Viewer fit must preserve grain (stride), not Lanczos-clean it.
+    assert 'or _proxy_dn(state["dn"], LIVE_MAX_SIDE)' in chunk
+    assert "working = src" not in chunk
     assert "_downscale_rgb(_to_rgb_u8(printed.preview), max_side)" in chunk
-    assert "_downscale_rgb_hq" not in chunk
+    assert "cancels=[film_preview_evt]" in source
 
 
 def test_locked_print_and_commit_use_stride_fit_not_lanczos():
