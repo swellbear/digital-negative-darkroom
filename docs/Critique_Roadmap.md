@@ -35,6 +35,7 @@ Make the core Upload → Develop → Print loop readable and trustworthy.
    - **Started 2026-08-03:** single-frame Upload lands on **Develop** (not Roll); next-step copy points at Commit Develop; Live viewer no longer says “easel”.
    - **Continued:** default Print path quieted — card/% dodge chrome hidden until Advanced is open; context menu lists Inspect/Crop before Advanced Dodge/Burn; Commit Develop copy points at paper → exposure → filtration → Commit Print.
    - **Inspect · zoom:** opening the module arms `preview_tool=inspect` (scroll zooms, not dodge-card size); stage swaps to the high-res inspect buffer; zoom survives clip/histogram refreshes.
+   - **Auto straighten:** composition-aware leveling (horizon flatness vs plumb verticals per frame; structural-line vote; safe crop trims black wedges).
 
 ---
 
