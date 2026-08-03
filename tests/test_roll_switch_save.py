@@ -124,8 +124,8 @@ def test_dirty_switch_discard_keeps_last_saved():
 
 
 def _control_block(outs, mod):
-    """Develop/Print control updates sit before chemistry_help + modal + pending."""
-    return outs[-(3 + mod._CONTROL_COUNT) : -3]
+    """Develop/Print control updates sit before print_drawer + help + modal + pending."""
+    return outs[-(4 + mod._CONTROL_COUNT) : -4]
 
 
 def test_switch_after_develop_reenables_film_controls():

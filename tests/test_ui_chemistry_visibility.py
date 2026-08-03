@@ -37,9 +37,13 @@ def test_print_key_visibility_bw_vs_color():
     assert mod._print_key_visible("color", "print_grade") is False
     assert mod._print_key_visible("color", "cc_magenta") is True
     assert mod._print_key_visible("color", "tone") is False
-    assert mod._print_key_visible("bw", "paper_id") is None
+    # Shared print keys must be True (not None) so Instant→B&W roll restore
+    # can un-hide sticky Gradio visibility.
+    assert mod._print_key_visible("bw", "paper_id") is True
+    assert mod._print_key_visible("bw", "print_exposure") is True
     assert mod._print_key_visible("instant", "print_grade") is False
     assert mod._print_key_visible("instant", "cc_cyan") is False
+    assert mod._print_key_visible("instant", "print_exposure") is False
 
 
 def test_chemistry_mode_change_hides_mg_shows_cc():

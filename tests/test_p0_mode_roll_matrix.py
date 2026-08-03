@@ -122,7 +122,8 @@ def _default_controls(mod, *, mode="bw"):
 
 
 def _control_block(outs, mod):
-    return outs[-(3 + mod._CONTROL_COUNT) : -3]
+    # ... controls, print_drawer, chemistry_help, modal, pending
+    return outs[-(4 + mod._CONTROL_COUNT) : -4]
 
 
 def _help_update(outs, mod):
@@ -228,3 +229,139 @@ def test_default_print_flow_without_dodge_burn():
     assert mod._viewer_label_for("live", state).startswith("Committed print")
     # Still no dodge/burn requirement.
     assert not (state.get("dn").metadata.get("print", {}).get("dodge_burn") or [])
+
+
+def _instant_controls(mod):
+    """Per-frame Instant recipe tuple matching _CONTROL_COUNT."""
+    if not mod.FILM_CHOICES_INSTANT:
+        return None
+    film_id = mod.FILM_CHOICES_INSTANT[0][1]
+    profile = mod._film_profile(film_id)
+    chem_id = mod.default_chemistry_id(profile)
+    chem = mod.get_chemistry(profile, chem_id) or {"normal_minutes": 0.5}
+    _tmin, _tmax, normal = mod.time_slider_bounds(chem)
+    return (
+        "instant",
+        film_id,
+        chem_id,
+        float(normal),
+        0.0,
+        float(profile.defaults.get("diffusion", 0.14)),
+        float(profile.iso),
+        "none",
+        0.01,
+        0.0,
+        mod.PAPER_CHOICES_BW[0][1] if mod.PAPER_CHOICES_BW else None,
+        8.0,
+        2.5,
+        0.0,
+        False,
+        0.0,
+        5.0,
+        4.0,
+        4.0,
+        False,
+        5,
+        0.5,
+        0.0,
+        0.0,
+        "none",
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        float(profile.defaults.get("process_temp_c", 21.0)),
+        float(profile.defaults.get("chroma", 1.0)),
+        float(profile.defaults.get("warmth", 0.0)),
+        bool(profile.defaults.get("card_border", True)),
+    )
+
+
+def _drawer_update(outs, mod):
+    # ... controls, print_drawer, chemistry_help, modal, pending
+    return outs[-(4)]
+
+
+def test_instant_bw_roll_switch_restores_chrome():
+    """Instant↔B&W roll switch must flip Print drawer, labels, and tank knobs."""
+    mod = _load_ui()
+    instant = _instant_controls(mod)
+    if instant is None:
+        return
+    path = str(FIXTURE)
+    state = _state_from(mod.commit_ingest(None, [path, path], None))
+    assert state["roll_index"] == 1
+    bw = _default_controls(mod, mode="bw")
+
+    # Frame 1 Instant, frame 0 B&W — then switch Instant → B&W.
+    state = {
+        **state,
+        "controls": mod._capture_controls(*instant),
+        "chemistry_mode": "instant",
+        "dirty": False,
+    }
+    state = mod._sync_active_into_roll(state)
+    roll = list(state["roll"])
+    roll[0] = {
+        **roll[0],
+        "controls": mod._capture_controls(*bw),
+        "chemistry_mode": "bw",
+        "dirty": False,
+    }
+    state = {**state, "roll": roll}
+
+    # Instant chrome on the active frame before switching.
+    ctrls = mod._control_updates(state)
+    assert _upd(ctrls[0]).get("value") == "instant"
+    assert _upd(ctrls[2]).get("label") == "Reagent"
+    assert _upd(ctrls[5]).get("label") == "Diffusion"
+    assert _upd(ctrls[5]).get("maximum") == 1.0
+    assert _upd(ctrls[7]).get("visible") is False  # contrast_filter
+    assert _upd(ctrls[11]).get("visible") is False  # print_exposure
+    assert _upd(ctrls[29]).get("visible") is True  # process_temp
+    assert _upd(mod._print_drawer_update(state)).get("visible") is False
+
+    outs = mod.begin_roll_switch("0:click", state, *instant)
+    state = _state_from(outs)
+    assert state["roll_index"] == 0
+    block = _control_block(outs, mod)
+    assert _upd(block[0]).get("value") == "bw"
+    assert _upd(block[2]).get("label") == "Developer"
+    assert _upd(block[5]).get("label") == "Grain"
+    assert _upd(block[5]).get("maximum") == 2.5
+    assert _upd(block[7]).get("visible") is True  # contrast_filter
+    assert _upd(block[8]).get("visible") is True  # scene_exposure
+    assert _upd(block[9]).get("visible") is True  # halation
+    assert _upd(block[10]).get("visible") is True  # paper
+    assert _upd(block[11]).get("visible") is True  # print_exposure
+    assert _upd(block[29]).get("visible") is False  # process_temp
+    assert _upd(_drawer_update(outs, mod)).get("visible") is True
+    assert "Black & White" in str(_upd(_help_update(outs, mod)).get("value", ""))
+    labels = [
+        str(_upd(u).get("value", ""))
+        for u in outs
+        if isinstance(_upd(u).get("value", None), str)
+        and "Commit" in str(_upd(u).get("value", ""))
+    ]
+    assert "Commit Develop" in labels
+
+    # Reverse: B&W → Instant restores Instant chrome.
+    outs = mod.begin_roll_switch("1:click", state, *bw)
+    state = _state_from(outs)
+    assert state["roll_index"] == 1
+    block = _control_block(outs, mod)
+    assert _upd(block[0]).get("value") == "instant"
+    assert _upd(block[2]).get("label") == "Reagent"
+    assert _upd(block[5]).get("label") == "Diffusion"
+    assert _upd(block[7]).get("visible") is False
+    assert _upd(block[11]).get("visible") is False
+    assert _upd(block[29]).get("visible") is True
+    assert _upd(_drawer_update(outs, mod)).get("visible") is False
+    assert "Instant" in str(_upd(_help_update(outs, mod)).get("value", ""))
+    labels = [
+        str(_upd(u).get("value", ""))
+        for u in outs
+        if isinstance(_upd(u).get("value", None), str)
+        and "Commit" in str(_upd(u).get("value", ""))
+    ]
+    assert "Commit pull" in labels
