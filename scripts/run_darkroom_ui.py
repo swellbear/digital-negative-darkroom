@@ -1860,7 +1860,6 @@ body.module-collapsed #module_panel {
 #hist_plot button,
 #hist_plot .image-container {
   height: auto !important;
-  min-height: 120px !important;
   max-height: none !important;
   width: 100% !important;
   background: var(--dr-bg-panel) !important;
@@ -1870,7 +1869,70 @@ body.module-collapsed #module_panel {
   height: auto !important;
   object-fit: contain !important;
 }
-#module_panel #hist_plot button { height: auto !important; min-height: 120px !important; }
+/* Empty histogram: collapse the Gradio placeholder icon in Modules.
+   When an <img> is present, allow a compact plot height. */
+#module_panel #hist_plot:not(:has(img)) {
+  display: none !important;
+  min-height: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+}
+#module_panel #hist_plot:has(img),
+#module_panel #hist_plot:has(img) > div,
+#module_panel #hist_plot:has(img) button,
+#module_panel #hist_plot:has(img) .image-container {
+  min-height: 72px !important;
+  height: auto !important;
+}
+#mod_inspect #inspect_hint,
+#mod_inspect #inspect_tip {
+  max-width: 100% !important;
+  overflow-wrap: anywhere !important;
+}
+#mod_inspect #inspect_hint .prose,
+#mod_inspect #inspect_hint .md,
+#mod_inspect #inspect_tip .prose,
+#mod_inspect #inspect_tip .md {
+  font-size: var(--dr-fs-tiny) !important;
+  line-height: 1.25 !important;
+}
+#mod_inspect #inspect_clip_row {
+  gap: 4px !important;
+  margin: 2px 0 !important;
+}
+#mod_inspect #inspect_clip_row > * {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+}
+#mod_inspect #inspect_actions {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  margin: 2px 0 0 0 !important;
+}
+#mod_inspect #inspect_actions > * {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+#mod_inspect #inspect_ab_row {
+  gap: 4px !important;
+}
+#mod_inspect #inspect_ab_row > * {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+}
+#mod_inspect #inspect_open {
+  position: absolute !important;
+  left: -9999px !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
 #rotate_row {
   gap: 4px !important;
   margin: 2px 0 6px 0 !important;
@@ -4075,27 +4137,29 @@ def refresh_inspect_tools(clip_hi, clip_lo, state):
     state["clip_lo"] = bool(clip_lo)
     refl, _ = _print_maps(state)
     hist = render_print_histogram(refl)
-    if hist is None:
-        hist = gr.update()
     mode = _curve_chemistry_mode(state)
+    if hist is None:
+        # Clear the Image so CSS can collapse the empty placeholder in Modules.
+        tip = (
+            "_No print meter yet — Add to roll / Live print first. "
+            "Then scroll the print to zoom; Blown/Crushed paint clipping._"
+        )
+        return None, tip, _inspect_frame(state), state
     if mode == "instant":
-        fit_tip = (
-            "**Fit to paper** is for enlarger prints — Instant is a finished card "
-            "(use process time / N±)."
+        tip = (
+            "_Zone histogram · Instant has no enlarger **Fit to paper** "
+            "(use process time / N±). Blown/Crushed paint clipping._"
         )
     elif mode == "color":
-        fit_tip = (
-            "**Fit to paper** auto-sets the timer (and softens RA-4 contrast if needed)."
+        tip = (
+            "_Zone histogram · **Fit to paper** sets timer / RA-4 contrast. "
+            "Blown/Crushed paint clipping._"
         )
     else:
-        fit_tip = (
-            "**Fit to paper** auto-sets the timer (and softens MG grade if needed)."
+        tip = (
+            "_Zone histogram · **Fit to paper** sets timer / MG grade. "
+            "Blown/Crushed paint clipping._"
         )
-    tip = (
-        "_Histogram of print reflectance with Zone ticks. "
-        "Clipping paints blown paper-white (red) and crushed Dmax (blue). "
-        f"{fit_tip}_"
-    )
     return hist, tip, _inspect_frame(state), state
 
 
@@ -9873,34 +9937,53 @@ def build_ui() -> gr.Blocks:
                 gr.HTML('<div class="module_panel_title">Modules</div>')
                 with gr.Accordion("Inspect · zoom", open=False, elem_id="mod_inspect"):
                     gr.Markdown(
-                        "Scroll to zoom · drag to pan when zoomed · double-click resets. "
-                        "Hover the print for a Zone / density spot reading."
+                        "_Scroll to zoom · drag to pan · double-click resets. "
+                        "Hover print for Zone / density._",
+                        elem_id="inspect_hint",
                     )
                     hist_plot = gr.Image(
                         label="Histogram",
                         type="numpy",
                         elem_id="hist_plot",
-                        height=140,
+                        height=96,
                         buttons=[],
                         show_label=False,
                     )
                     inspect_tip = gr.Markdown(
-                        "_Histogram appears once a print preview exists._",
+                        "_No print meter yet — Live print first, then histogram appears._",
                         elem_id="inspect_tip",
                     )
-                    with gr.Row():
-                        clip_hi = gr.Checkbox(label="Blown (Z VII+)", value=False)
-                        clip_lo = gr.Checkbox(label="Crushed (Z I−)", value=False)
+                    with gr.Row(elem_id="inspect_clip_row"):
+                        clip_hi = gr.Checkbox(
+                            label="Blown", value=False, elem_id="clip_hi"
+                        )
+                        clip_lo = gr.Checkbox(
+                            label="Crushed", value=False, elem_id="clip_lo"
+                        )
+                    with gr.Column(elem_id="inspect_actions"):
                         fit_tones_btn = gr.Button(
                             "Fit to paper",
                             size="sm",
                             variant="secondary",
                             elem_id="fit_tones_btn",
                         )
-                    with gr.Row():
-                        pin_ab_btn = gr.Button("Pin A", size="sm")
-                        toggle_ab_btn = gr.Button("Show A", size="sm", interactive=False)
-                    inspect_open = gr.Textbox(value="", elem_id="inspect_open", show_label=False)
+                        with gr.Row(elem_id="inspect_ab_row"):
+                            pin_ab_btn = gr.Button(
+                                "Pin A", size="sm", elem_id="pin_ab_btn"
+                            )
+                            toggle_ab_btn = gr.Button(
+                                "Show A",
+                                size="sm",
+                                interactive=False,
+                                elem_id="toggle_ab_btn",
+                            )
+                    # JS arms Inspect tool when the module opens — keep in DOM.
+                    inspect_open = gr.Textbox(
+                        value="",
+                        elem_id="inspect_open",
+                        show_label=False,
+                        label="inspect_open",
+                    )
 
                 with gr.Accordion("Curves", open=False, elem_id="mod_curves"):
                     curve_summary = gr.Markdown(
