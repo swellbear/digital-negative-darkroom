@@ -311,6 +311,82 @@ def format_crop_rect(box: dict[str, Any]) -> str:
     return ",".join(f"{float(box[k]):.5f}" for k in ("x", "y", "w", "h"))
 
 
+def remap_crop_box_to_parent(
+    local: dict[str, Any],
+    parent: dict[str, float],
+) -> dict[str, Any]:
+    """Map a normalized box from a parent sub-rect back into full-frame coords.
+
+    Used so Auto crop can score inside a straighten-safe window (no black
+    wedges) and still return an ``x,y,w,h`` overlay for the whole stage.
+    """
+    px = float(parent.get("x", 0.0))
+    py = float(parent.get("y", 0.0))
+    pw = float(max(parent.get("w", 1.0), 1e-6))
+    ph = float(max(parent.get("h", 1.0), 1e-6))
+    lx = float(local.get("x", 0.0))
+    ly = float(local.get("y", 0.0))
+    lw = float(local.get("w", 1.0))
+    lh = float(local.get("h", 1.0))
+    out = dict(local)
+    out["x"] = float(np.clip(px + lx * pw, 0.0, 1.0))
+    out["y"] = float(np.clip(py + ly * ph, 0.0, 1.0))
+    out["w"] = float(np.clip(lw * pw, 0.02, 1.0 - out["x"]))
+    out["h"] = float(np.clip(lh * ph, 0.02, 1.0 - out["y"]))
+    sub = local.get("subject") or {}
+    if isinstance(sub, dict) and sub:
+        out["subject"] = {
+            "x": float(np.clip(px + float(sub.get("x", 0.5)) * pw, 0.0, 1.0)),
+            "y": float(np.clip(py + float(sub.get("y", 0.5)) * ph, 0.0, 1.0)),
+        }
+    if out["h"] > 1e-6:
+        out["aspect"] = float(out["w"] / out["h"])
+    return out
+
+
+def fit_box_to_aspect_inside(
+    box: dict[str, Any],
+    aspect: float,
+    bounds: dict[str, float],
+) -> dict[str, Any]:
+    """Force normalized ``w/h = aspect`` while keeping the box inside ``bounds``.
+
+    Remapping through a non-square straighten-safe window breaks locked ratios;
+    this restores the UI aspect (same normalized-space convention as
+    :func:`suggest_crop_box`) around the subject / box center.
+    """
+    ar = float(aspect)
+    if ar <= 1e-6:
+        return dict(box)
+    bx = float(bounds.get("x", 0.0))
+    by = float(bounds.get("y", 0.0))
+    bw = float(max(bounds.get("w", 1.0), 1e-6))
+    bh = float(max(bounds.get("h", 1.0), 1e-6))
+    if bw / bh > ar:
+        max_h = bh
+        max_w = max_h * ar
+    else:
+        max_w = bw
+        max_h = max_w / max(ar, 1e-6)
+    area = float(max(box.get("w", max_w), 0.02) * max(box.get("h", max_h), 0.02))
+    h = float(np.sqrt(max(area, 1e-6) / ar))
+    w = ar * h
+    if w > max_w + 1e-9 or h > max_h + 1e-9:
+        w, h = float(max_w), float(max_h)
+    sub = box.get("subject") if isinstance(box.get("subject"), dict) else None
+    if sub:
+        cx = float(sub.get("x", bx + bw * 0.5))
+        cy = float(sub.get("y", by + bh * 0.5))
+    else:
+        cx = float(box.get("x", bx)) + float(box.get("w", w)) * 0.5
+        cy = float(box.get("y", by)) + float(box.get("h", h)) * 0.5
+    x = float(np.clip(cx - w * 0.5, bx, bx + bw - w))
+    y = float(np.clip(cy - h * 0.5, by, by + bh - h))
+    out = dict(box)
+    out.update({"x": x, "y": y, "w": float(w), "h": float(h), "aspect": ar})
+    return out
+
+
 def _horizon_flatness_score(gray: np.ndarray) -> tuple[float, float]:
     """Classical horizon level: dominant tone-break stays on one row across x.
 

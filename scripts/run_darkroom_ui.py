@@ -26,6 +26,8 @@ from digital_negative.auto_crop import (
     estimate_straighten_degrees,
     format_crop_rect,
     parse_aspect_ratio,
+    fit_box_to_aspect_inside,
+    remap_crop_box_to_parent,
     suggest_crop_box,
 )
 from digital_negative.analysis import (
@@ -6491,24 +6493,35 @@ def reset_crop_straighten(state):
 
 
 def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
-    """Set the interactive crop box from classical composition heuristics."""
+    """Set the interactive crop box from classical composition heuristics.
+
+    Analyzes the same picture Frame shows (film look / Instant well / easel
+    stripped) — not the raw original — so the orange box matches what Apply
+    bakes into the DN. When straighten is active, scores inside the safe
+    content window then remaps, preserving aspect (no axis-aligned crush).
+    """
     if not state or state.get("dn") is None:
         raise gr.Error("Commit Ingest first.")
     state = _ensure_geometry_bases(state)
     deg = float(straighten_deg or 0.0)
-    # Analyze the same picture the crop stage shows (prefer original photo).
-    src = state.get("original_base")
+    # Same picture the Frame stage / overlay use (not original_base).
+    src = _framing_picture_rgb(state)
     if src is None:
         src = state.get("geometry_base")
     if src is None:
+        src = state.get("original_base")
+    if src is None:
         raise gr.Error("No framing base to analyze.")
     img = np.asarray(src)
+    src_u8 = img.dtype == np.uint8 or (
+        img.ndim == 3 and img.shape[-1] >= 3 and float(np.max(img)) > 1.5
+    )
     # Composition heuristics don't need full-res — keep the UI responsive.
     h0, w0 = img.shape[:2]
     max_side = 960
     m = max(h0, w0)
     if m > max_side:
-        if img.dtype == np.uint8 or (img.ndim == 3 and img.shape[2] >= 3):
+        if src_u8 or (img.ndim == 3 and img.shape[2] >= 3):
             img = _downscale_rgb(img, max_side)
         else:
             scale = max_side / float(m)
@@ -6518,37 +6531,64 @@ def suggest_auto_crop(auto_rule, crop_ratio, straighten_deg, state):
             img = img[yy][:, xx]
     if abs(deg) >= 1e-6:
         img = straighten_image(
-            img.astype(np.float32) if img.dtype == np.uint8 else img,
+            img.astype(np.float32) if src_u8 else img,
             deg,
             fill=0.0,
         )
-        if np.asarray(src).dtype == np.uint8:
+        if src_u8:
             img = np.clip(img, 0, 255).astype(np.uint8)
     h, w = img.shape[:2]
     image_aspect = w / max(h, 1)
     aspect = parse_aspect_ratio(crop_ratio, image_aspect)
     rule = str(auto_rule or "auto")
-    result = suggest_crop_box(img, rule=rule, aspect_ratio=aspect)
-    # Keep composition inside the straighten-safe rect so black wedges stay out.
+    # Straighten fill wedges are not composition — score inside the safe
+    # window, then remap so locked ratios stay intact.
+    ratio_key = str(crop_ratio or "free").lower()
+    locked_aspect = (
+        None if ratio_key in {"free", "original", ""} else aspect
+    )
     if abs(deg) >= 0.05:
-        ratio = str(crop_ratio or "free").lower()
-        forced = None if ratio in {"free", "original", ""} else aspect
-        safe = straighten_safe_crop_box(w, h, deg, aspect_ratio=forced)
-        x0 = max(float(result["x"]), float(safe["x"]))
-        y0 = max(float(result["y"]), float(safe["y"]))
-        x1 = min(float(result["x"] + result["w"]), float(safe["x"] + safe["w"]))
-        y1 = min(float(result["y"] + result["h"]), float(safe["y"] + safe["h"]))
-        if x1 - x0 >= 0.08 and y1 - y0 >= 0.08:
-            result = {**result, "x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0}
+        safe = straighten_safe_crop_box(w, h, deg, aspect_ratio=None)
+        sx = float(safe["x"])
+        sy = float(safe["y"])
+        sw = float(safe["w"])
+        sh = float(safe["h"])
+        x0 = int(np.clip(round(sx * (w - 1)), 0, max(w - 2, 0)))
+        y0 = int(np.clip(round(sy * (h - 1)), 0, max(h - 2, 0)))
+        x1 = int(np.clip(round((sx + sw) * (w - 1)) + 1, x0 + 2, w))
+        y1 = int(np.clip(round((sy + sh) * (h - 1)) + 1, y0 + 2, h))
+        region = np.ascontiguousarray(img[y0:y1, x0:x1, ...])
+        if region.shape[0] >= 16 and region.shape[1] >= 16:
+            local_aspect = region.shape[1] / max(region.shape[0], 1)
+            ask = parse_aspect_ratio(crop_ratio, local_aspect)
+            local = suggest_crop_box(region, rule=rule, aspect_ratio=ask)
+            result = remap_crop_box_to_parent(
+                local, {"x": sx, "y": sy, "w": sw, "h": sh}
+            )
+            # Remap through a non-square safe window breaks locked ratios —
+            # re-fit in normalized space inside the same safe bounds.
+            if locked_aspect is not None:
+                result = fit_box_to_aspect_inside(result, locked_aspect, safe)
         else:
-            result = {**result, **safe}
+            result = suggest_crop_box(img, rule=rule, aspect_ratio=aspect)
+            result = {
+                **result,
+                **straighten_safe_crop_box(w, h, deg, aspect_ratio=locked_aspect),
+            }
+    else:
+        result = suggest_crop_box(img, rule=rule, aspect_ratio=aspect)
     rect = format_crop_rect(result)
     used = AUTO_CROP_RULE_LABELS.get(result.get("rule"), result.get("rule"))
     asked = AUTO_CROP_RULE_LABELS.get(rule, rule)
+    aspect_note = ""
+    if str(crop_ratio or "free").lower() in {"free", ""} and result.get("aspect"):
+        aspect_note = f" · aspect ≈ {float(result['aspect']):.2f}"
+    sub = result.get("subject") or {}
     hint = (
         f"_Auto crop ready — **{asked}**"
         + (f" → scored as **{used}**" if rule in {"auto", "best"} else "")
-        + f" · subject ≈ ({result['subject']['x']:.0%}, {result['subject']['y']:.0%}). "
+        + aspect_note
+        + f" · subject ≈ ({float(sub.get('x', 0.5)):.0%}, {float(sub.get('y', 0.5)):.0%}). "
         f"Tweak the box if needed, then **Apply framing**._"
     )
     return rect, hint
