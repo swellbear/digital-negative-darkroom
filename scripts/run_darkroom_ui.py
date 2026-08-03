@@ -2075,8 +2075,17 @@ UI_JS = """
   const clampToolScale = (s) => Math.min(2.75, Math.max(0.35, s));
 
   const updateSizeReadout = () => {
-    const el = document.querySelector('#db_size_readout .db-size-value');
-    if (!el) return;
+    const root = document.querySelector('#db_size_readout');
+    if (!root) return;
+    const el = root.querySelector('.db-size-value');
+    const card = root.querySelector('.db-card-size');
+    // Card size is Advanced dodge/burn chrome — hide until that module is armed.
+    const showCard = typeof dbEngaged === 'function' ? dbEngaged() : false;
+    if (card) {
+      card.hidden = !showCard;
+      card.style.display = showCard ? '' : 'none';
+    }
+    if (!el || !showCard) return;
     const pct = Math.round(clampToolScale(window.__dbToolScale || 1) * 100);
     const text = pct + '%';
     if (el.textContent !== text) el.textContent = text;
@@ -3129,6 +3138,7 @@ UI_JS = """
         } else {
           hideTool();
         }
+        try { updateSizeReadout(); } catch (_) {}
       } else if (id === 'mod_curves') {
         if (open) {
           // Rebuild overlay JSON + open the floating editor over the print.
@@ -3373,11 +3383,11 @@ UI_JS = """
     menu.id = 'ctx_menu';
     menu.innerHTML = `
       <button type="button" data-act="zoom">Inspect · zoom</button>
-      <button type="button" data-act="dodge">Dodge</button>
-      <button type="button" data-act="burn">Burn</button>
       <button type="button" data-act="crop">Crop & straighten</button>
       <button type="button" data-act="autostraighten">Auto straighten</button>
       <button type="button" data-act="autocrop">Auto crop</button>
+      <button type="button" data-act="dodge">Advanced · Dodge</button>
+      <button type="button" data-act="burn">Advanced · Burn</button>
     `;
     document.body.appendChild(menu);
     menu.addEventListener('click', (e) => {
@@ -7274,7 +7284,10 @@ def commit_develop(
         process_note = f" ({process.upper()})" if process else ""
         summary = (
             f"{_stage_banner('print', locks, state)}\n\n"
-            f"**Develop locked**{process_note} — refine Print below, then Commit Print.\n\n{_history_md(dn)}"
+            f"**Develop locked**{process_note} — next on **Print**:  \n"
+            f"paper → base exposure → filtration → **Commit Print**.  \n"
+            f"_Optional later: Print **More**, or Modules → Advanced dodge/burn._\n\n"
+            f"{_history_md(dn)}"
         )
     state = {
         **state,
@@ -7598,8 +7611,7 @@ def _base_math_md(base_seconds) -> str:
     stops = base_seconds_to_stops(seconds)
     return (
         f"**Base timer** — **{seconds:g}s** enlarger clock "
-        f"(≈ **{stops:+.2f} stops** vs calibrated {REFERENCE_BASE_SECONDS:g}s). "
-        f"Dodge/burn passes are timed against this."
+        f"(≈ **{stops:+.2f} stops** vs calibrated {REFERENCE_BASE_SECONDS:g}s)."
     )
 
 
@@ -8576,9 +8588,8 @@ def build_ui() -> gr.Blocks:
                                 0, 100, value=0, step=1, label="CC Yellow", visible=False
                             )
                         gr.Markdown(
-                            "_Default path: paper → exposure → filtration → **Commit Print**. "
-                            "Optional techniques under **More**; dodge/burn under "
-                            "**Modules → Advanced** (after Develop is locked)._",
+                            "_Default: paper → exposure → filtration → **Commit Print**. "
+                            "Split-grade / test strips under **More**._",
                             elem_id="db_hint",
                         )
                         with gr.Accordion(
@@ -8677,8 +8688,10 @@ def build_ui() -> gr.Blocks:
             with gr.Column(scale=1, elem_id="preview_col", min_width=420):
                 db_wave_banner = gr.HTML(_wave_banner_html(None), elem_id="db_wave_banner")
                 db_size_readout = gr.HTML(
-                    '<div class="db-size-pill"><span class="db-tool-mode">Print</span> · '
-                    'card <strong class="db-size-value">100%</strong> · right-click for tools</div>',
+                    '<div class="db-size-pill"><span class="db-tool-mode">Print</span>'
+                    '<span class="db-card-size" hidden> · card '
+                    '<strong class="db-size-value">100%</strong></span>'
+                    ' · right-click for tools</div>',
                     elem_id="db_size_readout",
                 )
                 # Stage + recipe readout floats over the print rather than
@@ -8816,63 +8829,6 @@ def build_ui() -> gr.Blocks:
                     )
 
                 with gr.Accordion(
-                    ADVANCED_DODGE_BURN_LABEL,
-                    open=False,
-                    elem_id="mod_dodge_burn",
-                ):
-                    gr.Markdown(
-                        "_Optional. Use only after **Commit Develop**, once paper / "
-                        "exposure / filtration look right. Skip this for a normal print._",
-                        elem_id="db_advanced_hint",
-                    )
-                    db_shape = gr.Radio(
-                        choices=[(label, key) for key, label in CARD_PRESETS],
-                        value="soft_oval",
-                        label="Card shape",
-                    )
-                    db_editor = gr.ImageEditor(
-                        label="Custom card (paint only if shape = Custom)",
-                        type="numpy",
-                        image_mode="RGBA",
-                        height=160,
-                        value=tool_workshop_canvas(),
-                        brush=gr.Brush(
-                            default_size=48,
-                            colors=["#e0954f", "#ffffff", "#6fd1c7"],
-                            default_color="#e0954f",
-                            color_mode="defaults",
-                        ),
-                        eraser=gr.Eraser(),
-                        layers=True,
-                        transforms=(),
-                        sources=(),
-                        buttons=["fullscreen"],
-                        visible=False,
-                    )
-                    db_mode = gr.Radio(
-                        choices=[
-                            ("Dodge — hold back light (lighter)", "dodge"),
-                            ("Burn — add enlarger light (darker)", "burn"),
-                        ],
-                        value="burn",
-                        label="Mode",
-                    )
-                    db_seconds = gr.Slider(
-                        1, 32, value=4, step=1, label="Pass (s)"
-                    )
-                    pass_math_md = gr.Markdown(_pass_math_md(8.0, 4.0, "burn"), elem_id="pass_math")
-                    db_timer_md = gr.Markdown("**Ready** — Start, then wave over the print")
-                    with gr.Row(elem_id="db_actions"):
-                        db_start_btn = gr.Button(
-                            "Start — wave over print →", variant="primary", size="sm"
-                        )
-                        db_reset_btn = gr.Button("Reset local work", size="sm")
-                    db_flag = gr.HTML(_db_flag_html(None), elem_id="db_flag")
-                    db_pos = gr.Textbox(value="0.5000,0.5000", elem_id="db_pos", show_label=False)
-                    with gr.Column(elem_classes=["db_clock_hidden"]):
-                        db_clock = gr.Timer(value=TICK_SECONDS, active=False)
-
-                with gr.Accordion(
                     "Crop & straighten", open=False, elem_id="mod_crop"
                 ) as mod_crop_acc:
                     crop_hint = gr.Markdown(
@@ -8937,6 +8893,64 @@ def build_ui() -> gr.Blocks:
                             elem_id="apply_framing_btn",
                         )
                         reset_framing_btn = gr.Button("Reset framing", interactive=False, size="sm")
+
+                with gr.Accordion(
+                    ADVANCED_DODGE_BURN_LABEL,
+                    open=False,
+                    elem_id="mod_dodge_burn",
+                ):
+                    gr.Markdown(
+                        "_Optional. Use only after **Commit Develop**, once paper / "
+                        "exposure / filtration look right. Skip this for a normal print._",
+                        elem_id="db_advanced_hint",
+                    )
+                    db_shape = gr.Radio(
+                        choices=[(label, key) for key, label in CARD_PRESETS],
+                        value="soft_oval",
+                        label="Card shape",
+                    )
+                    db_editor = gr.ImageEditor(
+                        label="Custom card (paint only if shape = Custom)",
+                        type="numpy",
+                        image_mode="RGBA",
+                        height=160,
+                        value=tool_workshop_canvas(),
+                        brush=gr.Brush(
+                            default_size=48,
+                            colors=["#e0954f", "#ffffff", "#6fd1c7"],
+                            default_color="#e0954f",
+                            color_mode="defaults",
+                        ),
+                        eraser=gr.Eraser(),
+                        layers=True,
+                        transforms=(),
+                        sources=(),
+                        buttons=["fullscreen"],
+                        visible=False,
+                    )
+                    db_mode = gr.Radio(
+                        choices=[
+                            ("Dodge — hold back light (lighter)", "dodge"),
+                            ("Burn — add enlarger light (darker)", "burn"),
+                        ],
+                        value="burn",
+                        label="Mode",
+                    )
+                    db_seconds = gr.Slider(
+                        1, 32, value=4, step=1, label="Pass (s)"
+                    )
+                    pass_math_md = gr.Markdown(_pass_math_md(8.0, 4.0, "burn"), elem_id="pass_math")
+                    db_timer_md = gr.Markdown("**Ready** — Start, then wave over the print")
+                    with gr.Row(elem_id="db_actions"):
+                        db_start_btn = gr.Button(
+                            "Start — wave over print →", variant="primary", size="sm"
+                        )
+                        db_reset_btn = gr.Button("Reset local work", size="sm")
+                    db_flag = gr.HTML(_db_flag_html(None), elem_id="db_flag")
+                    db_pos = gr.Textbox(value="0.5000,0.5000", elem_id="db_pos", show_label=False)
+                    with gr.Column(elem_classes=["db_clock_hidden"]):
+                        db_clock = gr.Timer(value=TICK_SECONDS, active=False)
+
 
         # Compatibility aliases used by older handlers expecting frame_tools group
         frame_tools = frame_acc

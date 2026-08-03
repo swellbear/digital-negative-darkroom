@@ -144,8 +144,19 @@ def test_advanced_dodge_burn_is_quarantined():
     source = (ROOT / "scripts" / "run_darkroom_ui.py").read_text(encoding="utf-8")
     assert "ADVANCED_DODGE_BURN_LABEL," in source
     assert 'elem_id="mod_dodge_burn"' in source
-    assert "Modules → Advanced" in source
-    assert "Default path: paper → exposure → filtration" in source
+    # Default Print tip stays on Commit Print — Advanced is not in the primary hint.
+    hint = source.split('elem_id="db_hint"', 1)[0][-320:]
+    assert "Commit Print" in hint
+    assert "Default: paper → exposure → filtration" in hint
+    assert "Advanced" not in hint
+    assert "Advanced · Dodge" in source  # context menu, labeled Advanced
+    assert 'class="db-card-size" hidden' in source
+    assert 'db-size-value' in source
+    # Crop (common) before Advanced in the Modules panel.
+    mod_chunk = source.split('elem_id="module_panel"', 1)[1][:25000]
+    assert mod_chunk.index('elem_id="mod_crop"') < mod_chunk.index('elem_id="mod_dodge_burn"')
+    # Base timer math should not advertise dodge/burn on the default path.
+    assert "Dodge/burn passes are timed against this" not in mod._base_math_md(8.0)
 
 
 def test_drawer_width_and_progressive_disclosure():
