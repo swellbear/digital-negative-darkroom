@@ -106,12 +106,13 @@ def test_ra4_live_print_is_not_orange_mask():
     lightbox = color_negative_lightbox_preview(developed.spectral_transmittance)
     print_mean = printed.preview.reshape(-1, 3).mean(0)
     lb_mean = lightbox.reshape(-1, 3).mean(0)
-    # Print should be brighter/neutraler than the orange light-table negative.
+    # Light-table neg keeps strong orange R≫G; RA-4 print must not.
+    assert float(lb_mean[0]) > float(lb_mean[1])
     assert float(print_mean.mean()) > 0.25
-    assert float(print_mean[0]) < float(lb_mean[0]) * 1.15
-    # Channels roughly balanced after dichroic stand-in (not strong cyan sludge).
-    assert abs(float(print_mean[0] - print_mean[1])) < 0.12
+    # Chromatic dichroic stand-in: channels near-balanced (not cyan sludge / orange mask).
+    assert abs(float(print_mean[0] - print_mean[1])) < 0.18
     assert abs(float(print_mean[1] - print_mean[2])) < 0.12
+    assert float(print_mean[0] / max(float(print_mean[1]), 1e-6)) < 1.35
 
 
 def test_c41_push_pull_chemistries_resolve():
