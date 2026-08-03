@@ -76,6 +76,42 @@ def enlarger_illuminant() -> np.ndarray:
     return (spd / (spd.max() + 1e-12)).astype(np.float32)
 
 
+def ra4_system_reflectance(
+    transmittance: np.ndarray,
+    paper: PaperProfile,
+    *,
+    base_exposure_seconds: float = 8.0,
+    contrast: float = 0.0,
+    log_center: float | None = None,
+) -> np.ndarray:
+    """1D RA-4 print reflectance from neutral negative transmittance samples.
+
+    Mirrors the logistic paper response in ``print_color_negative`` without the
+    spectral / CC / preview-balance path — enough for the floating system curve.
+    Does **not** use multigrade grade or MG filter-speed factors.
+    """
+    if str(paper.type).lower() not in {"color_ra4", "color"}:
+        raise ValueError(f"Paper {paper.id} is not a color RA-4 profile")
+    spectral_block = paper.raw.get("spectral") or {}
+    toe = float(spectral_block.get("toe", 0.35))
+    shoulder = float(spectral_block.get("shoulder", 0.35))
+    dmin = float(paper.dmin)
+    dmax = float(paper.dmax)
+    t = np.asarray(transmittance, dtype=np.float64)
+    seconds = max(float(base_exposure_seconds), 0.05)
+    exposure_scale = seconds / 8.0
+    layer_exp = np.maximum(t * exposure_scale, 1e-8)
+    log_e = np.log10(layer_exp)
+    if log_center is None:
+        log_center = float(np.median(log_e))
+    x = (log_e - float(log_center)) * (1.0 + 0.45 * float(contrast))
+    resp = 1.0 / (1.0 + np.exp(-x / max(toe, 0.05)))
+    resp = np.clip(resp, 0.0, 1.0)
+    resp = resp / (1.0 + shoulder * resp)
+    dens = dmin + (dmax - dmin) * np.clip(resp, 0.0, 1.0)
+    return np.power(10.0, -dens).astype(np.float64)
+
+
 def print_color_negative(
     transmittance: np.ndarray,
     dn: DigitalNegative,

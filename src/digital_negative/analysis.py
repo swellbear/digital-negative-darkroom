@@ -13,11 +13,13 @@ from typing import Any
 
 import numpy as np
 
+from .color_print import ra4_system_reflectance
 from .curves import FilmProfile, modify_curve
 from .development import linear_to_relative_log_exposure
 from .digital_negative import DigitalNegative
 from .papers import PaperProfile
 from .print_engine import _filter_speed, paper_response
+from .spectral import is_color_paper_type
 
 # Zone system anchors: Zone V is the mid grey the meter aims for, and each
 # zone is one stop. Print reflectance is what the eye judges, so zones are
@@ -107,6 +109,7 @@ def build_curve_report(
     development_minutes: float | None = None,
     paper: PaperProfile | None = None,
     grade: float | None = None,
+    print_contrast: float = 0.0,
     base_exposure_seconds: float | None = None,
     mid_log_e: float = 2.2,
     samples: int = 320,
@@ -155,28 +158,53 @@ def build_curve_report(
     print_d = None
     print_r = None
     if paper is not None:
-        eff_grade = float(paper.default_grade if grade is None else grade)
-        stops = 0.0
-        if base_exposure_seconds is not None:
-            stops = float(np.log2(max(float(base_exposure_seconds), 1e-6) / 8.0))
-        # Negative density -> transmittance -> enlarger light -> paper.
         transmittance = np.power(10.0, -active_d)
-        light = transmittance * (2.0**stops) * _filter_speed(eff_grade)
-        # Anchor the paper the same way print_negative does, off the scene's
-        # own midtone when we have one.
-        if scene.size:
-            mid_d = active.density_from_log_exposure(np.asarray([pct["p50"]]))[0]
-            centre = float(np.log10(max(10.0 ** (-float(mid_d)), 1e-6)))
-            centre += float(stops * np.log10(2.0) + np.log10(_filter_speed(eff_grade)))
+        seconds = float(base_exposure_seconds if base_exposure_seconds is not None else 8.0)
+        if is_color_paper_type(paper.type):
+            # RA-4: paper contrast + timer — never MG grade / filter speed.
+            p_contrast = float(print_contrast)
+            if scene.size:
+                mid_d = float(
+                    active.density_from_log_exposure(np.asarray([pct["p50"]]))[0]
+                )
+                mid_t = max(10.0 ** (-mid_d), 1e-6)
+                centre = float(np.log10(mid_t * (seconds / 8.0)))
+            else:
+                centre = None
+            print_r = ra4_system_reflectance(
+                transmittance,
+                paper,
+                base_exposure_seconds=seconds,
+                contrast=p_contrast,
+                log_center=centre,
+            )
+            print_d = (-np.log10(np.maximum(print_r, 1e-8))).astype(np.float64)
+            stats["paper"] = paper.name
+            stats["paper_type"] = paper.type
+            stats["print_contrast"] = p_contrast
+            stats["print_process"] = "ra4"
         else:
-            centre = float(np.percentile(np.log10(np.maximum(light, 1e-6)), 48))
-        print_d = paper_response(
-            light, paper=paper, grade=eff_grade, log_center=centre
-        ).astype(np.float64)
-        print_r = np.power(10.0, -print_d)
-        stats["paper"] = paper.name
-        stats["grade"] = eff_grade
-        if scene.size:
+            eff_grade = float(paper.default_grade if grade is None else grade)
+            stops = float(np.log2(max(seconds, 1e-6) / 8.0))
+            # Negative density -> transmittance -> enlarger light -> paper.
+            light = transmittance * (2.0**stops) * _filter_speed(eff_grade)
+            # Anchor the paper the same way print_negative does, off the scene's
+            # own midtone when we have one.
+            if scene.size:
+                mid_d = active.density_from_log_exposure(np.asarray([pct["p50"]]))[0]
+                centre = float(np.log10(max(10.0 ** (-float(mid_d)), 1e-6)))
+                centre += float(stops * np.log10(2.0) + np.log10(_filter_speed(eff_grade)))
+            else:
+                centre = float(np.percentile(np.log10(np.maximum(light, 1e-6)), 48))
+            print_d = paper_response(
+                light, paper=paper, grade=eff_grade, log_center=centre
+            ).astype(np.float64)
+            print_r = np.power(10.0, -print_d)
+            stats["paper"] = paper.name
+            stats["paper_type"] = paper.type
+            stats["grade"] = eff_grade
+            stats["print_process"] = "multigrade"
+        if scene.size and print_r is not None:
             sh = np.interp(pct["p5"], grid, print_r)
             hl = np.interp(pct["p95"], grid, print_r)
             stats["shadow_zone"] = float(reflectance_to_zone(sh))
@@ -378,8 +406,15 @@ def curve_summary_markdown(report: CurveReport) -> str:
 
     if "shadow_zone" in s:
         lines.append("")
+        if str(s.get("print_process") or "") == "ra4":
+            paper_bit = (
+                f"**On {s.get('paper', 'paper')} RA-4**"
+                f" · contrast `{float(s.get('print_contrast', 0.0)):+.2f}` —"
+            )
+        else:
+            paper_bit = f"**On {s.get('paper', 'paper')} g{s.get('grade', 0):.1f}** —"
         lines.append(
-            f"**On {s.get('paper', 'paper')} g{s.get('grade', 0):.1f}** —"
+            f"{paper_bit}"
             f" shadows print Zone `{_roman(round(s['shadow_zone']))}`,"
             f" highlights Zone `{_roman(round(s['highlight_zone']))}`"
         )
